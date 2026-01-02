@@ -65,10 +65,3 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ received: true });
 }
-
-// Stripe requires the raw body for webhook verification
-export const config = {
-    api: {
-        bodyParser: false,
-    },
-};
