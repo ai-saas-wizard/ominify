@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { recordCallUsage } from "@/lib/billing";
 import crypto from "crypto";
 
 /**
@@ -24,6 +25,7 @@ interface VapiWebhookPayload {
             startedAt?: string;
             endedAt?: string;
             transcript?: string;
+            type?: string;
             customer?: {
                 number?: string;
             };
@@ -39,28 +41,133 @@ interface VapiWebhookPayload {
                 };
             };
         };
+        conversation?: Array<{
+            role: string;
+            content?: string;
+            message?: string;
+        }>;
     };
 }
 
-// Update contact after call ends
-async function updateContactAfterCall(call: VapiWebhookPayload['message']['call']) {
+// Helper to get Client ID from Vapi Org ID
+async function getClientIdByOrgId(orgId: string): Promise<string | null> {
+    const { data } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('vapi_org_id', orgId)
+        .single();
+    return data?.id || null;
+}
+
+// Handle Call Started - Create Active Call
+async function handleCallStarted(call: NonNullable<VapiWebhookPayload['message']['call']>) {
+    try {
+        if (!call.orgId) return;
+        const clientId = await getClientIdByOrgId(call.orgId);
+        if (!clientId) return;
+
+        // Check if already exists to avoid duplicates
+        const { data: existing } = await supabase
+            .from('active_calls')
+            .select('id')
+            .eq('vapi_call_id', call.id)
+            .single();
+
+        if (existing) return;
+
+        await supabase.from('active_calls').insert({
+            vapi_call_id: call.id,
+            client_id: clientId,
+            status: call.status || 'ringing',
+            started_at: call.startedAt || new Date().toISOString(),
+            customer_number: call.customer?.number,
+            assistant_id: call.assistantId,
+            type: call.type || 'inbound',
+            last_active_at: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error handling call started:', error);
+    }
+}
+
+// Handle Call Updates (Status, Conversation)
+async function handleCallUpdate(
+    call: NonNullable<VapiWebhookPayload['message']['call']>,
+    conversation?: VapiWebhookPayload['message']['conversation']
+) {
+    try {
+        const updateData: any = {
+            status: call.status,
+            last_active_at: new Date().toISOString()
+        };
+
+        if (call.analysis?.summary) {
+            updateData.summary = call.analysis.summary;
+        }
+
+        if (conversation) {
+            // Format transcript from conversation history
+            const transcript = conversation
+                .map(m => `${m.role}: ${m.content || m.message || ''}`)
+                .join('\n');
+            updateData.transcript = transcript;
+        }
+
+        // Only update if record exists
+        await supabase
+            .from('active_calls')
+            .update(updateData)
+            .eq('vapi_call_id', call.id);
+
+    } catch (error) {
+        console.error('Error handling call update:', error);
+    }
+}
+
+// Handle End of Call - Cleanup and History
+async function handleEndOfCall(call: NonNullable<VapiWebhookPayload['message']['call']>) {
+    try {
+        // 1. Remove from active calls
+        await supabase.from('active_calls').delete().eq('vapi_call_id', call.id);
+
+        // 2. Update Contact History (CRM)
+        await updateContactAfterCall(call);
+
+        // 3. Record Usage for Billing
+        if (call.orgId) {
+            const clientId = await getClientIdByOrgId(call.orgId);
+            if (clientId) {
+                // Calculate duration
+                const startedAt = call.startedAt ? new Date(call.startedAt) : null;
+                const endedAt = call.endedAt ? new Date(call.endedAt) : null;
+                const durationSeconds = startedAt && endedAt
+                    ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
+                    : 0;
+
+                if (durationSeconds > 0) {
+                    await recordCallUsage(clientId, call.id, durationSeconds);
+                }
+            }
+        }
+
+    } catch (error) {
+        console.error('Error handling end of call:', error);
+    }
+}
+
+// Update contact after call ends (Existing Logic)
+async function updateContactAfterCall(call: NonNullable<VapiWebhookPayload['message']['call']>) {
     if (!call?.customer?.number || !call.orgId) return;
 
     try {
-        // Find client by org ID
-        const { data: client } = await supabase
-            .from('clients')
-            .select('id')
-            .eq('vapi_org_id', call.orgId)
-            .single();
-
-        if (!client) return;
+        const clientId = await getClientIdByOrgId(call.orgId);
+        if (!clientId) return;
 
         // Find or create contact
         let { data: contact } = await supabase
             .from('contacts')
             .select('id, conversation_summary, total_calls')
-            .eq('client_id', client.id)
+            .eq('client_id', clientId)
             .eq('phone', call.customer.number)
             .single();
 
@@ -69,7 +176,7 @@ async function updateContactAfterCall(call: VapiWebhookPayload['message']['call'
             const { data: newContact } = await supabase
                 .from('contacts')
                 .insert({
-                    client_id: client.id,
+                    client_id: clientId,
                     phone: call.customer.number,
                     name: call.analysis?.structuredData?.name || null,
                     email: call.analysis?.structuredData?.email || null,
@@ -82,14 +189,13 @@ async function updateContactAfterCall(call: VapiWebhookPayload['message']['call'
 
         if (!contact) return;
 
-        // Calculate duration
+        // Calculate duration and insert call history
         const startedAt = call.startedAt ? new Date(call.startedAt) : null;
         const endedAt = call.endedAt ? new Date(call.endedAt) : null;
         const durationSeconds = startedAt && endedAt
             ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
             : 0;
 
-        // Add call to history
         await supabase.from('contact_calls').insert({
             contact_id: contact.id,
             vapi_call_id: call.id,
@@ -100,63 +206,38 @@ async function updateContactAfterCall(call: VapiWebhookPayload['message']['call'
             called_at: call.startedAt || new Date().toISOString()
         });
 
-        // Update contact with new summary (append to rolling summary)
+        // Update contact summary (rolling 5 calls)
         const newSummary = call.analysis?.summary;
         let updatedSummary = contact.conversation_summary || '';
 
         if (newSummary) {
             const callDate = new Date(call.startedAt || Date.now()).toLocaleDateString();
             const summaryEntry = `[${callDate}] ${newSummary}`;
-
-            // Keep last 5 call summaries for context
             const summaries = updatedSummary.split('\n\n').filter(Boolean);
             summaries.push(summaryEntry);
-            if (summaries.length > 5) {
-                summaries.shift();
-            }
+            if (summaries.length > 5) summaries.shift();
             updatedSummary = summaries.join('\n\n');
         }
 
-        // Update contact
+        // Update contact details
         const updateData: any = {
             total_calls: (contact.total_calls || 0) + 1,
             last_call_at: call.startedAt || new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
 
-        if (newSummary) {
-            updateData.conversation_summary = updatedSummary;
-        }
+        if (newSummary) updateData.conversation_summary = updatedSummary;
 
-        // Extract name/email from structured data if not already set
         if (call.analysis?.structuredData?.name) {
-            const { data: currentContact } = await supabase
-                .from('contacts')
-                .select('name')
-                .eq('id', contact.id)
-                .single();
-
-            if (!currentContact?.name) {
-                updateData.name = call.analysis.structuredData.name;
-            }
+            const { data: current } = await supabase.from('contacts').select('name').eq('id', contact.id).single();
+            if (!current?.name) updateData.name = call.analysis.structuredData.name;
         }
-
         if (call.analysis?.structuredData?.email) {
-            const { data: currentContact } = await supabase
-                .from('contacts')
-                .select('email')
-                .eq('id', contact.id)
-                .single();
-
-            if (!currentContact?.email) {
-                updateData.email = call.analysis.structuredData.email;
-            }
+            const { data: current } = await supabase.from('contacts').select('email').eq('id', contact.id).single();
+            if (!current?.email) updateData.email = call.analysis.structuredData.email;
         }
 
-        await supabase
-            .from('contacts')
-            .update(updateData)
-            .eq('id', contact.id);
+        await supabase.from('contacts').update(updateData).eq('id', contact.id);
 
     } catch (error) {
         console.error('Error updating contact after call:', error);
@@ -264,7 +345,6 @@ async function forwardToWebhook(
 export async function POST(request: Request) {
     try {
         const body = await request.json() as VapiWebhookPayload;
-
         const messageType = body.message?.type;
         const call = body.message?.call;
 
@@ -272,15 +352,24 @@ export async function POST(request: Request) {
             return NextResponse.json({ received: true });
         }
 
+        // --- ACTIVE CALL TRACKING ---
+        if (messageType === 'call-started') {
+            await handleCallStarted(call);
+        } else if (messageType === 'status-update') {
+            await handleCallUpdate(call);
+        } else if (messageType === 'conversation-update') {
+            await handleCallUpdate(call, body.message.conversation);
+        } else if (messageType === 'end-of-call-report') {
+            await handleEndOfCall(call);
+        }
+
+        // --- WEBHOOK FORWARDING LOGIC ---
         // Map Vapi message types to our event types
         let eventType: string | null = null;
         if (messageType === 'status-update' && call.status === 'in-progress') {
             eventType = 'call.started';
         } else if (messageType === 'end-of-call-report') {
             eventType = 'call.ended';
-
-            // UPDATE CONTACT after call ends
-            await updateContactAfterCall(call);
         }
 
         if (!eventType) {
