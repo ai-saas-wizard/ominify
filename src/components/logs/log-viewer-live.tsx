@@ -16,12 +16,14 @@ import {
     LayoutTemplate,
     PhoneForwarded,
     Sparkles,
-    Radio
+    Radio,
+    PhoneOff
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ActiveCall } from "./logs-page-client";
+import { endActiveCall } from "@/app/actions/call-actions";
 
 // Display call type that can be either live or historical
 type DisplayCall = VapiCall & { isLive?: boolean };
@@ -31,6 +33,7 @@ interface LogViewerWithLiveProps {
     agents: VapiAgent[];
     phoneNumbers: VapiPhoneNumber[];
     activeCalls: ActiveCall[];
+    clientId: string;
 }
 
 // Convert ActiveCall to DisplayCall for unified display
@@ -75,9 +78,10 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
     return <span className="font-mono">{duration}</span>;
 }
 
-export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls }: LogViewerWithLiveProps) => {
+export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls, clientId }: LogViewerWithLiveProps) => {
     const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
     const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+    const [isEndingCall, setIsEndingCall] = useState(false);
 
     // Convert active calls to display format
     const liveDisplayCalls: DisplayCall[] = activeCalls.map(activeCallToDisplayCall);
@@ -109,6 +113,24 @@ export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls }: 
     const getAgentNumber = (agentId: string) => {
         const pn = phoneNumbers.find(p => p.assistantId === agentId);
         return pn ? pn.number : null;
+    };
+
+    // Handle end call button click
+    const handleEndCall = async () => {
+        if (!selectedCallId || !isSelectedLive) return;
+        setIsEndingCall(true);
+        try {
+            const result = await endActiveCall(clientId, selectedCallId);
+            if (!result.success) {
+                console.error("Failed to end call:", result.error);
+                alert("Failed to end call: " + result.error);
+            }
+        } catch (error) {
+            console.error("Error ending call:", error);
+            alert("Error ending call");
+        } finally {
+            setIsEndingCall(false);
+        }
     };
 
     return (
@@ -264,9 +286,17 @@ export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls }: 
                                         )}
                                     </h3>
                                     {isSelectedLive && (
-                                        <div className="text-xs text-green-600 flex items-center gap-1">
+                                        <div className="text-xs text-green-600 flex items-center gap-2">
                                             <Clock className="w-3 h-3" />
                                             <LiveDuration startedAt={selectedCall.startedAt!} />
+                                            <button
+                                                onClick={handleEndCall}
+                                                disabled={isEndingCall}
+                                                className="ml-2 flex items-center gap-1 px-2 py-0.5 bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white text-xs font-medium rounded transition-colors"
+                                            >
+                                                <PhoneOff className="w-3 h-3" />
+                                                {isEndingCall ? "Ending..." : "End Call"}
+                                            </button>
                                         </div>
                                     )}
                                 </div>

@@ -102,6 +102,34 @@ export async function getAgent(id: string, apiKey?: string): Promise<VapiAgent |
     }
 }
 
+/**
+ * End/terminate an active call
+ * Uses DELETE request to /call/{id} endpoint
+ */
+export async function endCall(callId: string, apiKey?: string): Promise<boolean> {
+    const token = apiKey || DEFAULT_KEY;
+    if (!token) return false;
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/call/${callId}`, {
+            method: 'DELETE',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            console.error("Failed to end call:", await res.text());
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.error("Vapi Client Error (endCall):", error);
+        return false;
+    }
+}
+
 export async function updateAgent(id: string, data: Partial<VapiAgent>, apiKey?: string): Promise<VapiAgent | null> {
     const token = apiKey || DEFAULT_KEY;
     if (!token) return null;

@@ -93,6 +93,7 @@ export function LogsPageClient({ calls, agents, phoneNumbers, clientId }: LogsPa
             agents={agents}
             phoneNumbers={phoneNumbers}
             activeCalls={activeCalls}
+            clientId={clientId}
         />
     );
 }
