@@ -74,6 +74,12 @@ async function handleCallStarted(call: NonNullable<VapiWebhookPayload['message']
             return;
         }
 
+        // Cleanup stale calls older than 1 hour (in case end-of-call webhooks were missed)
+        await supabase
+            .from('active_calls')
+            .delete()
+            .lt('started_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
+
         // Check if already exists to avoid duplicates
         const { data: existing } = await supabase
             .from('active_calls')
