@@ -132,21 +132,46 @@ export async function listCalls(apiKey?: string, assistantId?: string): Promise<
     if (!token) return [];
 
     try {
-        let url = `${VAPI_BASE_URL}/call`;
-        if (assistantId) {
-            url += `?assistantId=${assistantId}`;
-        }
+        // Vapi API has a default limit, so we fetch with a higher limit
+        // and paginate if needed
+        let allCalls: VapiCall[] = [];
+        let cursor: string | undefined = undefined;
+        const limit = 100;
 
-        const res = await fetch(url, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            next: { revalidate: 30 }
-        } as any);
+        do {
+            let url = `${VAPI_BASE_URL}/call?limit=${limit}`;
+            if (assistantId) {
+                url += `&assistantId=${assistantId}`;
+            }
+            if (cursor) {
+                url += `&cursor=${cursor}`;
+            }
 
-        if (!res.ok) return [];
-        return await res.json();
+            const res = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                next: { revalidate: 30 }
+            } as any);
+
+            if (!res.ok) break;
+
+            const data = await res.json();
+
+            // Vapi returns either an array or an object with results and nextCursor
+            if (Array.isArray(data)) {
+                allCalls = allCalls.concat(data);
+                cursor = undefined; // No more pages
+            } else if (data.results) {
+                allCalls = allCalls.concat(data.results);
+                cursor = data.nextCursor;
+            } else {
+                break;
+            }
+        } while (cursor);
+
+        return allCalls;
     } catch (error) {
         console.error("Vapi Client Error:", error);
         return [];
