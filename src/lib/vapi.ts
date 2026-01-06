@@ -160,19 +160,16 @@ export async function listCalls(apiKey?: string, assistantId?: string): Promise<
     if (!token) return [];
 
     try {
-        // Vapi API has a default limit, so we fetch with a higher limit
-        // and paginate if needed
+        // Vapi API uses limit and page for pagination
         let allCalls: VapiCall[] = [];
-        let cursor: string | undefined = undefined;
+        let page = 1;
         const limit = 100;
+        let hasMore = true;
 
-        do {
-            let url = `${VAPI_BASE_URL}/call?limit=${limit}`;
+        while (hasMore) {
+            let url = `${VAPI_BASE_URL}/call?limit=${limit}&page=${page}`;
             if (assistantId) {
                 url += `&assistantId=${assistantId}`;
-            }
-            if (cursor) {
-                url += `&cursor=${cursor}`;
             }
 
             const res = await fetch(url, {
@@ -187,17 +184,31 @@ export async function listCalls(apiKey?: string, assistantId?: string): Promise<
 
             const data = await res.json();
 
-            // Vapi returns either an array or an object with results and nextCursor
+            // Vapi returns an array of calls
             if (Array.isArray(data)) {
-                allCalls = allCalls.concat(data);
-                cursor = undefined; // No more pages
-            } else if (data.results) {
+                if (data.length === 0) {
+                    hasMore = false;
+                } else {
+                    allCalls = allCalls.concat(data);
+                    // If we got less than limit, we've reached the end
+                    if (data.length < limit) {
+                        hasMore = false;
+                    } else {
+                        page++;
+                    }
+                }
+            } else if (data.results && Array.isArray(data.results)) {
+                // Handle paginated response format
                 allCalls = allCalls.concat(data.results);
-                cursor = data.nextCursor;
+                if (data.results.length < limit || !data.hasMore) {
+                    hasMore = false;
+                } else {
+                    page++;
+                }
             } else {
                 break;
             }
-        } while (cursor);
+        }
 
         return allCalls;
     } catch (error) {
