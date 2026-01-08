@@ -7,8 +7,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Vapi Voice Agent Platform",
-  description: "Advanced Voice Agent Management",
+  title: "Elevate With Ai",
+  description: "Voice Agent Management Platform",
 };
 
 export default function RootLayout({
