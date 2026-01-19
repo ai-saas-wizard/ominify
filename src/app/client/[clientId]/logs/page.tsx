@@ -26,6 +26,26 @@ interface SupabaseCallWithAgent {
 }
 
 function transformToVapiCall(call: SupabaseCallWithAgent): VapiCall {
+    // Parse transcript into messages array (component expects messages, not raw transcript)
+    let messages: Array<{ role: string; message: string }> | undefined;
+    if (call.transcript) {
+        messages = call.transcript
+            .split('\n')
+            .filter(Boolean)
+            .map(line => {
+                const colonIndex = line.indexOf(':');
+                if (colonIndex > 0) {
+                    const role = line.slice(0, colonIndex).trim().toLowerCase();
+                    const message = line.slice(colonIndex + 1).trim();
+                    return {
+                        role: role === 'user' ? 'user' : (role === 'ai' || role === 'bot' || role === 'assistant') ? 'bot' : role,
+                        message
+                    };
+                }
+                return { role: 'bot', message: line };
+            });
+    }
+
     return {
         id: call.vapi_call_id,
         assistantId: call.agents?.vapi_id || '',
@@ -38,11 +58,13 @@ function transformToVapiCall(call: SupabaseCallWithAgent): VapiCall {
             summary: call.summary || undefined,
             structuredData: call.structured_data || undefined
         },
+        messages,
         startedAt: call.started_at || new Date().toISOString(),
         endedAt: call.ended_at || undefined,
         cost: call.cost
     };
 }
+
 
 async function fetchCallsFromSupabase(
     clientId: string,
