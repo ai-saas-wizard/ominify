@@ -146,12 +146,40 @@ export async function recordCallUsage(
     // Get client pricing
     const billing = await getOrCreateClientBilling(clientId);
 
+    // Get call details to find agent
+    const { data: calldata } = await supabase
+        .from('calls')
+        .select('agent_id')
+        .eq('vapi_call_id', vapiCallId)
+        .single();
+
+    let pricePerMinute = billing.price_per_minute;
+    let costPerMinute = billing.cost_per_minute;
+
+    // Check if agent has specific pricing
+    if (calldata?.agent_id) {
+        const { data: agent } = await supabase
+            .from('agents')
+            .select('price_per_minute, cost_per_minute')
+            .eq('id', calldata.agent_id)
+            .single();
+
+        if (agent) {
+            if (agent.price_per_minute !== null && agent.price_per_minute !== undefined) {
+                pricePerMinute = agent.price_per_minute;
+            }
+            if (agent.cost_per_minute !== null && agent.cost_per_minute !== undefined) {
+                costPerMinute = agent.cost_per_minute;
+            }
+        }
+    }
+
     // Round up to nearest minute
     const minutesCharged = Math.ceil(durationSeconds / 60);
 
     // Calculate costs
-    const costToUs = minutesCharged * billing.cost_per_minute;
-    const priceCharged = minutesCharged * billing.price_per_minute;
+    const costToUs = minutesCharged * costPerMinute;
+    const priceCharged = minutesCharged * pricePerMinute;
 
     // Check if already recorded
     const { data: existing } = await supabase
