@@ -1,34 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { listCalls, listAgents } from "@/lib/vapi";
 
-// Based on actual Vapi API response structure
-interface VapiCallResponse {
+// Supabase call record with agent join
+interface SupabaseCallWithAgent {
     id: string;
-    orgId: string;
+    vapi_call_id: string;
+    agent_id: string | null;
     type: string;
     status: string;
-    endedReason?: string;
-    startedAt?: string;
-    endedAt?: string;
-    transcript?: string;
-    assistantId?: string;
-    assistant?: {
+    ended_reason: string | null;
+    started_at: string | null;
+    ended_at: string | null;
+    duration_seconds: number;
+    cost: number;
+    agents: {
         id: string;
+        vapi_id: string;
         name: string;
-    };
-    costs?: Array<{
-        type: string;
-        cost: number;
-        minutes?: number;
-    }>;
-    analysis?: {
-        summary?: string;
-        structuredData?: any;
-    };
-    customer?: {
-        number?: string;
-    };
+    } | null;
 }
 
 interface AnalyticsData {
@@ -69,20 +58,26 @@ export async function GET(
     const { clientId } = await params;
 
     try {
-        // Get client's Vapi key
-        const { data: client } = await supabase
-            .from('clients')
-            .select('vapi_key')
-            .eq('id', clientId)
-            .single();
+        // Fetch calls from Supabase with agent join
+        const { data: rawCalls, error: callsError } = await supabase
+            .from('calls')
+            .select(`
+                *,
+                agents (
+                    id,
+                    vapi_id,
+                    name
+                )
+            `)
+            .eq('client_id', clientId)
+            .order('started_at', { ascending: false });
 
-        const vapiKey = client?.vapi_key || process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY;
+        if (callsError) {
+            console.error('Error fetching calls:', callsError);
+            return NextResponse.json({ error: 'Failed to fetch calls' }, { status: 500 });
+        }
 
-        // Fetch calls from Vapi
-        const rawCalls = await listCalls(vapiKey);
-        const calls = rawCalls as unknown as VapiCallResponse[];
-
-        const agents = await listAgents(vapiKey);
+        const calls = (rawCalls || []) as SupabaseCallWithAgent[];
 
         // Get balance from database
         const { data: balance } = await supabase
@@ -101,25 +96,19 @@ export async function GET(
 
         // Overview calculations
         const totalCalls = calls.length;
-        const totalCallsToday = calls.filter(c => c.startedAt && new Date(c.startedAt) >= todayStart).length;
-        const totalCallsWeek = calls.filter(c => c.startedAt && new Date(c.startedAt) >= weekStart).length;
+        const totalCallsToday = calls.filter(c => c.started_at && new Date(c.started_at) >= todayStart).length;
+        const totalCallsWeek = calls.filter(c => c.started_at && new Date(c.started_at) >= weekStart).length;
 
-        // Calculate duration from startedAt/endedAt
-        let totalSeconds = 0;
-        calls.forEach(c => {
-            if (c.startedAt && c.endedAt) {
-                const duration = (new Date(c.endedAt).getTime() - new Date(c.startedAt).getTime()) / 1000;
-                if (duration > 0) totalSeconds += duration;
-            }
-        });
+        // Calculate duration from stored duration_seconds
+        const totalSeconds = calls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0);
 
         const totalMinutes = Math.round(totalSeconds / 60);
         const avgDuration = totalCalls > 0 ? Math.round(totalSeconds / totalCalls) : 0;
 
-        // Success rate based on endedReason
+        // Success rate based on ended_reason
         const successfulReasons = ['assistant-ended-call', 'customer-ended-call'];
         const completedCalls = calls.filter(c =>
-            successfulReasons.includes(c.endedReason || '') ||
+            successfulReasons.includes(c.ended_reason || '') ||
             c.status === 'ended'
         ).length;
         const successRate = totalCalls > 0 ? Math.round((completedCalls / totalCalls) * 100) : 0;
@@ -134,28 +123,25 @@ export async function GET(
         }
 
         calls.forEach(call => {
-            if (!call.startedAt) return;
-            const dateStr = new Date(call.startedAt).toISOString().split('T')[0];
+            if (!call.started_at) return;
+            const dateStr = new Date(call.started_at).toISOString().split('T')[0];
             if (callsByDayMap.has(dateStr)) {
                 const entry = callsByDayMap.get(dateStr)!;
                 entry.calls++;
-                if (call.startedAt && call.endedAt) {
-                    const mins = (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 60000;
-                    if (mins > 0) entry.minutes += mins;
-                }
+                entry.minutes += Math.round((call.duration_seconds || 0) / 60);
             }
         });
 
         const callsByDay = Array.from(callsByDayMap.entries()).map(([date, data]) => ({
             date,
             calls: data.calls,
-            minutes: Math.round(data.minutes)
+            minutes: data.minutes
         }));
 
-        // Call outcomes from endedReason
+        // Call outcomes from ended_reason
         const outcomeMap = new Map<string, number>();
         calls.forEach(call => {
-            const reason = call.endedReason || call.status || 'unknown';
+            const reason = call.ended_reason || call.status || 'unknown';
             outcomeMap.set(reason, (outcomeMap.get(reason) || 0) + 1);
         });
 
@@ -167,6 +153,7 @@ export async function GET(
             'assistant-error': '#ef4444',
             'pipeline-error-openai-llm-failed': '#ef4444',
             'phone-call-provider-closed-websocket': '#6b7280',
+            'assistant-forwarded-call': '#8b5cf6',
             'ended': '#3b82f6',
             'in-progress': '#8b5cf6',
             'unknown': '#9ca3af'
@@ -180,7 +167,7 @@ export async function GET(
                 color: outcomeColors[name] || '#6b7280'
             }));
 
-        // Agent performance - use assistantId from calls
+        // Agent performance using joined agent data
         const agentStatsMap = new Map<string, {
             name: string;
             calls: number;
@@ -189,24 +176,14 @@ export async function GET(
             totalCost: number;
         }>();
 
-        // Initialize with known agents
-        agents.forEach(agent => {
-            agentStatsMap.set(agent.id, {
-                name: agent.name,
-                calls: 0,
-                totalSeconds: 0,
-                successfulCalls: 0,
-                totalCost: 0
-            });
-        });
-
         calls.forEach(call => {
-            const agentId = call.assistantId || call.assistant?.id;
-            if (!agentId) return;
+            if (!call.agents) return;
+
+            const agentId = call.agents.vapi_id; // Use vapi_id for consistency with VapiCall format
 
             if (!agentStatsMap.has(agentId)) {
                 agentStatsMap.set(agentId, {
-                    name: call.assistant?.name || 'Unknown Agent',
+                    name: call.agents.name || 'Unknown Agent',
                     calls: 0,
                     totalSeconds: 0,
                     successfulCalls: 0,
@@ -216,22 +193,13 @@ export async function GET(
 
             const stats = agentStatsMap.get(agentId)!;
             stats.calls++;
+            stats.totalSeconds += call.duration_seconds || 0;
 
-            if (call.startedAt && call.endedAt) {
-                const duration = (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000;
-                if (duration > 0) stats.totalSeconds += duration;
-            }
-
-            if (successfulReasons.includes(call.endedReason || '')) {
+            if (successfulReasons.includes(call.ended_reason || '')) {
                 stats.successfulCalls++;
             }
 
-            // Sum costs from costs array
-            if (call.costs && Array.isArray(call.costs)) {
-                call.costs.forEach(costItem => {
-                    if (costItem.cost) stats.totalCost += costItem.cost;
-                });
-            }
+            stats.totalCost += call.cost || 0;
         });
 
         const agentPerformance = Array.from(agentStatsMap.entries())
@@ -248,8 +216,8 @@ export async function GET(
         // Peak hours heatmap (7 days x 24 hours)
         const peakHours: number[][] = Array(7).fill(null).map(() => Array(24).fill(0));
         calls.forEach(call => {
-            if (!call.startedAt) return;
-            const date = new Date(call.startedAt);
+            if (!call.started_at) return;
+            const date = new Date(call.started_at);
             const dayOfWeek = date.getDay();
             const hour = date.getHours();
             peakHours[dayOfWeek][hour]++;
@@ -287,6 +255,7 @@ function formatOutcomeName(name: string): string {
         'assistant-error': 'Error',
         'pipeline-error-openai-llm-failed': 'AI Error',
         'phone-call-provider-closed-websocket': 'Connection Lost',
+        'assistant-forwarded-call': 'Forwarded',
         'ended': 'Ended',
         'in-progress': 'In Progress',
         'unknown': 'Unknown'

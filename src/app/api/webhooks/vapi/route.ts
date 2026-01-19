@@ -17,6 +17,7 @@ import crypto from "crypto";
 interface VapiWebhookPayload {
     message: {
         type: string;
+        endedReason?: string;
         artifact?: {
             messages?: Array<{
                 role: string;
@@ -24,6 +25,8 @@ interface VapiWebhookPayload {
                 content?: string;
             }>;
             transcript?: string;
+            recordingUrl?: string;
+            stereoRecordingUrl?: string;
         };
         call?: {
             id: string;
@@ -35,6 +38,7 @@ interface VapiWebhookPayload {
             endedAt?: string;
             transcript?: string;
             type?: string;
+            phoneNumberId?: string;
             customer?: {
                 number?: string;
             };
@@ -44,13 +48,16 @@ interface VapiWebhookPayload {
             }>;
             analysis?: {
                 summary?: string;
-                structuredData?: {
-                    name?: string;
-                    email?: string;
-                    caller_name?: string;
-                    caller_email?: string;
-                };
+                structuredData?: Record<string, any>;
             };
+            artifact?: {
+                recordingUrl?: string;
+                stereoRecordingUrl?: string;
+            };
+        };
+        assistant?: {
+            id: string;
+            name: string;
         };
         conversation?: Array<{
             role: string;
@@ -213,10 +220,116 @@ async function handleCallUpdate(
     }
 }
 
+// Persist call record to Supabase calls table
+async function persistCallRecord(
+    call: NonNullable<VapiWebhookPayload['message']['call']>,
+    artifact?: VapiWebhookPayload['message']['artifact'],
+    assistant?: VapiWebhookPayload['message']['assistant'],
+    endedReason?: string,
+    rawPayload?: any
+) {
+    console.log('[VAPI WEBHOOK] persistCallRecord called for:', call.id);
+    try {
+        if (!call.orgId) {
+            console.log('[VAPI WEBHOOK] No orgId, skipping persist');
+            return;
+        }
+
+        const clientId = await getClientIdByOrgId(call.orgId);
+        if (!clientId) {
+            console.log('[VAPI WEBHOOK] No client found for orgId:', call.orgId);
+            return;
+        }
+
+        // Look up agent by vapi_id (Vapi's assistantId) to get our internal agent UUID
+        let agentId: string | null = null;
+        if (call.assistantId) {
+            const { data: agent } = await supabase
+                .from('agents')
+                .select('id')
+                .eq('vapi_id', call.assistantId)
+                .eq('client_id', clientId)
+                .single();
+
+            agentId = agent?.id || null;
+            if (!agentId) {
+                console.log('[VAPI WEBHOOK] No agent found for vapi_id:', call.assistantId);
+            }
+        }
+
+        // Calculate duration
+        const startedAt = call.startedAt ? new Date(call.startedAt) : null;
+        const endedAt = call.endedAt ? new Date(call.endedAt) : null;
+        const durationSeconds = startedAt && endedAt
+            ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
+            : 0;
+
+        // Build transcript from artifact.messages if needed
+        let transcript = call.transcript || artifact?.transcript || '';
+        if (!transcript && artifact?.messages) {
+            transcript = artifact.messages
+                .filter(m => m.role === 'user' || m.role === 'bot' || m.role === 'assistant')
+                .map(m => `${m.role}: ${m.message || m.content || ''}`)
+                .join('\n');
+        }
+
+        // Get recording URL from artifact
+        const recordingUrl = call.artifact?.recordingUrl || artifact?.recordingUrl || null;
+
+        // Calculate total cost
+        const totalCost = call.costs?.reduce((sum, c) => sum + (c.cost || 0), 0) || 0;
+
+        // Use ended reason from multiple sources
+        const finalEndedReason = call.endedReason || endedReason || null;
+
+        // Build call data matching existing schema
+        const callData: Record<string, any> = {
+            client_id: clientId,
+            vapi_call_id: call.id,
+            agent_id: agentId,
+            duration_seconds: durationSeconds,
+            recording_url: recordingUrl,
+            transcript: transcript || null,
+            cost: totalCost,
+            status: call.status || 'ended',
+            started_at: call.startedAt || null,
+            ended_at: call.endedAt || null,
+            // New columns (added via migration)
+            customer_number: call.customer?.number || null,
+            type: call.type || 'inboundPhoneCall',
+            ended_reason: finalEndedReason,
+            summary: call.analysis?.summary || null,
+            structured_data: call.analysis?.structuredData || {},
+            raw_payload: rawPayload || null,
+            updated_at: new Date().toISOString()
+        };
+
+        // Upsert to handle duplicate webhooks
+        const { error } = await supabase
+            .from('calls')
+            .upsert(callData, {
+                onConflict: 'vapi_call_id',
+                ignoreDuplicates: false
+            });
+
+        if (error) {
+            console.error('[VAPI WEBHOOK] Error persisting call:', error);
+        } else {
+            console.log('[VAPI WEBHOOK] Call persisted successfully:', call.id);
+        }
+    } catch (error) {
+        console.error('[VAPI WEBHOOK] Error in persistCallRecord:', error);
+    }
+}
+
+
 // Handle End of Call - Cleanup and History
 async function handleEndOfCall(
     call: NonNullable<VapiWebhookPayload['message']['call']>,
-    artifact?: VapiWebhookPayload['message']['artifact']
+    artifact?: VapiWebhookPayload['message']['artifact'],
+    assistant?: VapiWebhookPayload['message']['assistant'],
+    endedReason?: string,
+    rawPayload?: any
 ) {
     console.log('[VAPI WEBHOOK] handleEndOfCall called for:', call.id);
     try {
@@ -224,10 +337,13 @@ async function handleEndOfCall(
         const deleteResult = await supabase.from('active_calls').delete().eq('vapi_call_id', call.id);
         console.log('[VAPI WEBHOOK] Delete result:', deleteResult);
 
-        // 2. Update Contact History (CRM)
+        // 2. Persist call record to Supabase
+        await persistCallRecord(call, artifact, assistant, endedReason, rawPayload);
+
+        // 3. Update Contact History (CRM)
         await updateContactAfterCall(call, artifact);
 
-        // 3. Record Usage for Billing
+        // 4. Record Usage for Billing
         if (call.orgId) {
             const clientId = await getClientIdByOrgId(call.orgId);
             if (clientId) {
@@ -523,7 +639,7 @@ export async function POST(request: Request) {
             // Check if call has ended - Vapi sends status-update with status=ended
             if (call.status === 'ended') {
                 console.log('[VAPI WEBHOOK] Call ended via status-update:', call.id);
-                await handleEndOfCall(call, message?.artifact);
+                await handleEndOfCall(call, message?.artifact, message?.assistant, message?.endedReason, rawPayload);
             } else {
                 await handleCallStarted(call); // Ensure call exists
                 await handleCallUpdate(call);
@@ -532,11 +648,12 @@ export async function POST(request: Request) {
             await handleCallStarted(call); // Ensure call exists
             await handleCallUpdate(call, conversation);
         } else if (messageType === 'end-of-call-report') {
-            await handleEndOfCall(call, message?.artifact);
+            await handleEndOfCall(call, message?.artifact, message?.assistant, message?.endedReason, rawPayload);
         } else {
             // For any other event type, try to create/update the call
             await handleCallStarted(call);
         }
+
 
         // --- WEBHOOK FORWARDING LOGIC ---
         let eventType: string | null = null;
