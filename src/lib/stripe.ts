@@ -11,6 +11,7 @@ export const stripe = stripeSecretKey
 
 /**
  * Get or create a Stripe customer for a client
+ * Handles case where customer ID exists but is invalid (e.g., test mode ID used with live keys)
  */
 export async function getOrCreateStripeCustomer(
     clientId: string,
@@ -21,9 +22,19 @@ export async function getOrCreateStripeCustomer(
 
     const billing = await getOrCreateClientBilling(clientId);
 
-    // Return existing customer if we have one
+    // If we have an existing customer ID, verify it's valid
     if (billing.stripe_customer_id) {
-        return billing.stripe_customer_id;
+        try {
+            // Try to retrieve the customer to verify it exists
+            await stripe.customers.retrieve(billing.stripe_customer_id);
+            return billing.stripe_customer_id;
+        } catch (error: unknown) {
+            // Customer doesn't exist (likely test mode ID with live keys)
+            // Log and proceed to create a new customer
+            console.warn(
+                `Stripe customer ${billing.stripe_customer_id} not found, creating new customer for client ${clientId}`
+            );
+        }
     }
 
     // Create new Stripe customer
@@ -33,7 +44,7 @@ export async function getOrCreateStripeCustomer(
         metadata: { clientId }
     });
 
-    // Save to database
+    // Save to database (this updates the old invalid ID with the new one)
     await supabase
         .from('client_billing')
         .update({ stripe_customer_id: customer.id })
