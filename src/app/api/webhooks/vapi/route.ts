@@ -17,6 +17,7 @@ import crypto from "crypto";
 interface VapiWebhookPayload {
     message: {
         type: string;
+        status?: string;  // For status-update events: "ended", "in-progress", "ringing", etc.
         endedReason?: string;
         artifact?: {
             messages?: Array<{
@@ -613,13 +614,18 @@ export async function POST(request: Request) {
         const call = message?.call;
         const conversation = message?.conversation;
 
+        // CRITICAL: For status-update events, the actual status is in message.status,
+        // NOT in call.status (which contains the original creation status like "ringing")
+        const messageStatus = message?.status;  // e.g., "ended", "in-progress"
+        const messageEndedReason = message?.endedReason;  // e.g., "customer-ended-call"
+
         // Skip if no call object
         if (!call) {
             console.log('[VAPI WEBHOOK] Skipping - no call object');
             return NextResponse.json({ received: true });
         }
 
-        console.log('[VAPI WEBHOOK] Processing call:', call.id, 'type:', messageType, 'status:', call.status);
+        console.log('[VAPI WEBHOOK] Processing call:', call.id, 'type:', messageType, 'message.status:', messageStatus, 'call.status:', call.status);
 
         // --- ACTIVE CALL TRACKING ---
         // Handle any event that has call data - insert if new, update if exists
@@ -636,11 +642,12 @@ export async function POST(request: Request) {
         if (messageType === 'call-started' || messageType === 'assistant.started' || messageType === 'speech-update') {
             await handleCallStarted(call);
         } else if (messageType === 'status-update') {
-            // Check if call has ended - Vapi sends status-update with status=ended
-            if (call.status === 'ended') {
-                console.log('[VAPI WEBHOOK] Call ended via status-update:', call.id);
-                await handleEndOfCall(call, message?.artifact, message?.assistant, message?.endedReason, rawPayload);
-            } else if (call.status === 'in-progress') {
+            // CRITICAL FIX: Check message.status (not call.status) for current status
+            // Vapi sends message.status='ended' but call.status might still be 'ringing' or 'in-progress'
+            if (messageStatus === 'ended') {
+                console.log('[VAPI WEBHOOK] Call ended via status-update:', call.id, 'reason:', messageEndedReason);
+                await handleEndOfCall(call, message?.artifact, message?.assistant, messageEndedReason || message?.endedReason, rawPayload);
+            } else if (messageStatus === 'in-progress') {
                 // Only track when call actually starts (not every status update)
                 await handleCallStarted(call);
             }
