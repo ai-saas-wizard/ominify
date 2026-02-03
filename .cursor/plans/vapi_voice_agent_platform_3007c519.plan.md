@@ -64,8 +64,6 @@ graph TD
     VapiAPI -->|Webhooks| Logs
 ```
 
-
-
 ### Database Schema (Supabase)
 
 - `clients`: `id`, `name`, `email`, `account_type` (CUSTOM/UMBRELLA), `vapi_key`, `vapi_org_id`, `balance`.
