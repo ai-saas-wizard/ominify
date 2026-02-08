@@ -91,7 +91,7 @@ export function SequenceDetailClient({
 
     async function handleDeleteStep(stepId: string) {
         if (!confirm("Delete this step?")) return;
-        await deleteSequenceStep(stepId, sequenceId);
+        await deleteSequenceStep(stepId);
         router.refresh();
     }
 
@@ -124,11 +124,10 @@ export function SequenceDetailClient({
                     <button
                         onClick={handleToggleActive}
                         disabled={toggling}
-                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            isActive
-                                ? "bg-green-100 text-green-700 hover:bg-green-200"
-                                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                        } disabled:opacity-50`}
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isActive
+                            ? "bg-green-100 text-green-700 hover:bg-green-200"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            } disabled:opacity-50`}
                     >
                         {isActive ? (
                             <ToggleRight className="w-4 h-4" />
@@ -158,11 +157,10 @@ export function SequenceDetailClient({
                                 setActiveTab(tab.key);
                                 if (tab.key === "log") loadExecutionLog();
                             }}
-                            className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
-                                activeTab === tab.key
-                                    ? "border-violet-600 text-violet-600"
-                                    : "border-transparent text-gray-500 hover:text-gray-700"
-                            }`}
+                            className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === tab.key
+                                ? "border-violet-600 text-violet-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
                         >
                             {tab.label}
                         </button>
@@ -204,7 +202,6 @@ export function SequenceDetailClient({
                                                             <SequenceStepEditor
                                                                 sequenceId={sequenceId}
                                                                 existingStep={step}
-                                                                stepOrder={step.step_order}
                                                                 onClose={() => setEditingStepId(null)}
                                                                 onSaved={() => {
                                                                     setEditingStepId(null);
@@ -267,7 +264,6 @@ export function SequenceDetailClient({
                                 <div className="bg-gray-50 rounded-lg p-4 border mt-4">
                                     <SequenceStepEditor
                                         sequenceId={sequenceId}
-                                        stepOrder={steps.length + 1}
                                         onClose={() => setShowAddStep(false)}
                                         onSaved={() => {
                                             setShowAddStep(false);
@@ -290,7 +286,6 @@ export function SequenceDetailClient({
                     {/* ─── ENROLLMENTS TAB ─── */}
                     {activeTab === "enrollments" && (
                         <EnrollmentTable
-                            sequenceId={sequenceId}
                             enrollments={enrollments}
                         />
                     )}
@@ -334,15 +329,14 @@ export function SequenceDetailClient({
                                                         </td>
                                                         <td className="py-2.5 pr-4">
                                                             <span
-                                                                className={`text-xs px-2 py-0.5 rounded-full ${
-                                                                    log.status === "delivered" || log.status === "success"
-                                                                        ? "bg-green-100 text-green-700"
-                                                                        : log.status === "failed"
+                                                                className={`text-xs px-2 py-0.5 rounded-full ${log.status === "delivered" || log.status === "success"
+                                                                    ? "bg-green-100 text-green-700"
+                                                                    : log.status === "failed"
                                                                         ? "bg-red-100 text-red-700"
                                                                         : log.status === "pending"
-                                                                        ? "bg-yellow-100 text-yellow-700"
-                                                                        : "bg-gray-100 text-gray-600"
-                                                                }`}
+                                                                            ? "bg-yellow-100 text-yellow-700"
+                                                                            : "bg-gray-100 text-gray-600"
+                                                                    }`}
                                                             >
                                                                 {log.status}
                                                             </span>
