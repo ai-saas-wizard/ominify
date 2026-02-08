@@ -142,7 +142,7 @@ export class VapiUmbrellaConcurrencyManager {
             limit: parseInt(umbrella.limit || '10'),
             lastSync: umbrella.last_sync ? parseInt(umbrella.last_sync) : null,
             tenantBreakdown: Object.fromEntries(
-                Object.entries(tenantUsage).map(([k, v]) => [k, parseInt(v)])
+                Object.entries(tenantUsage).map(([k, v]) => [k, parseInt(v as string)])
             ),
         };
     }
