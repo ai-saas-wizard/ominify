@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 import {
     Users,
     Settings,
-    CreditCard
+    CreditCard,
+    Umbrella
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 
@@ -15,6 +16,11 @@ const routes = [
         label: "Clients",
         icon: Users,
         href: "/admin/clients",
+    },
+    {
+        label: "Umbrellas",
+        icon: Umbrella,
+        href: "/admin/umbrellas",
     },
     {
         label: "Billing",

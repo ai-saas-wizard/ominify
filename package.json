@@ -31,7 +31,8 @@
     "recharts": "^3.6.0",
     "stripe": "^20.1.0",
     "tailwind-merge": "^3.4.0",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "twilio": "^5.12.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -69,13 +69,33 @@ interface VapiWebhookPayload {
 }
 
 // Helper to get Client ID from Vapi Org ID
-async function getClientIdByOrgId(orgId: string): Promise<string | null> {
+// Supports both Type A (direct org → client) and Type B (umbrella org → agent → client)
+async function getClientIdByOrgId(orgId: string, assistantId?: string): Promise<string | null> {
+    // Step 1: Try direct org → client match (works for Type A clients)
     const { data } = await supabase
         .from('clients')
         .select('id')
         .eq('vapi_org_id', orgId)
         .single();
-    return data?.id || null;
+
+    if (data?.id) return data.id;
+
+    // Step 2: Umbrella resolution — org ID belongs to a shared umbrella account
+    // Multiple TYPE B tenants share the same org ID, so we resolve via the assistant
+    if (assistantId) {
+        const { data: agent } = await supabase
+            .from('agents')
+            .select('client_id')
+            .eq('vapi_id', assistantId)
+            .single();
+
+        if (agent?.client_id) {
+            console.log(`[VAPI] Umbrella resolution: orgId=${orgId} assistantId=${assistantId} → clientId=${agent.client_id}`);
+            return agent.client_id;
+        }
+    }
+
+    return null;
 }
 
 // Get contact context for assistant-request (inject into AI)
@@ -86,7 +106,7 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
     if (!phone || !call?.orgId) return null;
 
     try {
-        const clientId = await getClientIdByOrgId(call.orgId);
+        const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
         if (!clientId) return null;
 
         // Get or create contact
@@ -146,7 +166,7 @@ async function handleCallStarted(call: NonNullable<VapiWebhookPayload['message']
             console.log('[VAPI WEBHOOK] No orgId, skipping');
             return;
         }
-        const clientId = await getClientIdByOrgId(call.orgId);
+        const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
         console.log('[VAPI WEBHOOK] Client lookup result:', { orgId: call.orgId, clientId });
         if (!clientId) {
             console.log('[VAPI WEBHOOK] No client found for orgId:', call.orgId);
@@ -237,7 +257,7 @@ async function persistCallRecord(
             return;
         }
 
-        const clientId = await getClientIdByOrgId(call.orgId);
+        const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
         if (!clientId) {
             console.log('[VAPI WEBHOOK] No client found for orgId:', call.orgId);
             return;
@@ -350,7 +370,7 @@ async function handleEndOfCall(
 
         // 4. Record Usage for Billing
         if (call.orgId) {
-            const clientId = await getClientIdByOrgId(call.orgId);
+            const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
             if (clientId) {
                 // Calculate duration
                 const startedAt = call.startedAt ? new Date(call.startedAt) : null;
@@ -391,7 +411,7 @@ async function updateContactAfterCall(
     }
 
     try {
-        const clientId = await getClientIdByOrgId(call.orgId);
+        const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
         if (!clientId) return;
 
         // Find or create contact
@@ -617,6 +637,11 @@ export async function POST(request: Request) {
         const messageType = message?.type;
         const call = message?.call;
         const conversation = message?.conversation;
+
+        // Attach assistantId to call for umbrella (TYPE B) client resolution
+        if (call && message?.assistant?.id) {
+            call._assistantId = message.assistant.id;
+        }
 
         // CRITICAL: For status-update events, the actual status is in message.status,
         // NOT in call.status (which contains the original creation status like "ringing")

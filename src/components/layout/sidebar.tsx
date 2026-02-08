@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
     LayoutDashboard,
@@ -25,7 +26,7 @@ import { UserButton } from "@clerk/nextjs";
 import { MinuteBalanceDisplay } from "./minute-balance-display";
 import { WorkspaceDisplay } from "./workspace-display";
 
-const routes = [
+const baseRoutes = [
     {
         label: "Agents",
         icon: Bot,
@@ -53,6 +54,20 @@ const routes = [
     },
 ];
 
+// Additional routes for TYPE B (UMBRELLA) clients
+const umbrellaRoutes = [
+    {
+        label: "Sequences",
+        icon: GitBranch,
+        href: "/sequences",
+    },
+    {
+        label: "Phone Numbers",
+        icon: Phone,
+        href: "/phone-numbers",
+    },
+];
+
 const bottomRoutes = [
     {
         label: "Settings",
@@ -63,8 +78,26 @@ const bottomRoutes = [
 
 export const Sidebar = () => {
     const pathname = usePathname();
-    // Extract clientId from /client/[clientId]/...
     const clientId = pathname.split('/')[2];
+    const [accountType, setAccountType] = useState<string | null>(null);
+
+    // Fetch client account type to determine which nav items to show
+    useEffect(() => {
+        if (!clientId) return;
+        fetch(`/api/client/${clientId}/info`)
+            .then(res => res.json())
+            .then(data => {
+                if (data?.account_type) {
+                    setAccountType(data.account_type);
+                }
+            })
+            .catch(() => {
+                // Fallback: show base routes only
+            });
+    }, [clientId]);
+
+    const isUmbrella = accountType === "UMBRELLA";
+    const routes = isUmbrella ? [...baseRoutes, ...umbrellaRoutes] : baseRoutes;
 
     return (
         <div className="flex flex-col h-full bg-white border-r border-gray-200">
