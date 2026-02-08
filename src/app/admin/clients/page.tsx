@@ -38,7 +38,7 @@ async function getClients() {
 
                 return {
                     ...client,
-                    umbrella_name: (assignment?.vapi_umbrellas as Record<string, string>)?.name || "Unassigned",
+                    umbrella_name: (assignment?.vapi_umbrellas as unknown as { name: string } | null)?.name || "Unassigned",
                     concurrency_cap: assignment?.tenant_concurrency_cap,
                     onboarding_completed: profile?.onboarding_completed || false,
                     industry: profile?.industry,
