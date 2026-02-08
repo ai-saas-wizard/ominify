@@ -113,6 +113,16 @@ export async function createClientAction(formData: FormData) {
             total_used_minutes: 0,
         });
 
+        // Create client_members entry so tenant can access their account on sign-up
+        if (email) {
+            await supabase.from("client_members").insert({
+                client_id: clientId,
+                email: email.toLowerCase().trim(),
+                role: "owner",
+                invited_by: "admin",
+            });
+        }
+
         revalidatePath("/admin/clients");
         return { success: true, clientId };
     }
