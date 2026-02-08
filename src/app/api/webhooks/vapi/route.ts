@@ -33,6 +33,7 @@ interface VapiWebhookPayload {
             id: string;
             orgId: string;
             assistantId?: string;
+            _assistantId?: string;  // Custom property set from message.assistant.id
             status: string;
             endedReason?: string;
             startedAt?: string;
