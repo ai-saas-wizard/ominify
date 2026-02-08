@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sequencer:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL}
+      - WEBHOOK_PORT=3000
+      - ADMIN_PORT=3001
+    ports:
+      - "3000:3000"    # Webhook server
+      - "3001:3001"    # Admin/health API
+    volumes:
+      - ./logs:/app/logs
+    restart: always
+
+volumes:
+  redis-data:

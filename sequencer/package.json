@@ -1,0 +1,39 @@
+{
+    "name": "ominify-sequencer",
+    "version": "1.0.0",
+    "description": "AI-powered multi-channel outreach sequencer engine",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "scheduler": "tsx src/workers/scheduler-worker.ts",
+        "sms-worker": "tsx src/workers/sms-worker.ts",
+        "email-worker": "tsx src/workers/email-worker.ts",
+        "vapi-worker": "tsx src/workers/vapi-worker.ts",
+        "event-processor": "tsx src/workers/event-processor.ts",
+        "webhook-server": "tsx src/server/webhook-server.ts"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0",
+        "bullmq": "^5.1.0",
+        "dotenv": "^16.3.1",
+        "fastify": "^4.25.0",
+        "@fastify/cors": "^8.5.0",
+        "ioredis": "^5.3.2",
+        "openai": "^4.24.0",
+        "twilio": "^4.20.0",
+        "zod": "^3.22.4",
+        "date-fns": "^2.30.0",
+        "date-fns-tz": "^2.0.0",
+        "nodemailer": "^6.9.8"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.0",
+        "tsx": "^4.7.0",
+        "typescript": "^5.3.0"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}
