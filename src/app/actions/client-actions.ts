@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { getActiveUmbrella } from "@/app/actions/umbrella-actions";
 
 export async function createClientAction(formData: FormData) {
     const name = formData.get("name") as string;
@@ -34,27 +35,18 @@ export async function createClientAction(formData: FormData) {
         return { success: true, clientId: newClient?.id };
     }
 
-    // ─── TYPE B (UMBRELLA): Uses agency credentials via umbrella ───
+    // ─── TYPE B (UMBRELLA): Auto-resolve single umbrella ───
     if (type === "UMBRELLA") {
-        const umbrellaId = formData.get("umbrella_id") as string;
         const tenantConcurrencyCap = parseInt(formData.get("tenant_concurrency_cap") as string) || 2;
 
         if (!name) {
             return { success: false, error: "Client name is required" };
         }
-        if (!umbrellaId) {
-            return { success: false, error: "Please select an umbrella" };
-        }
 
-        // Fetch umbrella's VAPI credentials
-        const { data: umbrella, error: umbrellaError } = await supabase
-            .from("vapi_umbrellas")
-            .select("vapi_api_key_encrypted, vapi_org_id")
-            .eq("id", umbrellaId)
-            .single();
-
-        if (umbrellaError || !umbrella) {
-            return { success: false, error: "Selected umbrella not found" };
+        // Auto-resolve the single active umbrella
+        const umbrella = await getActiveUmbrella();
+        if (!umbrella) {
+            return { success: false, error: "No umbrella configured. Create one in Admin → Settings first." };
         }
 
         const placeholderClerkId = `pending_${crypto.randomUUID()}`;
@@ -79,7 +71,7 @@ export async function createClientAction(formData: FormData) {
         // Create umbrella assignment
         const { error: assignError } = await supabase.from("tenant_vapi_assignments").insert({
             client_id: clientId,
-            umbrella_id: umbrellaId,
+            umbrella_id: umbrella.id,
             tenant_concurrency_cap: tenantConcurrencyCap,
             priority_weight: 1.0,
             assigned_by: "admin",

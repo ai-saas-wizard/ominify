@@ -7,7 +7,6 @@ import {
     Users,
     Settings,
     CreditCard,
-    Umbrella
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 
@@ -17,12 +16,7 @@ const routes = [
         icon: Users,
         href: "/admin/clients",
     },
-    {
-        label: "Umbrellas",
-        icon: Umbrella,
-        href: "/admin/umbrellas",
-    },
-    {
+{
         label: "Billing",
         icon: CreditCard,
         href: "/admin/billing",

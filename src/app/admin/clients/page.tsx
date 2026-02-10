@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock } from "lucide-react";
+import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap } from "lucide-react";
 import Link from "next/link";
 import { CreateClientDialog } from "@/components/admin/create-client-dialog";
 
@@ -17,14 +17,14 @@ async function getClients() {
 
     if (!data) return [];
 
-    // Enrich UMBRELLA clients with umbrella name + onboarding status
+    // Enrich UMBRELLA clients with concurrency + onboarding status
     const enriched = await Promise.all(
         data.map(async (client) => {
             if (client.account_type === "UMBRELLA") {
-                // Get umbrella assignment
+                // Get concurrency cap from assignment
                 const { data: assignment } = await supabase
                     .from("tenant_vapi_assignments")
-                    .select("umbrella_id, tenant_concurrency_cap, vapi_umbrellas(name)")
+                    .select("tenant_concurrency_cap")
                     .eq("client_id", client.id)
                     .eq("is_active", true)
                     .single();
@@ -38,7 +38,6 @@ async function getClients() {
 
                 return {
                     ...client,
-                    umbrella_name: (assignment?.vapi_umbrellas as unknown as { name: string } | null)?.name || "Unassigned",
                     concurrency_cap: assignment?.tenant_concurrency_cap,
                     onboarding_completed: profile?.onboarding_completed || false,
                     industry: profile?.industry,
@@ -112,18 +111,13 @@ export default async function AdminClientsPage() {
                                 </div>
 
                                 <div className="space-y-2 pt-2 border-t border-indigo-50 mt-3">
-                                    {/* Umbrella info */}
-                                    <div className="flex items-center justify-between text-sm">
-                                        <div className="flex items-center text-gray-500 gap-2">
-                                            <Umbrella className="w-3.5 h-3.5" />
-                                            <span className="text-xs">{client.umbrella_name}</span>
-                                            {client.concurrency_cap && (
-                                                <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">
-                                                    {client.concurrency_cap} slots
-                                                </span>
-                                            )}
+                                    {/* Concurrency + Onboarding */}
+                                    {client.concurrency_cap && (
+                                        <div className="flex items-center text-gray-500 gap-2 text-sm">
+                                            <Zap className="w-3.5 h-3.5" />
+                                            <span className="text-xs">{client.concurrency_cap} concurrency slots</span>
                                         </div>
-                                    </div>
+                                    )}
 
                                     {/* Onboarding status */}
                                     <div className="flex items-center justify-between text-sm">

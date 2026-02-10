@@ -1,34 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Plus, Loader2, Umbrella, Key } from "lucide-react";
 import { createClientAction } from "@/app/actions/client-actions";
-import { getUmbrellas } from "@/app/actions/umbrella-actions";
-
-type UmbrellaOption = {
-    id: string;
-    name: string;
-    concurrency_limit: number;
-    current_concurrency: number;
-};
 
 export function CreateClientDialog() {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [accountType, setAccountType] = useState<"CUSTOM" | "UMBRELLA">("CUSTOM");
-    const [umbrellas, setUmbrellas] = useState<UmbrellaOption[]>([]);
-    const [loadingUmbrellas, setLoadingUmbrellas] = useState(false);
-
-    // Fetch umbrellas when UMBRELLA type is selected
-    useEffect(() => {
-        if (accountType === "UMBRELLA" && umbrellas.length === 0) {
-            setLoadingUmbrellas(true);
-            getUmbrellas().then((data) => {
-                setUmbrellas(data as UmbrellaOption[]);
-                setLoadingUmbrellas(false);
-            });
-        }
-    }, [accountType, umbrellas.length]);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -98,7 +77,7 @@ export function CreateClientDialog() {
                         </div>
                     )}
 
-                    {/* ── TYPE B: Agency umbrella assignment ── */}
+                    {/* ── TYPE B: Auto-assigned to agency umbrella ── */}
                     {accountType === "UMBRELLA" && (
                         <div className="space-y-4">
                             <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
@@ -109,29 +88,6 @@ export function CreateClientDialog() {
                                 <p className="text-xs text-indigo-600/80">
                                     This client will use agency-managed VAPI credentials and get a Twilio subaccount provisioned automatically.
                                 </p>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700">Assign to Umbrella</label>
-                                {loadingUmbrellas ? (
-                                    <div className="flex items-center gap-2 text-sm text-gray-500 p-2">
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Loading umbrellas...
-                                    </div>
-                                ) : umbrellas.length === 0 ? (
-                                    <div className="text-sm text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-3">
-                                        No umbrellas configured. Create one in Admin → Umbrellas first.
-                                    </div>
-                                ) : (
-                                    <select name="umbrella_id" required className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-indigo-500">
-                                        <option value="">Select an umbrella...</option>
-                                        {umbrellas.map((u) => (
-                                            <option key={u.id} value={u.id}>
-                                                {u.name} ({u.current_concurrency}/{u.concurrency_limit} slots used)
-                                            </option>
-                                        ))}
-                                    </select>
-                                )}
                             </div>
 
                             <div className="space-y-2">
@@ -159,7 +115,7 @@ export function CreateClientDialog() {
                         </button>
                         <button
                             type="submit"
-                            disabled={loading || (accountType === "UMBRELLA" && umbrellas.length === 0)}
+                            disabled={loading}
                             className={`px-4 py-2 text-sm font-medium text-white rounded-lg flex items-center ${
                                 accountType === "UMBRELLA"
                                     ? "bg-indigo-600 hover:bg-indigo-700"

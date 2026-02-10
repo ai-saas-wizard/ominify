@@ -4,30 +4,16 @@ import { isAdmin, getAccessibleClients, addClientMember } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
-// Find an available umbrella with tenant capacity
-async function findAvailableUmbrella() {
-  const { data: umbrellas } = await supabase
+// Get the single active umbrella
+async function getActiveUmbrellaForSignup() {
+  const { data: umbrella } = await supabase
     .from("vapi_umbrellas")
-    .select("id, name, vapi_api_key_encrypted, vapi_org_id, max_tenants")
+    .select("id, name, vapi_api_key_encrypted, vapi_org_id")
     .eq("is_active", true)
-    .order("name");
+    .limit(1)
+    .single();
 
-  if (!umbrellas || umbrellas.length === 0) return null;
-
-  for (const umbrella of umbrellas) {
-    const { count } = await supabase
-      .from("tenant_vapi_assignments")
-      .select("*", { count: "exact", head: true })
-      .eq("umbrella_id", umbrella.id)
-      .eq("is_active", true);
-
-    // max_tenants NULL = unlimited capacity
-    if (umbrella.max_tenants === null || (count || 0) < umbrella.max_tenants) {
-      return umbrella;
-    }
-  }
-
-  return null; // All umbrellas at capacity
+  return umbrella || null;
 }
 
 // Auto-provision a new UMBRELLA client for a self-serve sign-up
@@ -36,8 +22,8 @@ async function autoProvisionUmbrellaClient(
   userId: string,
   userName: string
 ) {
-  // Find an umbrella with available capacity
-  const umbrella = await findAvailableUmbrella();
+  // Get the single active umbrella
+  const umbrella = await getActiveUmbrellaForSignup();
   if (!umbrella) return null;
 
   // Create the client record

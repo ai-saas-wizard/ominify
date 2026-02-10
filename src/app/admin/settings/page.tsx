@@ -1,11 +1,13 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { ArrowLeft, DollarSign, Download, RefreshCw, Shield, ChevronRight } from "lucide-react";
+import { ArrowLeft, DollarSign, Download, RefreshCw, Shield, ChevronRight, Umbrella } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { DefaultPricingForm } from "@/components/admin/default-pricing-form";
 import { ExportClientsButton } from "@/components/admin/export-clients-button";
 import { SyncUsageButton } from "@/components/admin/sync-usage-button";
+import { UmbrellaSettingsCard } from "@/components/admin/umbrella-settings-card";
 import { getAllAdmins } from "@/lib/auth";
+import { getActiveUmbrellaWithStats } from "@/app/actions/umbrella-actions";
 
 // Get platform settings from database or env
 async function getPlatformSettings() {
@@ -61,6 +63,7 @@ export default async function AdminSettingsPage() {
     const settings = await getPlatformSettings();
     const clients = await getAllClientsData();
     const admins = await getAllAdmins();
+    const umbrella = await getActiveUmbrellaWithStats();
 
     async function updateDefaultPricing(formData: FormData) {
         "use server";
@@ -117,6 +120,30 @@ export default async function AdminSettingsPage() {
                             <ChevronRight className="w-5 h-5 text-gray-400" />
                         </div>
                     </Link>
+
+                    {/* VAPI Umbrella */}
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                            <div className="flex items-center gap-3">
+                                <Umbrella className="w-5 h-5 text-indigo-600" />
+                                <h2 className="text-lg font-semibold text-gray-900">VAPI Umbrella</h2>
+                            </div>
+                            <p className="text-sm text-gray-500 mt-1">
+                                Manage the shared VAPI account used by all Type B clients
+                            </p>
+                        </div>
+                        <div className="p-6">
+                            {umbrella ? (
+                                <UmbrellaSettingsCard umbrella={umbrella} />
+                            ) : (
+                                <div className="text-center py-4">
+                                    <Umbrella className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-500">No umbrella configured yet.</p>
+                                    <p className="text-xs text-gray-400 mt-1">Create one to enable Type B client onboarding.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
 
                     {/* Default Pricing */}
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
