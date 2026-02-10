@@ -11,6 +11,7 @@ import { Worker, Job } from 'bullmq';
 import { supabase } from '../lib/db.js';
 import { redisConnection } from '../lib/redis.js';
 import { decrypt } from '../lib/encryption.js';
+import { recordInteraction } from '../lib/conversation-memory.js';
 import type { EmailJobPayload } from '../lib/types.js';
 
 interface TenantEmailConfig {
@@ -170,6 +171,28 @@ async function processEmailJob(job: Job<EmailJobPayload>): Promise<{ messageId: 
         providerResponse: result,
         emailStatus: 'sent',
     });
+
+    // Record interaction for conversation memory
+    const { data: enrollment } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollment) {
+        await recordInteraction({
+            clientId: enrollment.tenant_id,
+            contactId: enrollment.contact_id,
+            enrollmentId,
+            stepId,
+            channel: 'email',
+            direction: 'outbound',
+            contentBody: bodyText,
+            contentSubject: subject,
+            outcome: 'delivered',
+            providerId: result.messageId,
+        });
+    }
 
     return result;
 }

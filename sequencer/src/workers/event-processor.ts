@@ -17,37 +17,50 @@ import { Worker, Job } from 'bullmq';
 import { supabase } from '../lib/db.js';
 import { redisConnection } from '../lib/redis.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
-import type { EventJobPayload, EnrollmentStatus } from '../lib/types.js';
+import {
+    recordInteraction,
+    updateInteraction,
+    findInteractionByProviderId,
+    updateContactConversationSummary,
+} from '../lib/conversation-memory.js';
+import {
+    analyzeMessage,
+    analyzeCallTranscript,
+    updateEnrollmentEI,
+    generateEINotifications,
+    createNotification,
+} from '../lib/emotional-intelligence.js';
+import { handleFailure } from '../lib/self-healer.js';
+import { computeStepAttribution } from '../lib/outcome-learning.js';
+import type { EventJobPayload, EnrollmentStatus, EmotionalAnalysis, ContactInteraction, FailureType, ConversionType } from '../lib/types.js';
 
 /**
- * AI classification of SMS reply intent
- * In production, this would use OpenAI
+ * Fetch recent interactions for a contact (for EI scoring and trend analysis)
  */
-async function classifyReplyIntent(messageBody: string): Promise<'interested' | 'not_interested' | 'reschedule' | 'stop' | 'question' | 'unknown'> {
-    const lowerBody = messageBody.toLowerCase();
+async function getRecentInteractions(contactId: string, limit: number = 10): Promise<ContactInteraction[]> {
+    const { data } = await supabase
+        .from('contact_interactions')
+        .select('*')
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    // Simple keyword matching - replace with AI classification
-    if (['stop', 'unsubscribe', 'remove', 'opt out', 'dont text', "don't text"].some(kw => lowerBody.includes(kw))) {
-        return 'stop';
-    }
+    return (data as ContactInteraction[]) || [];
+}
 
-    if (['not interested', 'no thanks', 'no thank you', 'remove me'].some(kw => lowerBody.includes(kw))) {
-        return 'not_interested';
-    }
+/**
+ * Build a brief conversation history string for EI analysis context
+ */
+async function buildConversationHistoryString(contactId: string): Promise<string> {
+    const interactions = await getRecentInteractions(contactId, 5);
+    if (interactions.length === 0) return '';
 
-    if (['yes', 'interested', 'call me', 'tell me more', 'more info'].some(kw => lowerBody.includes(kw))) {
-        return 'interested';
-    }
-
-    if (['reschedule', 'different time', 'not now', 'later', 'busy'].some(kw => lowerBody.includes(kw))) {
-        return 'reschedule';
-    }
-
-    if (lowerBody.includes('?')) {
-        return 'question';
-    }
-
-    return 'unknown';
+    return interactions.reverse().map(i => {
+        const dir = i.direction === 'inbound' ? 'Customer' : 'Agent';
+        const ch = i.channel.toUpperCase();
+        const content = i.content_summary || (i.content_body || '').substring(0, 100);
+        return `[${ch}] ${dir}: ${content}`;
+    }).join('\n');
 }
 
 /**
@@ -121,10 +134,40 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
             updates.appointment_booked = true;
             updates.completed_at = new Date().toISOString();
             console.log(`[EVENT] Enrollment ${enrollmentId} marked as BOOKED`);
+
+            // Phase 5: Compute step attribution on conversion
+            try {
+                await computeStepAttribution(enrollmentId, 'booked');
+            } catch (err) {
+                console.error('[EVENT] Attribution computation failed:', err);
+            }
         }
     }
 
     await updateEnrollmentStatus(enrollmentId, updates);
+
+    // Phase 4: Self-Healing — trigger healing on call failures
+    if (!wasAnswered && enrollmentId && event.stepId) {
+        let callFailureType: FailureType | null = null;
+
+        if (disposition === 'no-answer' || disposition === 'no_answer') {
+            callFailureType = 'call_no_answer';
+        } else if (disposition === 'busy') {
+            callFailureType = 'call_busy';
+        } else if (disposition === 'failed' || disposition === 'error') {
+            callFailureType = 'call_failed';
+        }
+        // Note: voicemail is not a failure — it's a partial success
+
+        if (callFailureType) {
+            console.log(`[EVENT] Call failure (${callFailureType}) for enrollment ${enrollmentId} — triggering self-healing`);
+            await handleFailure(enrollmentId, event.stepId, callFailureType, {
+                disposition,
+                duration,
+                callId,
+            });
+        }
+    }
 
     // 3. Update execution log with final call details
     await supabase
@@ -136,10 +179,87 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
             provider_response: { disposition, duration, appointmentBooked },
         })
         .eq('provider_id', callId);
+
+    // 4. Run Emotional Intelligence analysis on the call transcript
+    let eiAnalysis: EmotionalAnalysis | null = null;
+    if (event.transcript && event.transcript.length > 30) {
+        try {
+            eiAnalysis = await analyzeCallTranscript(
+                event.transcript,
+                duration || 0,
+                disposition || 'unknown'
+            );
+            console.log(`[EVENT] EI analysis: emotion=${eiAnalysis.primary_emotion}, intent=${eiAnalysis.intent}, hot=${eiAnalysis.is_hot_lead}`);
+        } catch (err) {
+            console.error('[EVENT] EI analysis failed for call transcript:', err);
+        }
+    }
+
+    // 5. Update the voice interaction record with call outcome + EI data
+    if (callId) {
+        const existingInteraction = await findInteractionByProviderId(callId);
+        if (existingInteraction) {
+            await updateInteraction(existingInteraction.id, {
+                content_body: event.transcript || null,
+                outcome: wasAnswered ? 'answered' : (disposition as any) || 'failed',
+                call_duration_seconds: duration || null,
+                call_disposition: disposition || null,
+                appointment_booked: appointmentBooked || false,
+            });
+
+            // Store EI analysis on the interaction
+            if (eiAnalysis) {
+                await supabase
+                    .from('contact_interactions')
+                    .update({ emotional_analysis: eiAnalysis })
+                    .eq('id', existingInteraction.id);
+            }
+        }
+    }
+
+    // 6. Update the contact's rolling conversation summary
+    if (enrollmentId) {
+        const { data: enroll } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id, contacts(name)')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enroll?.contact_id) {
+            await updateContactConversationSummary(enroll.contact_id);
+
+            // 7. Update enrollment EI state + generate notifications
+            if (eiAnalysis) {
+                const interactions = await getRecentInteractions(enroll.contact_id);
+                await updateEnrollmentEI(enrollmentId, eiAnalysis, interactions);
+
+                const contactName = (enroll as any).contacts?.name || undefined;
+                await generateEINotifications(
+                    enroll.tenant_id,
+                    enroll.contact_id,
+                    enrollmentId,
+                    eiAnalysis,
+                    contactName
+                );
+
+                // Handle recommended actions from EI
+                if (eiAnalysis.recommended_action === 'escalate_to_human') {
+                    await supabase
+                        .from('sequence_enrollments')
+                        .update({
+                            needs_human_intervention: true,
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq('id', enrollmentId);
+                    console.log(`[EVENT] Enrollment ${enrollmentId} flagged for human intervention`);
+                }
+            }
+        }
+    }
 }
 
 /**
- * Handle SMS reply event
+ * Handle SMS reply event — now powered by Emotional Intelligence
  */
 async function handleSmsReply(event: EventJobPayload): Promise<void> {
     const { enrollmentId, tenantId, messageBody } = event;
@@ -151,15 +271,107 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
 
     console.log(`[EVENT] SMS reply received: "${messageBody.substring(0, 50)}..."`);
 
-    // Classify the reply intent
-    const intent = await classifyReplyIntent(messageBody);
-    console.log(`[EVENT] Reply intent: ${intent}`);
+    // 1. Run EI analysis on the reply (replaces old classifyReplyIntent)
+    let eiAnalysis: EmotionalAnalysis | null = null;
+    let conversationHistory = '';
+
+    if (enrollmentId) {
+        const { data: enroll } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id, contacts(name)')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enroll) {
+            // Build conversation history for context-aware analysis
+            conversationHistory = await buildConversationHistoryString(enroll.contact_id);
+
+            // Analyze with full EI
+            try {
+                eiAnalysis = await analyzeMessage(messageBody, 'sms', conversationHistory);
+                console.log(`[EVENT] EI analysis: emotion=${eiAnalysis.primary_emotion}, intent=${eiAnalysis.intent}, hot=${eiAnalysis.is_hot_lead}, at_risk=${eiAnalysis.is_at_risk}`);
+            } catch (err) {
+                console.error('[EVENT] EI analysis failed, using fallback:', err);
+            }
+
+            // Map EI sentiment for the interaction record
+            const emotionToSentiment: Record<string, 'positive' | 'negative' | 'neutral' | 'interested' | 'objection' | 'confused'> = {
+                excited: 'positive',
+                interested: 'interested',
+                neutral: 'neutral',
+                hesitant: 'neutral',
+                frustrated: 'negative',
+                confused: 'confused',
+                angry: 'negative',
+                dismissive: 'negative',
+            };
+
+            const sentiment = eiAnalysis
+                ? (emotionToSentiment[eiAnalysis.primary_emotion] || 'neutral')
+                : 'neutral';
+
+            const intent = eiAnalysis?.intent || 'unknown';
+
+            // 2. Record inbound SMS interaction with EI data
+            const interactionId = await recordInteraction({
+                clientId: enroll.tenant_id,
+                contactId: enroll.contact_id,
+                enrollmentId,
+                channel: 'sms',
+                direction: 'inbound',
+                contentBody: messageBody,
+                outcome: 'replied',
+                sentiment,
+                intent: intent as any,
+            });
+
+            // Store full EI analysis on the interaction
+            if (interactionId && eiAnalysis) {
+                await supabase
+                    .from('contact_interactions')
+                    .update({
+                        emotional_analysis: eiAnalysis,
+                        engagement_score: eiAnalysis.is_hot_lead ? 80 : eiAnalysis.is_at_risk ? 25 : 50,
+                    })
+                    .eq('id', interactionId);
+            }
+
+            // 3. Update contact conversation summary
+            await updateContactConversationSummary(enroll.contact_id);
+
+            // 4. Update enrollment EI state + generate notifications
+            if (eiAnalysis) {
+                const interactions = await getRecentInteractions(enroll.contact_id);
+                await updateEnrollmentEI(enrollmentId, eiAnalysis, interactions);
+
+                const contactName = (enroll as any).contacts?.name || undefined;
+                await generateEINotifications(
+                    enroll.tenant_id,
+                    enroll.contact_id,
+                    enrollmentId,
+                    eiAnalysis,
+                    contactName
+                );
+            }
+        }
+    }
 
     if (!enrollmentId) {
         console.log('[EVENT] No enrollmentId in SMS reply, creating notification only');
-        // TODO: Create notification for tenant
+        if (tenantId && messageBody) {
+            await createNotification({
+                clientId: tenantId,
+                type: 'needs_human',
+                title: 'SMS reply from untracked contact',
+                body: `Reply: "${messageBody.substring(0, 100)}"`,
+                priority: 'normal',
+            });
+        }
         return;
     }
+
+    // 5. Update enrollment status based on EI intent (or fallback)
+    const intent = eiAnalysis?.intent || 'unknown';
 
     switch (intent) {
         case 'stop':
@@ -167,16 +379,22 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
                 status: 'manual_stop',
                 contact_replied: true,
             });
-            // TODO: Add to opt-out list
             console.log(`[EVENT] Enrollment ${enrollmentId} stopped (opt-out)`);
             break;
 
         case 'interested':
+        case 'ready_to_buy':
             await updateEnrollmentStatus(enrollmentId, {
                 contact_replied: true,
             });
-            // TODO: Notify tenant: "Hot lead replied!"
-            console.log(`[EVENT] Hot lead! Enrollment ${enrollmentId} replied with interest`);
+            console.log(`[EVENT] Hot lead! Enrollment ${enrollmentId} replied with: ${intent}`);
+
+            // Phase 5: Compute attribution on positive reply (conversion event)
+            try {
+                await computeStepAttribution(enrollmentId, 'replied');
+            } catch (err) {
+                console.error('[EVENT] Attribution computation failed:', err);
+            }
             break;
 
         case 'not_interested':
@@ -188,12 +406,50 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             console.log(`[EVENT] Enrollment ${enrollmentId} not interested, sequence ended`);
             break;
 
+        case 'objection':
+            await updateEnrollmentStatus(enrollmentId, {
+                contact_replied: true,
+            });
+            console.log(`[EVENT] Enrollment ${enrollmentId} raised objection — sequence continues with EI adjustments`);
+            break;
+
         default:
             await updateEnrollmentStatus(enrollmentId, {
                 contact_replied: true,
             });
-            // TODO: Notify tenant of reply
             console.log(`[EVENT] Enrollment ${enrollmentId} replied (${intent})`);
+    }
+
+    // 6. Handle EI recommended actions
+    if (eiAnalysis) {
+        switch (eiAnalysis.recommended_action) {
+            case 'escalate_to_human':
+                await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        needs_human_intervention: true,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId);
+                console.log(`[EVENT] Enrollment ${enrollmentId} escalated to human`);
+                break;
+
+            case 'fast_track':
+                // Move the next step time to now (speed up the sequence)
+                await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        next_step_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId);
+                console.log(`[EVENT] Enrollment ${enrollmentId} fast-tracked — next step moved to now`);
+                break;
+
+            case 'end_sequence':
+                // Already handled by 'stop' intent above
+                break;
+        }
     }
 }
 
@@ -215,10 +471,20 @@ async function handleSmsDelivery(event: EventJobPayload): Promise<void> {
             .eq('channel', 'sms');
     }
 
-    // Handle failures
+    // Phase 4: Self-Healing — trigger healing on SMS delivery failures
     if (deliveryStatus === 'failed' || deliveryStatus === 'undelivered') {
-        // TODO: Increment failure count, potentially pause sequence
-        console.log(`[EVENT] SMS delivery failed for enrollment ${enrollmentId}`);
+        console.log(`[EVENT] SMS delivery failed for enrollment ${enrollmentId} — triggering self-healing`);
+
+        if (enrollmentId && stepId) {
+            const failureType: FailureType = deliveryStatus === 'undelivered'
+                ? 'sms_undelivered'
+                : 'sms_failed';
+
+            await handleFailure(enrollmentId, stepId, failureType, {
+                deliveryStatus,
+                tenantId,
+            });
+        }
     }
 }
 
@@ -240,8 +506,22 @@ async function handleEmailOpened(event: EventJobPayload): Promise<void> {
             .eq('channel', 'email');
     }
 
-    // Track engagement metrics
-    // TODO: This could influence branching logic
+    // Update interaction record with opened status
+    if (stepId) {
+        const { data: logEntry } = await supabase
+            .from('sequence_execution_log')
+            .select('provider_id')
+            .eq('step_id', stepId)
+            .eq('channel', 'email')
+            .single();
+
+        if (logEntry?.provider_id) {
+            const existing = await findInteractionByProviderId(logEntry.provider_id);
+            if (existing) {
+                await updateInteraction(existing.id, { outcome: 'opened' });
+            }
+        }
+    }
 }
 
 /**
@@ -262,8 +542,65 @@ async function handleEmailClicked(event: EventJobPayload): Promise<void> {
             .eq('channel', 'email');
     }
 
-    // High engagement - potentially fast-track this contact
-    // TODO: Notify tenant of engaged lead
+    // Update interaction record with clicked status
+    if (stepId) {
+        const { data: logEntry } = await supabase
+            .from('sequence_execution_log')
+            .select('provider_id')
+            .eq('step_id', stepId)
+            .eq('channel', 'email')
+            .single();
+
+        if (logEntry?.provider_id) {
+            const existing = await findInteractionByProviderId(logEntry.provider_id);
+            if (existing) {
+                await updateInteraction(existing.id, { outcome: 'clicked' });
+            }
+        }
+    }
+}
+
+/**
+ * Handle email bounced event (Phase 4: Self-Healing)
+ */
+async function handleEmailBounced(event: EventJobPayload): Promise<void> {
+    const { enrollmentId, stepId, tenantId } = event;
+    const bounceType = (event as any).bounceType || 'hard'; // 'hard' or 'soft'
+
+    console.log(`[EVENT] Email bounced (${bounceType}) for enrollment ${enrollmentId}`);
+
+    if (stepId) {
+        await supabase
+            .from('sequence_execution_log')
+            .update({ email_status: 'bounced' })
+            .eq('step_id', stepId)
+            .eq('channel', 'email');
+    }
+
+    // Update interaction record
+    if (stepId) {
+        const { data: logEntry } = await supabase
+            .from('sequence_execution_log')
+            .select('provider_id')
+            .eq('step_id', stepId)
+            .eq('channel', 'email')
+            .single();
+
+        if (logEntry?.provider_id) {
+            const existing = await findInteractionByProviderId(logEntry.provider_id);
+            if (existing) {
+                await updateInteraction(existing.id, { outcome: 'bounced' });
+            }
+        }
+    }
+
+    // Trigger self-healing
+    if (enrollmentId && stepId) {
+        await handleFailure(enrollmentId, stepId, 'email_bounced', {
+            bounceType,
+            tenantId,
+        });
+    }
 }
 
 /**
@@ -293,6 +630,10 @@ async function processEvent(job: Job<EventJobPayload>): Promise<void> {
 
         case 'email-clicked':
             await handleEmailClicked(event);
+            break;
+
+        case 'email-bounced':
+            await handleEmailBounced(event);
             break;
 
         default:

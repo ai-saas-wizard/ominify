@@ -106,19 +106,29 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
         .single();
 
     if (existing) {
-        // Update last touch
+        // Merge custom variables into existing custom_fields (existing values preserved, new ones added)
+        const mergedCustomFields = {
+            ...(existing.custom_fields || {}),
+            ...(leadData.customVariables || {}),
+        };
+
+        // Update last touch and merge custom fields
         await supabase
             .from('contacts')
             .update({
                 updated_at: new Date().toISOString(),
                 name: leadData.name || existing.name,
                 email: leadData.email || existing.email,
+                first_name: leadData.first_name || existing.first_name,
+                last_name: leadData.last_name || existing.last_name,
+                company: leadData.company || existing.company,
+                custom_fields: mergedCustomFields,
             })
             .eq('id', existing.id);
-        return existing as Contact;
+        return { ...existing, custom_fields: mergedCustomFields } as Contact;
     }
 
-    // Insert new contact
+    // Insert new contact with custom variables persisted to custom_fields
     const { data: newContact, error } = await supabase
         .from('contacts')
         .insert({
@@ -129,6 +139,7 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
             first_name: leadData.first_name,
             last_name: leadData.last_name,
             company: leadData.company,
+            custom_fields: leadData.customVariables || {},
         })
         .select()
         .single();

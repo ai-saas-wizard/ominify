@@ -17,6 +17,7 @@ import { supabase } from '../lib/db.js';
 import { redisConnection, vapiQueue } from '../lib/redis.js';
 import { umbrellaResolver } from '../lib/umbrella-resolver.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
+import { recordInteraction } from '../lib/conversation-memory.js';
 import type { VapiJobPayload, VoiceContent } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
@@ -188,6 +189,26 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             providerResponse: result,
             callStatus: 'initiated',
         });
+
+        // Record interaction for conversation memory (initial - updated on call end by event processor)
+        const { data: enrollment } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enrollment) {
+            await recordInteraction({
+                clientId: enrollment.tenant_id,
+                contactId: enrollment.contact_id,
+                enrollmentId,
+                stepId,
+                channel: 'voice',
+                direction: 'outbound',
+                outcome: 'delivered',
+                providerId: result.callId,
+            });
+        }
 
         // Note: Concurrency slot will be released by the webhook when call ends
         // DO NOT release here - call is still in progress

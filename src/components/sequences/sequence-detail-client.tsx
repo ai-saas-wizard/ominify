@@ -14,15 +14,20 @@ import {
     ChevronDown,
     ChevronUp,
     Activity,
+    Sparkles,
 } from "lucide-react";
 import {
     toggleSequenceActive,
     deleteSequence,
     deleteSequenceStep,
     getExecutionLog,
+    updateSequenceMutationSettings,
+    getMutationHistory,
 } from "@/app/actions/sequence-actions";
 import { SequenceStepEditor } from "./sequence-step-editor";
 import { EnrollmentTable } from "./enrollment-table";
+import { MutationEnabledDot, MutationBadge } from "./mutation-badge";
+import { HealingBadge } from "./healing-badge";
 import { useRouter } from "next/navigation";
 
 const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
@@ -64,6 +69,11 @@ export function SequenceDetailClient({
     const [deleting, setDeleting] = useState(false);
     const [executionLog, setExecutionLog] = useState<any[]>([]);
     const [logLoaded, setLogLoaded] = useState(false);
+    // Phase 3: Mutation settings
+    const [mutationEnabled, setMutationEnabled] = useState(sequence?.enable_adaptive_mutation || false);
+    const [mutationAggressiveness, setMutationAggressiveness] = useState(sequence?.mutation_aggressiveness || "moderate");
+    const [savingMutation, setSavingMutation] = useState(false);
+    const [mutationHistory, setMutationHistory] = useState<Record<string, any[]>>({});
 
     async function handleToggleActive() {
         setToggling(true);
@@ -102,6 +112,37 @@ export function SequenceDetailClient({
         setLogLoaded(true);
     }
 
+    async function handleMutationToggle(enabled: boolean) {
+        setSavingMutation(true);
+        setMutationEnabled(enabled);
+        try {
+            await updateSequenceMutationSettings(sequenceId, {
+                enable_adaptive_mutation: enabled,
+            });
+            router.refresh();
+        } catch (err) {
+            console.error("Mutation toggle error:", err);
+            setMutationEnabled(!enabled); // revert
+        } finally {
+            setSavingMutation(false);
+        }
+    }
+
+    async function handleAggressivenessChange(level: string) {
+        setSavingMutation(true);
+        setMutationAggressiveness(level);
+        try {
+            await updateSequenceMutationSettings(sequenceId, {
+                mutation_aggressiveness: level,
+            });
+            router.refresh();
+        } catch (err) {
+            console.error("Aggressiveness change error:", err);
+        } finally {
+            setSavingMutation(false);
+        }
+    }
+
     function formatDelay(step: any) {
         if (step.delay_type === "immediate") return "Immediately";
         if (step.delay_amount && step.delay_unit) {
@@ -137,14 +178,47 @@ export function SequenceDetailClient({
                         {toggling ? "Updating..." : isActive ? "Active" : "Inactive"}
                     </button>
                 </div>
-                <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                >
-                    <Trash2 className="w-4 h-4" />
-                    {deleting ? "Deleting..." : "Delete Sequence"}
-                </button>
+                <div className="flex items-center gap-3">
+                    {/* Phase 3: Mutation controls */}
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-100">
+                        <Sparkles className="w-4 h-4 text-violet-500" />
+                        <span className="text-xs font-medium text-violet-700">AI Mutation</span>
+                        <button
+                            onClick={() => handleMutationToggle(!mutationEnabled)}
+                            disabled={savingMutation}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                mutationEnabled ? "bg-violet-600" : "bg-gray-300"
+                            } disabled:opacity-50`}
+                        >
+                            <span
+                                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                    mutationEnabled ? "translate-x-4.5" : "translate-x-0.5"
+                                }`}
+                            />
+                        </button>
+                        {mutationEnabled && (
+                            <select
+                                value={mutationAggressiveness}
+                                onChange={(e) => handleAggressivenessChange(e.target.value)}
+                                disabled={savingMutation}
+                                className="text-xs bg-white border border-violet-200 rounded px-1.5 py-0.5 text-violet-700 outline-none focus:ring-1 focus:ring-violet-400"
+                            >
+                                <option value="conservative">Conservative</option>
+                                <option value="moderate">Moderate</option>
+                                <option value="aggressive">Aggressive</option>
+                            </select>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        {deleting ? "Deleting..." : "Delete Sequence"}
+                    </button>
+                </div>
             </div>
 
             {/* Tab Bar */}
@@ -223,6 +297,7 @@ export function SequenceDetailClient({
                                                                         <span className="text-xs text-gray-400">
                                                                             {formatDelay(step)}
                                                                         </span>
+                                                                        {step.enable_ai_mutation && <MutationEnabledDot />}
                                                                     </div>
                                                                     {step.content_template && (
                                                                         <p className="text-sm text-gray-700 line-clamp-2 mt-1">
@@ -323,23 +398,44 @@ export function SequenceDetailClient({
                                                             {new Date(log.executed_at).toLocaleString()}
                                                         </td>
                                                         <td className="py-2.5 pr-4">
-                                                            <span className={`text-xs px-2 py-0.5 rounded-full ${config.color}`}>
-                                                                {config.label}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className={`text-xs px-2 py-0.5 rounded-full ${config.color}`}>
+                                                                    {config.label}
+                                                                </span>
+                                                                {log.was_mutated && log.mutation && (
+                                                                    <MutationBadge
+                                                                        originalContent={log.mutation.original_content}
+                                                                        mutatedContent={log.mutation.mutated_content}
+                                                                        mutationReason={log.mutation.mutation_reason}
+                                                                        confidence={log.mutation.confidence_score}
+                                                                        model={log.mutation.mutation_model}
+                                                                    />
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="py-2.5 pr-4">
-                                                            <span
-                                                                className={`text-xs px-2 py-0.5 rounded-full ${log.status === "delivered" || log.status === "success"
-                                                                    ? "bg-green-100 text-green-700"
-                                                                    : log.status === "failed"
-                                                                        ? "bg-red-100 text-red-700"
-                                                                        : log.status === "pending"
-                                                                            ? "bg-yellow-100 text-yellow-700"
-                                                                            : "bg-gray-100 text-gray-600"
-                                                                    }`}
-                                                            >
-                                                                {log.status}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span
+                                                                    className={`text-xs px-2 py-0.5 rounded-full ${log.status === "delivered" || log.status === "success"
+                                                                        ? "bg-green-100 text-green-700"
+                                                                        : log.status === "failed"
+                                                                            ? "bg-red-100 text-red-700"
+                                                                            : log.status === "pending"
+                                                                                ? "bg-yellow-100 text-yellow-700"
+                                                                                : "bg-gray-100 text-gray-600"
+                                                                        }`}
+                                                                >
+                                                                    {log.status}
+                                                                </span>
+                                                                {log.was_healed && log.healing && (
+                                                                    <HealingBadge
+                                                                        failureType={log.healing.failure_type}
+                                                                        healingAction={log.healing.healing_action}
+                                                                        healingDetails={log.healing.healing_details}
+                                                                        failureDetails={log.healing.failure_details}
+                                                                    />
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="py-2.5 pr-4 text-xs">
                                                             {log.enrollment_id?.substring(0, 8)}...

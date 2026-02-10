@@ -14,6 +14,7 @@ import {
     AlertCircle,
     Pause,
     XCircle,
+    Brain,
 } from "lucide-react";
 import { SequenceDetailClient } from "@/components/sequences/sequence-detail-client";
 
@@ -85,14 +86,23 @@ export default async function SequenceDetailPage({
 
     return (
         <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
-            {/* Back Link */}
-            <Link
-                href={`/client/${clientId}/sequences`}
-                className="inline-flex items-center text-sm text-gray-500 hover:text-gray-900 transition-colors"
-            >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Sequences
-            </Link>
+            {/* Navigation */}
+            <div className="flex items-center justify-between">
+                <Link
+                    href={`/client/${clientId}/sequences`}
+                    className="inline-flex items-center text-sm text-gray-500 hover:text-gray-900 transition-colors"
+                >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Sequences
+                </Link>
+                <Link
+                    href={`/client/${clientId}/sequences/${sequenceId}/learning`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg border border-violet-200 transition-colors"
+                >
+                    <Brain className="w-4 h-4" />
+                    Learning Dashboard
+                </Link>
+            </div>
 
             {/* Sequence Header */}
             <div className="bg-white rounded-xl border shadow-sm p-6">

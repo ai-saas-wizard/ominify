@@ -16,6 +16,31 @@
 import 'dotenv/config';
 import { supabase } from '../lib/db.js';
 import { smsQueue, emailQueue, vapiQueue } from '../lib/redis.js';
+import {
+    getConversationContext,
+    buildTemplateVariables,
+    buildVoiceAgentContext,
+} from '../lib/conversation-memory.js';
+import {
+    buildVoiceAgentToneDirective,
+    getToneTemplateVariables,
+    getEmotionBasedDelayMultiplier,
+} from '../lib/tone-adapter.js';
+import {
+    shouldMutate,
+    mutateStepContent,
+    recordMutation,
+    MIN_CONFIDENCE,
+} from '../lib/sequence-mutator.js';
+import {
+    getChannelOverride,
+    checkContactValidity,
+    handleFailure,
+} from '../lib/self-healer.js';
+import {
+    selectVariant,
+    recordVariantSent,
+} from '../lib/outcome-learning.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -26,6 +51,11 @@ import type {
     EmailContent,
     VoiceContent,
     UrgencyTier,
+    ConversationContext,
+    SentimentTrend,
+    PrimaryEmotion,
+    RecommendedTone,
+    ChannelType,
 } from '../lib/types.js';
 import { format, addSeconds, isWithinInterval, setHours, setMinutes } from 'date-fns';
 import { utcToZonedTime } from 'date-fns-tz';
@@ -256,6 +286,22 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 
     console.log(`[SCHEDULER] Processing enrollment ${enrollment.id}, step ${step.step_order} (${step.channel})`);
 
+    // 0. Check if enrollment needs human intervention (EI flag)
+    const enrollmentEI = enrollment as SequenceEnrollment & {
+        needs_human_intervention?: boolean;
+        sentiment_trend?: SentimentTrend;
+        last_emotion?: PrimaryEmotion;
+        recommended_tone?: RecommendedTone;
+        is_hot_lead?: boolean;
+        is_at_risk?: boolean;
+        engagement_score?: number;
+    };
+
+    if (enrollmentEI.needs_human_intervention) {
+        console.log(`[SCHEDULER] Enrollment ${enrollment.id} needs human intervention — skipping step`);
+        return; // Don't advance, don't reschedule — wait for human to take over
+    }
+
     // 1. Check skip conditions
     if (shouldSkipStep(enrollment, step.skip_conditions)) {
         console.log(`[SCHEDULER] Skipping step ${step.step_order} - conditions met`);
@@ -283,21 +329,125 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
-    // 4. Render template with variables
+    // 4. Load conversation context for cross-channel awareness
+    let conversationCtx: ConversationContext | null = null;
+    try {
+        conversationCtx = await getConversationContext(contact.id, enrollment.id);
+    } catch (err) {
+        console.log(`[SCHEDULER] Could not load conversation context, proceeding without it`);
+    }
+
+    // 5. Build template variables (contact core + custom_fields + enrollment vars + conversation memory + tone)
+    const conversationVars = conversationCtx ? buildTemplateVariables(conversationCtx) : {};
+
+    // Build tone/emotional state variables from enrollment EI data
+    const toneVars = getToneTemplateVariables({
+        recommendedTone: enrollmentEI.recommended_tone || 'professional',
+        sentimentTrend: enrollmentEI.sentiment_trend || 'stable',
+        lastEmotion: enrollmentEI.last_emotion || null,
+        isHotLead: enrollmentEI.is_hot_lead || false,
+        isAtRisk: enrollmentEI.is_at_risk || false,
+        engagementScore: enrollmentEI.engagement_score || 50,
+    });
+
     const variables = {
+        // Contact core fields
         first_name: contact.first_name || contact.name?.split(' ')[0] || '',
         last_name: contact.last_name || contact.name?.split(' ').slice(1).join(' ') || '',
         name: contact.name || '',
         phone: contact.phone,
         email: contact.email || '',
         company: contact.company || '',
+        // Persistent contact custom fields (from manual entry / settings)
+        ...(contact.custom_fields || {}),
+        // Per-enrollment custom variables (from CSV / webhook — overrides contact fields)
         ...enrollment.custom_variables,
+        // Conversation memory variables (cross-channel context)
+        ...conversationVars,
+        // Emotional intelligence / tone variables
+        ...toneVars,
     };
 
-    const renderedContent = renderTemplate(step.content, variables);
+    // 5b. A/B Variant Selection — check if step has active variants
+    let selectedVariantId: string | null = null;
+    let contentToRender = step.content;
 
-    // 5. Dispatch to channel queue
-    switch (step.channel) {
+    try {
+        const variant = await selectVariant(step.id);
+        if (variant) {
+            contentToRender = variant.content;
+            selectedVariantId = variant.variantId;
+            await recordVariantSent(variant.variantId);
+            console.log(`[SCHEDULER] A/B variant selected: ${variant.variantId} for step ${step.step_order}`);
+        }
+    } catch (err) {
+        console.log('[SCHEDULER] Variant selection failed, using original content:', err);
+    }
+
+    let renderedContent = renderTemplate(contentToRender, variables);
+
+    // 6. Adaptive Mutation — AI-rewrite step content based on conversation context
+    let wasMutated = false;
+    if (shouldMutate(step, sequence, enrollment, conversationCtx)) {
+        try {
+            const mutation = await mutateStepContent(
+                step,
+                conversationCtx!,
+                tenantProfile,
+                sequence.mutation_aggressiveness || 'moderate'
+            );
+
+            if (mutation.confidence >= MIN_CONFIDENCE) {
+                // Re-render the mutated content with variables (mutation may include {{placeholders}})
+                renderedContent = renderTemplate(mutation.content, variables);
+                wasMutated = true;
+
+                // Record the mutation for audit trail + analytics
+                await recordMutation(
+                    enrollment.id,
+                    step.id,
+                    enrollment.tenant_id,
+                    step.content,
+                    mutation,
+                    sequence.mutation_aggressiveness || 'moderate'
+                );
+
+                console.log(`[SCHEDULER] Step mutated (confidence=${mutation.confidence.toFixed(2)}): ${mutation.reason}`);
+            } else {
+                console.log(`[SCHEDULER] Mutation confidence too low (${mutation.confidence.toFixed(2)}), using original template`);
+            }
+        } catch (err) {
+            console.log('[SCHEDULER] Mutation failed, using original template:', err);
+        }
+    }
+
+    // 7. Self-Healing: Check channel overrides and contact validity before dispatch
+    let dispatchChannel: ChannelType = step.channel;
+
+    // Check if this enrollment has a channel override (e.g., SMS → email because phone is landline)
+    const override = getChannelOverride(enrollment, step.channel);
+    if (override) {
+        console.log(`[SCHEDULER] Channel override: ${step.channel} → ${override} for enrollment ${enrollment.id}`);
+        dispatchChannel = override;
+    }
+
+    // Check contact validity for the dispatch channel
+    const validity = checkContactValidity(contact, dispatchChannel);
+    if (!validity.valid) {
+        console.log(`[SCHEDULER] Contact invalid for ${dispatchChannel}: ${validity.reason}`);
+        // Trigger self-healing which will find an alternative
+        if (validity.failureType) {
+            await handleFailure(enrollment.id, step.id, validity.failureType, {
+                reason: validity.reason,
+            });
+        } else {
+            await advanceToNextStep(enrollment, sequence.id);
+        }
+        return;
+    }
+
+    // 8. Dispatch to channel queue
+    switch (dispatchChannel) {
         case 'sms':
             await smsQueue.add('sms:send', {
                 tenantId: enrollment.tenant_id,
@@ -328,11 +478,29 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             console.log(`[SCHEDULER] Dispatched email for enrollment ${enrollment.id}`);
             break;
 
-        case 'voice':
+        case 'voice': {
+            // Inject conversation history into voice agent's system prompt
+            const voiceContent = renderedContent as VoiceContent;
+            if (conversationCtx && conversationCtx.interaction_count.total > 0) {
+                const agentContext = buildVoiceAgentContext(conversationCtx);
+                voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${agentContext}`;
+            }
+
+            // Inject tone directive from EI layer
+            const toneDirective = buildVoiceAgentToneDirective({
+                recommendedTone: enrollmentEI.recommended_tone || 'professional',
+                sentimentTrend: enrollmentEI.sentiment_trend || 'stable',
+                lastEmotion: enrollmentEI.last_emotion || null,
+                isHotLead: enrollmentEI.is_hot_lead || false,
+                isAtRisk: enrollmentEI.is_at_risk || false,
+                needsHuman: enrollmentEI.needs_human_intervention || false,
+            });
+            voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${toneDirective}`;
+
             await vapiQueue.add('vapi:call', {
                 tenantId: enrollment.tenant_id,
                 contactPhone: contact.phone,
-                assistantConfig: renderedContent as VoiceContent,
+                assistantConfig: voiceContent,
                 enrollmentId: enrollment.id,
                 stepId: step.id,
                 urgencyPriority: getCallPriority(sequence.urgency_tier),
@@ -341,18 +509,42 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             });
             console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}`);
             break;
+        }
     }
 
-    // 6. Advance enrollment state
-    await advanceToNextStep(enrollment, sequence.id);
+    // 9. Track variant_id in execution log if A/B test variant was used
+    if (selectedVariantId) {
+        // Update the latest execution log entry for this step with variant_id
+        await supabase
+            .from('sequence_execution_log')
+            .update({ variant_id: selectedVariantId })
+            .eq('enrollment_id', enrollment.id)
+            .eq('step_id', step.id)
+            .is('variant_id', null);
+    }
+
+    // 10. Advance enrollment state (with emotion-aware delay adjustment)
+    await advanceToNextStep(enrollment, sequence.id, {
+        sentimentTrend: enrollmentEI.sentiment_trend || 'stable',
+        isHotLead: enrollmentEI.is_hot_lead || false,
+        isAtRisk: enrollmentEI.is_at_risk || false,
+        lastEmotion: enrollmentEI.last_emotion || null,
+    });
 }
 
 /**
  * Advance enrollment to next step
+ * Now supports emotion-based delay adjustment from EI layer
  */
 async function advanceToNextStep(
     enrollment: SequenceEnrollment,
-    sequenceId: string
+    sequenceId: string,
+    emotionalState?: {
+        sentimentTrend: SentimentTrend;
+        isHotLead: boolean;
+        isAtRisk: boolean;
+        lastEmotion: PrimaryEmotion | null;
+    }
 ): Promise<void> {
     // Get next step
     const { data: nextStep } = await supabase
@@ -376,8 +568,25 @@ async function advanceToNextStep(
         return;
     }
 
-    // Calculate next step time
-    const nextStepAt = addSeconds(new Date(), nextStep.delay_seconds);
+    // Calculate next step time with emotion-based delay adjustment
+    let adjustedDelaySeconds = nextStep.delay_seconds;
+
+    if (emotionalState) {
+        const multiplier = getEmotionBasedDelayMultiplier({
+            sentimentTrend: emotionalState.sentimentTrend,
+            isHotLead: emotionalState.isHotLead,
+            isAtRisk: emotionalState.isAtRisk,
+            lastEmotion: emotionalState.lastEmotion,
+        });
+
+        if (multiplier !== 1.0) {
+            const originalDelay = nextStep.delay_seconds;
+            adjustedDelaySeconds = Math.round(originalDelay * multiplier);
+            console.log(`[SCHEDULER] EI delay adjustment: ${originalDelay}s → ${adjustedDelaySeconds}s (x${multiplier}, trend=${emotionalState.sentimentTrend})`);
+        }
+    }
+
+    const nextStepAt = addSeconds(new Date(), adjustedDelaySeconds);
 
     await supabase
         .from('sequence_enrollments')

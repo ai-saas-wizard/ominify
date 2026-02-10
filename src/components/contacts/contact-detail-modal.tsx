@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Phone, Mail, User, Calendar, MessageSquare, Clock, Save, Plus, Loader2 } from "lucide-react";
+import { X, Phone, Mail, User, Calendar, MessageSquare, Clock, Save, Plus, Loader2, Activity, Brain } from "lucide-react";
+import { InteractionTimeline } from "./interaction-timeline";
+import { EngagementMeter } from "./engagement-meter";
+import { EmotionBadge } from "./emotion-badge";
 
 interface Contact {
     id: string;
@@ -13,6 +16,9 @@ interface Contact {
     last_call_at: string | null;
     custom_fields: Record<string, any>;
     created_at: string;
+    // Phase 2: Emotional Intelligence
+    engagement_score?: number;
+    sentiment_trend?: string;
     calls?: Array<{
         id: string;
         summary: string | null;
@@ -20,6 +26,15 @@ interface Contact {
         duration_seconds: number;
         called_at: string;
     }>;
+    // Active enrollments with EI data
+    active_enrollment?: {
+        last_emotion?: string;
+        is_hot_lead?: boolean;
+        is_at_risk?: boolean;
+        needs_human_intervention?: boolean;
+        recommended_tone?: string;
+        objections_detected?: Array<{ type: string; detail: string; severity: string }>;
+    };
 }
 
 interface CustomField {
@@ -225,13 +240,89 @@ export function ContactDetailModal({
                         <div>
                             <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2 mb-2">
                                 <MessageSquare className="w-4 h-4" />
-                                Conversation History
+                                AI Summary
                             </h4>
                             <div className="bg-indigo-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line">
                                 {fullContact.conversation_summary}
                             </div>
                         </div>
                     )}
+
+                    {/* Emotional Intelligence Panel */}
+                    {(fullContact.engagement_score !== undefined || fullContact.active_enrollment) && (
+                        <div>
+                            <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2 mb-3">
+                                <Brain className="w-4 h-4" />
+                                Emotional Intelligence
+                            </h4>
+                            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                                {/* Engagement Score */}
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs text-gray-500 font-medium">Engagement</span>
+                                    <EngagementMeter
+                                        score={fullContact.engagement_score || 50}
+                                        sentimentTrend={fullContact.sentiment_trend}
+                                        size="sm"
+                                    />
+                                </div>
+
+                                {/* Emotion & Intent Badges */}
+                                {fullContact.active_enrollment && (
+                                    <div className="space-y-2">
+                                        <EmotionBadge
+                                            emotion={fullContact.active_enrollment.last_emotion}
+                                            isHotLead={fullContact.active_enrollment.is_hot_lead}
+                                            isAtRisk={fullContact.active_enrollment.is_at_risk}
+                                            needsHuman={fullContact.active_enrollment.needs_human_intervention}
+                                            size="sm"
+                                        />
+
+                                        {/* Objections */}
+                                        {fullContact.active_enrollment.objections_detected &&
+                                            fullContact.active_enrollment.objections_detected.length > 0 && (
+                                            <div>
+                                                <span className="text-[10px] text-gray-400 uppercase font-medium">Objections</span>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {fullContact.active_enrollment.objections_detected.map((obj, i) => (
+                                                        <span
+                                                            key={i}
+                                                            className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                                                obj.severity === 'strong' ? 'bg-red-100 text-red-600' :
+                                                                obj.severity === 'moderate' ? 'bg-orange-100 text-orange-600' :
+                                                                'bg-yellow-100 text-yellow-600'
+                                                            }`}
+                                                            title={obj.detail}
+                                                        >
+                                                            {obj.type}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Recommended Tone */}
+                                        {fullContact.active_enrollment.recommended_tone && (
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] text-gray-400 uppercase font-medium">Tone</span>
+                                                <span className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded capitalize">
+                                                    {fullContact.active_enrollment.recommended_tone}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Cross-Channel Interaction Timeline */}
+                    <div>
+                        <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2 mb-3">
+                            <Activity className="w-4 h-4" />
+                            Interaction Timeline
+                        </h4>
+                        <InteractionTimeline contactId={fullContact.id} />
+                    </div>
 
                     {/* Call History */}
                     {fullContact.calls && fullContact.calls.length > 0 && (

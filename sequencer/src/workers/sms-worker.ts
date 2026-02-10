@@ -11,7 +11,9 @@ import { Worker, Job } from 'bullmq';
 import { supabase } from '../lib/db.js';
 import { redisConnection } from '../lib/redis.js';
 import { decrypt } from '../lib/encryption.js';
-import type { SmsJobPayload, TenantTwilioAccount } from '../lib/types.js';
+import { recordInteraction } from '../lib/conversation-memory.js';
+import { handleFailure } from '../lib/self-healer.js';
+import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 
@@ -119,6 +121,124 @@ async function updateEnrollmentSmsCount(enrollmentId: string): Promise<void> {
 }
 
 /**
+ * Phase 4: Detect phone type via Twilio Lookup API and cache it.
+ * Only runs once per contact (checks if phone_type is already set).
+ * If landline is detected, triggers self-healing.
+ */
+async function detectAndCachePhoneType(
+    twilioClient: any,
+    phone: string,
+    enrollmentId: string,
+    tenantId: string,
+): Promise<PhoneType> {
+    try {
+        // Check if we already have phone_type cached for this contact
+        const { data: enrollment } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (!enrollment) return 'unknown';
+
+        const { data: contact } = await supabase
+            .from('contacts')
+            .select('phone_type')
+            .eq('id', enrollment.contact_id)
+            .single();
+
+        // Already detected — skip lookup
+        if (contact?.phone_type && contact.phone_type !== 'unknown') {
+            if (contact.phone_type === 'landline') {
+                // Trigger self-healing for landline (switch channel)
+                const { data: step } = await supabase
+                    .from('sequence_enrollments')
+                    .select('current_step_order, sequence_id')
+                    .eq('id', enrollmentId)
+                    .single();
+
+                if (step) {
+                    const { data: currentStep } = await supabase
+                        .from('sequence_steps')
+                        .select('id')
+                        .eq('sequence_id', step.sequence_id)
+                        .eq('step_order', step.current_step_order)
+                        .single();
+
+                    if (currentStep) {
+                        await handleFailure(enrollmentId, currentStep.id, 'landline_detected', {
+                            phone_type: 'landline',
+                        });
+                    }
+                }
+
+                throw new Error('LANDLINE_DETECTED'); // Stop SMS processing
+            }
+            return contact.phone_type as PhoneType;
+        }
+
+        // Perform Twilio Lookup
+        let phoneType: PhoneType = 'unknown';
+        try {
+            const lookup = await twilioClient.lookups.v2.phoneNumbers(phone).fetch({
+                fields: 'line_type_intelligence',
+            });
+
+            const lineType = lookup?.lineTypeIntelligence?.type;
+            if (lineType === 'landline' || lineType === 'fixedVoip') {
+                phoneType = 'landline';
+            } else if (lineType === 'mobile') {
+                phoneType = 'mobile';
+            } else if (lineType === 'voip' || lineType === 'nonFixedVoip') {
+                phoneType = 'voip';
+            }
+
+            console.log(`[SMS] Phone type lookup for ${phone}: ${lineType} → ${phoneType}`);
+        } catch (lookupErr) {
+            console.log(`[SMS] Phone type lookup failed for ${phone}, continuing as unknown`);
+        }
+
+        // Cache the result on the contact
+        await supabase
+            .from('contacts')
+            .update({ phone_type: phoneType })
+            .eq('id', enrollment.contact_id);
+
+        // If landline detected, trigger healing and abort SMS
+        if (phoneType === 'landline') {
+            const { data: step } = await supabase
+                .from('sequence_enrollments')
+                .select('current_step_order, sequence_id')
+                .eq('id', enrollmentId)
+                .single();
+
+            if (step) {
+                const { data: currentStep } = await supabase
+                    .from('sequence_steps')
+                    .select('id')
+                    .eq('sequence_id', step.sequence_id)
+                    .eq('step_order', step.current_step_order)
+                    .single();
+
+                if (currentStep) {
+                    await handleFailure(enrollmentId, currentStep.id, 'landline_detected', {
+                        phone_type: 'landline',
+                    });
+                }
+            }
+
+            throw new Error('LANDLINE_DETECTED');
+        }
+
+        return phoneType;
+    } catch (err: any) {
+        if (err.message === 'LANDLINE_DETECTED') throw err;
+        console.log('[SMS] Phone type detection error (non-blocking):', err);
+        return 'unknown';
+    }
+}
+
+/**
  * SMS Worker processor
  */
 async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; status: string }> {
@@ -141,6 +261,9 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
 
     // Create Twilio client with subaccount credentials
     const client = Twilio(config.subaccountSid, config.authToken);
+
+    // Phase 4: Phone type detection — check if the number is a landline on first SMS
+    await detectAndCachePhoneType(client, contactPhone, enrollmentId, tenantId);
 
     // Prepare message options
     const messageOptions: any = {
@@ -178,6 +301,27 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         },
         smsStatus: message.status,
     });
+
+    // Record interaction for conversation memory
+    const { data: enrollment } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollment) {
+        await recordInteraction({
+            clientId: enrollment.tenant_id,
+            contactId: enrollment.contact_id,
+            enrollmentId,
+            stepId,
+            channel: 'sms',
+            direction: 'outbound',
+            contentBody: body,
+            outcome: 'delivered',
+            providerId: message.sid,
+        });
+    }
 
     return { sid: message.sid, status: message.status };
 }

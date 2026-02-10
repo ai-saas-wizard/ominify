@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, MessageSquare, Mail, Phone, Clock, GitBranch } from "lucide-react";
-import { addSequenceStep, updateSequenceStep } from "@/app/actions/sequence-actions";
+import { Loader2, MessageSquare, Mail, Phone, Clock, GitBranch, Sparkles } from "lucide-react";
+import { addSequenceStep, updateSequenceStep, updateStepMutationSettings } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 
 const CHANNEL_OPTIONS = [
@@ -41,6 +41,9 @@ interface ExistingStep {
     skip_conditions: any;
     on_success: any;
     on_failure: any;
+    // Phase 3: Adaptive Mutation
+    enable_ai_mutation?: boolean;
+    mutation_instructions?: string | null;
 }
 
 export function SequenceStepEditor({
@@ -56,6 +59,7 @@ export function SequenceStepEditor({
 }) {
     const [loading, setLoading] = useState(false);
     const [channel, setChannel] = useState(existingStep?.channel || "sms");
+    const [aiMutationEnabled, setAiMutationEnabled] = useState(existingStep?.enable_ai_mutation || false);
     const router = useRouter();
 
     const isEditing = !!existingStep;
@@ -80,6 +84,20 @@ export function SequenceStepEditor({
         setLoading(false);
 
         if (res.success) {
+            // If editing and mutation settings changed, save them separately
+            if (isEditing && existingStep) {
+                const mutationInstructions = formData.get("mutation_instructions") as string;
+                const enableMutation = formData.get("enable_ai_mutation") === "true";
+                if (
+                    enableMutation !== existingStep.enable_ai_mutation ||
+                    mutationInstructions !== (existingStep.mutation_instructions || "")
+                ) {
+                    await updateStepMutationSettings(existingStep.id, {
+                        enable_ai_mutation: enableMutation,
+                        mutation_instructions: mutationInstructions || null,
+                    });
+                }
+            }
             onSaved();
             onClose();
             router.refresh();
@@ -200,6 +218,53 @@ export function SequenceStepEditor({
                             className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm resize-none"
                         />
                     </div>
+
+                    {/* ─── AI Mutation (Phase 3) ─── */}
+                    {(channel === "sms" || channel === "email" || channel === "voice") && (
+                        <div className="space-y-3 p-4 rounded-lg border border-dashed border-violet-200 bg-violet-50/30">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-violet-500" />
+                                    <label className="text-sm font-medium text-gray-700">
+                                        AI Adaptive Mutation
+                                    </label>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setAiMutationEnabled(!aiMutationEnabled)}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                        aiMutationEnabled ? "bg-violet-600" : "bg-gray-300"
+                                    }`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                            aiMutationEnabled ? "translate-x-6" : "translate-x-1"
+                                        }`}
+                                    />
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500">
+                                When enabled, AI will dynamically rewrite this step&apos;s content based on the contact&apos;s
+                                conversation history, emotional state, and objections before sending.
+                            </p>
+                            {aiMutationEnabled && (
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-gray-600">
+                                        Mutation Instructions{" "}
+                                        <span className="text-gray-400 font-normal">(optional)</span>
+                                    </label>
+                                    <textarea
+                                        name="mutation_instructions"
+                                        rows={2}
+                                        defaultValue={existingStep?.mutation_instructions || ""}
+                                        placeholder='e.g., "Always address pricing if it was mentioned" or "Keep the discount offer but personalize the opening"'
+                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+                                    />
+                                </div>
+                            )}
+                            <input type="hidden" name="enable_ai_mutation" value={aiMutationEnabled ? "true" : "false"} />
+                        </div>
+                    )}
 
                     {/* On Success / On Failure */}
                     <div className="grid grid-cols-2 gap-4">

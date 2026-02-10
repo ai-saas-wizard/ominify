@@ -25,6 +25,7 @@ import {
 import { UserButton } from "@clerk/nextjs";
 import { MinuteBalanceDisplay } from "./minute-balance-display";
 import { WorkspaceDisplay } from "./workspace-display";
+import { NotificationCenter } from "./notification-center";
 
 const baseRoutes = [
     {
@@ -101,8 +102,13 @@ export const Sidebar = () => {
 
     return (
         <div className="flex flex-col h-full bg-white border-r border-gray-200">
-            {/* Workspace Display */}
-            <WorkspaceDisplay clientId={clientId} />
+            {/* Workspace Display + Notifications */}
+            <div className="flex items-center justify-between pr-2">
+                <div className="flex-1 min-w-0">
+                    <WorkspaceDisplay clientId={clientId} />
+                </div>
+                <NotificationCenter clientId={clientId} />
+            </div>
 
             <div className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5 scrollbar-thin scrollbar-thumb-gray-200">
                 {routes.map((route) => {

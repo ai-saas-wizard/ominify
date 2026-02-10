@@ -12,6 +12,7 @@
         "email-worker": "tsx src/workers/email-worker.ts",
         "vapi-worker": "tsx src/workers/vapi-worker.ts",
         "event-processor": "tsx src/workers/event-processor.ts",
+        "analytics-worker": "tsx src/workers/analytics-worker.ts",
         "webhook-server": "tsx src/server/webhook-server.ts"
     },
     "dependencies": {

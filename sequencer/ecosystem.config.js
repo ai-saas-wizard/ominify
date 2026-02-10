@@ -53,6 +53,15 @@ module.exports = {
             env_production: {
                 NODE_ENV: 'production'
             }
+        },
+        {
+            name: 'analytics-worker',
+            script: './dist/workers/analytics-worker.js',
+            instances: 1,
+            max_memory_restart: '500M',
+            env_production: {
+                NODE_ENV: 'production'
+            }
         }
     ]
 };
