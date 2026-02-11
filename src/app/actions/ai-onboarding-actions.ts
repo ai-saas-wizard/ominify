@@ -137,7 +137,7 @@ const RESPONSE_SCHEMA = {
 
 /**
  * Analyzes a business website using OpenAI's Responses API with web search.
- * GPT-5.3 will search the web itself to find and analyze the business website,
+ * GPT-4o will search the web itself to find and analyze the business website,
  * bypassing 403/bot-blocking issues that affect server-side scraping.
  */
 export async function analyzeBusinessWebsite(websiteUrl: string): Promise<AIAnalysisResult> {
@@ -158,12 +158,13 @@ export async function analyzeBusinessWebsite(websiteUrl: string): Promise<AIAnal
         });
 
         const response = await openai.responses.create({
-            model: "gpt-5.3",
+            model: "gpt-4o",
             instructions: ANALYSIS_INSTRUCTIONS,
             input: `Search and analyze this business website, then extract all profile information: ${websiteUrl}`,
             tools: [
                 {
                     type: "web_search" as const,
+                    search_context_size: "high" as const,
                 },
             ],
             text: {
@@ -203,7 +204,7 @@ export async function analyzeBusinessWebsite(websiteUrl: string): Promise<AIAnal
             success: false,
             profile: null,
             fieldMeta: {},
-            error: "AI analysis failed. You can continue filling in the fields manually.",
+            error: `AI analysis failed: ${errorMessage.slice(0, 120)}`,
         };
     }
 }
