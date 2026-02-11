@@ -260,7 +260,7 @@ export function OnboardingV2Wizard({
 
     // ─── RENDER ───
     return (
-        <div className="fixed inset-0 z-50 bg-gray-50">
+        <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gray-50">
             <AnimatePresence mode="wait">
                 {phase === "url_input" && (
                     <motion.div
