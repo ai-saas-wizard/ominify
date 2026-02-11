@@ -22,27 +22,27 @@ export const CATEGORY_CONFIG: Record<
 > = {
     inbound: {
         label: "Inbound",
-        color: "text-emerald-400",
-        bgColor: "bg-emerald-400/10",
-        borderColor: "border-emerald-400/20",
+        color: "text-emerald-600",
+        bgColor: "bg-emerald-50",
+        borderColor: "border-emerald-200",
     },
     outbound_follow_up: {
         label: "Follow-Up",
-        color: "text-blue-400",
-        bgColor: "bg-blue-400/10",
-        borderColor: "border-blue-400/20",
+        color: "text-blue-600",
+        bgColor: "bg-blue-50",
+        borderColor: "border-blue-200",
     },
     outbound_marketing: {
         label: "Marketing",
-        color: "text-orange-400",
-        bgColor: "bg-orange-400/10",
-        borderColor: "border-orange-400/20",
+        color: "text-orange-600",
+        bgColor: "bg-orange-50",
+        borderColor: "border-orange-200",
     },
     outbound_retention: {
         label: "Retention",
-        color: "text-purple-400",
-        bgColor: "bg-purple-400/10",
-        borderColor: "border-purple-400/20",
+        color: "text-purple-600",
+        bgColor: "bg-purple-50",
+        borderColor: "border-purple-200",
     },
 };
 
@@ -51,21 +51,21 @@ export const CATEGORY_CONFIG: Record<
 export const CONFIDENCE_CONFIG = {
     highly_recommended: {
         label: "Highly Recommended",
-        color: "text-emerald-400",
-        bgColor: "bg-emerald-400/10",
-        borderColor: "border-emerald-400/30",
+        color: "text-emerald-600",
+        bgColor: "bg-emerald-50",
+        borderColor: "border-emerald-200",
     },
     recommended: {
         label: "Recommended",
-        color: "text-blue-400",
-        bgColor: "bg-blue-400/10",
-        borderColor: "border-blue-400/30",
+        color: "text-blue-600",
+        bgColor: "bg-blue-50",
+        borderColor: "border-blue-200",
     },
     optional: {
         label: "Optional",
-        color: "text-zinc-400",
-        bgColor: "bg-zinc-400/10",
-        borderColor: "border-zinc-400/30",
+        color: "text-gray-500",
+        bgColor: "bg-gray-50",
+        borderColor: "border-gray-200",
     },
 };
 

@@ -218,3 +218,101 @@ export async function createAgentSequence(
 
     return { success: true, sequenceId: sequence.id };
 }
+
+// ═══════════════════════════════════════════════════════════
+// V2 DYNAMIC SEQUENCE CREATION
+// Creates a sequence from GPT-generated structure instead
+// of hardcoded catalog templates.
+// ═══════════════════════════════════════════════════════════
+
+export async function createAgentSequenceFromDynamic(
+    clientId: string,
+    agentId: string,
+    vapiAssistantId: string,
+    sequenceStructure: {
+        steps: Array<{
+            step_order: number;
+            channel: string;
+            delay_minutes: number;
+            content_purpose: string;
+        }>;
+    },
+    businessName: string,
+    profile: TenantProfileData
+): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
+    if (!sequenceStructure?.steps || sequenceStructure.steps.length === 0) {
+        return { success: true };
+    }
+
+    // 1. Create the sequence
+    const { data: sequence, error: seqError } = await supabase
+        .from("sequences")
+        .insert({
+            client_id: clientId,
+            agent_id: agentId,
+            name: `${businessName} - Auto Sequence`,
+            description: "AI-generated outbound sequence",
+            trigger_type: "manual",
+            urgency_tier: "medium",
+            respect_business_hours: true,
+            ai_generated: true,
+            auto_created: true,
+            is_active: true,
+        })
+        .select("id")
+        .single();
+
+    if (seqError || !sequence) {
+        console.error("[AUTO-SEQUENCE V2] Error creating sequence:", seqError);
+        return { success: false, error: seqError?.message || "Failed to create sequence" };
+    }
+
+    // 2. Generate content and create steps
+    const stepPromises = sequenceStructure.steps.map(async (step) => {
+        try {
+            const stepTemplate: SequenceStepTemplate = {
+                step_order: step.step_order,
+                channel: step.channel as "sms" | "email" | "voice",
+                delay_minutes: step.delay_minutes,
+                delay_type: "after_previous",
+                content_purpose: step.content_purpose,
+                enable_ai_mutation: true,
+                skip_conditions: null,
+                on_success: { action: "continue" },
+                on_failure: { action: "skip" },
+            };
+
+            const contentTemplate = await generateStepContent(
+                businessName,
+                profile,
+                stepTemplate,
+                step.channel === "voice" ? vapiAssistantId : undefined
+            );
+
+            return supabase.from("sequence_steps").insert({
+                sequence_id: sequence.id,
+                step_order: step.step_order,
+                channel: step.channel,
+                delay_minutes: step.delay_minutes,
+                delay_type: "after_previous",
+                content: contentTemplate,
+                enable_ai_mutation: true,
+                skip_conditions: null,
+                on_success: { action: "continue" },
+                on_failure: { action: "skip" },
+                is_active: true,
+            });
+        } catch (err) {
+            console.error(`[AUTO-SEQUENCE V2] Error creating step ${step.step_order}:`, err);
+            return null;
+        }
+    });
+
+    await Promise.allSettled(stepPromises);
+
+    console.log(
+        `[AUTO-SEQUENCE V2] Created dynamic sequence with ${sequenceStructure.steps.length} steps`
+    );
+
+    return { success: true, sequenceId: sequence.id };
+}

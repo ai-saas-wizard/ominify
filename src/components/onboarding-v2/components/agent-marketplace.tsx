@@ -47,31 +47,31 @@ export function AgentMarketplace({
         .join(" ");
 
     return (
-        <div className="flex min-h-screen flex-col bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950">
+        <div className="flex min-h-screen flex-col bg-gray-50">
             {/* Header */}
-            <div className="border-b border-zinc-800 px-4 py-5 sm:px-6">
+            <div className="border-b border-gray-200 bg-white px-4 py-5 sm:px-6">
                 <div className="mx-auto flex max-w-5xl items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className="text-xl font-bold text-white sm:text-2xl">
+                            <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">
                                 {businessName || "Your Business"}
                             </h1>
                             {industry && (
                                 <Badge
                                     variant="outline"
-                                    className="border-zinc-700 text-zinc-400"
+                                    className="border-gray-200 text-gray-500"
                                 >
                                     {industryLabel}
                                 </Badge>
                             )}
                         </div>
-                        <p className="mt-1 text-sm text-zinc-400">
+                        <p className="mt-1 text-sm text-gray-500">
                             Your AI Agent Fleet — {enabledCount} agent{enabledCount !== 1 ? "s" : ""} selected
                         </p>
                     </div>
                     <button
                         onClick={onEditProfile}
-                        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+                        className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
                     >
                         <Pencil className="h-3.5 w-3.5" />
                         Edit profile
@@ -82,7 +82,7 @@ export function AgentMarketplace({
             {/* Agent grid */}
             <div className="flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6">
                 <div className="mx-auto max-w-5xl">
-                    <p className="mb-5 text-sm text-zinc-500">
+                    <p className="mb-5 text-sm text-gray-400">
                         Based on our analysis, here are the agents we recommend.
                         Toggle them on or off, or chat with us to customize.
                     </p>
@@ -118,13 +118,13 @@ export function AgentMarketplace({
             </div>
 
             {/* Fixed bottom bar */}
-            <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-800 bg-zinc-950/90 px-4 py-4 backdrop-blur-lg sm:px-6">
+            <div className="fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white/90 px-4 py-4 backdrop-blur-lg sm:px-6">
                 <div className="mx-auto flex max-w-5xl items-center justify-between">
-                    <div className="text-sm text-zinc-400">
-                        <span className="font-medium text-white">{enabledCount}</span> agent{enabledCount !== 1 ? "s" : ""}
+                    <div className="text-sm text-gray-500">
+                        <span className="font-medium text-gray-900">{enabledCount}</span> agent{enabledCount !== 1 ? "s" : ""}
                         {sequenceCount > 0 && (
                             <span>
-                                {" "}&middot; <span className="font-medium text-white">{sequenceCount}</span> sequence{sequenceCount !== 1 ? "s" : ""}
+                                {" "}&middot; <span className="font-medium text-gray-900">{sequenceCount}</span> sequence{sequenceCount !== 1 ? "s" : ""}
                             </span>
                         )}
                     </div>

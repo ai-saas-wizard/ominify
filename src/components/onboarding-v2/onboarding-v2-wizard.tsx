@@ -2,15 +2,17 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { buildSuggestedAgentFromDefinition, AGENT_CATALOG } from "@/lib/agent-catalog";
 import { UrlLaunchScreen } from "./components/url-launch-screen";
 import { AnalysisTheater } from "./components/analysis-theater";
-import { AgentMarketplace } from "./components/agent-marketplace";
+import { ProfileReview } from "./components/profile-review";
+import { AgentFleet } from "./components/agent-fleet";
 import { ChatPanel } from "./components/chat-panel";
 import { DeploySequence } from "./components/deploy-sequence";
 import { DeploySuccess } from "./components/deploy-success";
 import { useAIAnalysisV2 } from "./hooks/use-ai-analysis-v2";
+import { useProfileForm } from "./hooks/use-profile-form";
 import { useAgentChat } from "./hooks/use-agent-chat";
+import { useConversationFlows } from "./hooks/use-conversation-flows";
 import { useDeployment } from "./hooks/use-deployment";
 import type {
     OnboardingV2Phase,
@@ -29,9 +31,6 @@ export function OnboardingV2Wizard({
     const [websiteUrl, setWebsiteUrl] = useState("");
     const [businessName, setBusinessName] = useState(clientName || "");
     const [industry, setIndustry] = useState("");
-    const [tenantProfile, setTenantProfile] = useState<Record<string, unknown> | null>(
-        initialProfile
-    );
     const [suggestedAgents, setSuggestedAgents] = useState<SuggestedAgent[]>([]);
 
     // ─── CHAT STATE ───
@@ -40,7 +39,9 @@ export function OnboardingV2Wizard({
 
     // ─── HOOKS ───
     const analysis = useAIAnalysisV2();
+    const profileForm = useProfileForm(initialProfile);
     const chat = useAgentChat(businessName, industry);
+    const flowsHook = useConversationFlows();
     const deployment = useDeployment(clientId);
 
     // ─── DERIVED ───
@@ -50,7 +51,7 @@ export function OnboardingV2Wizard({
     );
 
     const sequenceCount = useMemo(
-        () => enabledAgents.filter((a) => a.sequence_summary).length,
+        () => enabledAgents.filter((a) => a.direction === "outbound").length,
         [enabledAgents]
     );
 
@@ -64,13 +65,19 @@ export function OnboardingV2Wizard({
             if (result && result.success) {
                 setBusinessName(result.businessName || clientName || "");
                 setIndustry(result.industry || "");
-                setTenantProfile(result.profile);
                 setSuggestedAgents(result.agentSuggestions);
-                setPhase("marketplace");
+
+                // Apply analysis to profile form
+                profileForm.applyV2Analysis(result);
+
+                // Set website URL in profile
+                profileForm.updateField("website", url);
+
+                setPhase("profile_review");
             }
             // If failed, stay on "analyzing" phase — error UI shown by AnalysisTheater
         },
-        [analysis, clientName]
+        [analysis, clientName, profileForm]
     );
 
     // ─── PHASE 2: ANALYSIS RETRY/SKIP ───
@@ -80,21 +87,26 @@ export function OnboardingV2Wizard({
     }, [analysis]);
 
     const handleSkip = useCallback(() => {
-        // Skip to marketplace with default agents (all as optional)
-        const defaultAgents = AGENT_CATALOG.map((def) =>
-            buildSuggestedAgentFromDefinition(
-                def,
-                def.type_id === "inbound_receptionist" ? 1.0 : 0.5,
-                def.type_id === "inbound_receptionist"
-            )
-        );
-        setSuggestedAgents(defaultAgents);
+        // Skip to profile review with empty agents
+        setSuggestedAgents([]);
         setBusinessName(clientName || "My Business");
         setIndustry("general");
-        setPhase("marketplace");
+        setPhase("profile_review");
     }, [clientName]);
 
-    // ─── PHASE 3: MARKETPLACE ACTIONS ───
+    // ─── PHASE 3: PROFILE REVIEW → AGENT FLEET ───
+    const handleProfileContinue = useCallback(async () => {
+        setPhase("agent_fleet");
+
+        // Fire-and-forget flow generation for all enabled agents
+        flowsHook.generateAllFlows(enabledAgents, profileForm.form);
+    }, [enabledAgents, profileForm.form, flowsHook]);
+
+    const handleBackToProfile = useCallback(() => {
+        setPhase("profile_review");
+    }, []);
+
+    // ─── PHASE 4: AGENT FLEET ACTIONS ───
     const handleToggleAgent = useCallback((agentTypeId: string, enabled: boolean) => {
         setSuggestedAgents((prev) =>
             prev.map((a) => (a.type_id === agentTypeId ? { ...a, enabled } : a))
@@ -110,13 +122,24 @@ export function OnboardingV2Wizard({
         [suggestedAgents]
     );
 
-    const handleEditProfile = useCallback(() => {
-        // For now, go back to URL input to re-analyze
-        analysis.resetAnalysis();
-        setPhase("url_input");
-    }, [analysis]);
+    // ─── CONVERSATION FLOW HANDLERS ───
+    const handleRegenerateFlow = useCallback(
+        (agentTypeId: string) => {
+            const agent = suggestedAgents.find((a) => a.type_id === agentTypeId);
+            if (agent) {
+                flowsHook.generateFlowForAgent(
+                    agentTypeId,
+                    agent.name,
+                    agent.purpose || agent.description,
+                    agent.direction || "inbound",
+                    profileForm.form
+                );
+            }
+        },
+        [suggestedAgents, flowsHook, profileForm.form]
+    );
 
-    // ─── PHASE 4: CHAT ───
+    // ─── CHAT ───
     const handleSendChatMessage = useCallback(
         async (message: string) => {
             const modifications = await chat.sendMessage(message, suggestedAgents);
@@ -193,6 +216,8 @@ export function OnboardingV2Wizard({
                             override_variables: [],
                             custom_instructions: (changes.purpose as string) || null,
                             is_custom: true,
+                            purpose: (changes.purpose as string) || "",
+                            direction: (changes.direction as "inbound" | "outbound") || "outbound",
                         };
                         next.push(newAgent);
                         break;
@@ -204,24 +229,15 @@ export function OnboardingV2Wizard({
         });
     }, []);
 
-    // ─── PHASE 5: DEPLOY ───
+    // ─── DEPLOY ───
     const handleDeploy = useCallback(async () => {
         setPhase("deploying");
         setChatOpen(false);
 
         // Build profile FormData
-        const formData = new FormData();
-        if (tenantProfile) {
-            for (const [key, value] of Object.entries(tenantProfile)) {
-                if (value === null || value === undefined) continue;
-                if (typeof value === "object") {
-                    formData.append(key, JSON.stringify(value));
-                } else {
-                    formData.append(key, String(value));
-                }
-            }
-        }
-        // Ensure required fields are present
+        const formData = profileForm.buildFormData();
+
+        // Add business name if missing
         if (!formData.get("business_name")) {
             formData.set("business_name", businessName);
         }
@@ -232,18 +248,19 @@ export function OnboardingV2Wizard({
             formData.set("website_url", websiteUrl);
         }
 
-        const result = await deployment.deploy(enabledAgents, formData);
+        // Serialize conversation flows
+        const flowsText = flowsHook.getAllFlowsAsText();
+
+        const result = await deployment.deploy(enabledAgents, formData, flowsText);
 
         if (result && result.success) {
-            // Small delay for the final animation to settle
             setTimeout(() => setPhase("success"), 1500);
         }
-        // If failed, stay on "deploying" — error shown by DeploySequence
-    }, [tenantProfile, businessName, industry, websiteUrl, deployment, enabledAgents]);
+    }, [profileForm, businessName, industry, websiteUrl, deployment, enabledAgents, flowsHook]);
 
     // ─── RENDER ───
     return (
-        <div className="fixed inset-0 z-50 bg-zinc-950">
+        <div className="fixed inset-0 z-50 bg-gray-50">
             <AnimatePresence mode="wait">
                 {phase === "url_input" && (
                     <motion.div
@@ -278,18 +295,47 @@ export function OnboardingV2Wizard({
                     </motion.div>
                 )}
 
-                {phase === "marketplace" && (
+                {phase === "profile_review" && (
                     <motion.div
-                        key="marketplace"
+                        key="profile_review"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <AgentMarketplace
+                        <ProfileReview
+                            form={profileForm.form}
+                            fieldMeta={profileForm.fieldMeta}
+                            businessName={businessName}
+                            updateField={profileForm.updateField}
+                            resetFieldToAI={profileForm.resetFieldToAI}
+                            addJobType={profileForm.addJobType}
+                            updateJobType={profileForm.updateJobType}
+                            removeJobType={profileForm.removeJobType}
+                            updateServiceAreaCities={profileForm.updateServiceAreaCities}
+                            updateServiceAreaZips={profileForm.updateServiceAreaZips}
+                            updateServiceAreaRadius={profileForm.updateServiceAreaRadius}
+                            updateHours={profileForm.updateHours}
+                            toggleLeadSource={profileForm.toggleLeadSource}
+                            onContinue={handleProfileContinue}
+                        />
+                    </motion.div>
+                )}
+
+                {phase === "agent_fleet" && (
+                    <motion.div
+                        key="agent_fleet"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        <AgentFleet
                             businessName={businessName}
                             industry={industry}
                             suggestedAgents={suggestedAgents}
+                            flows={flowsHook.flows}
+                            generatingFlow={flowsHook.generatingFlow}
                             onToggleAgent={handleToggleAgent}
                             onCustomizeAgent={handleCustomizeAgent}
                             onDeploy={handleDeploy}
@@ -297,7 +343,18 @@ export function OnboardingV2Wizard({
                                 setFocusedAgentName(undefined);
                                 setChatOpen(true);
                             }}
-                            onEditProfile={handleEditProfile}
+                            onBackToProfile={handleBackToProfile}
+                            onUpdateFlowStep={(agentTypeId, stepId, text) =>
+                                flowsHook.updateStep(agentTypeId, stepId, text)
+                            }
+                            onAddFlowStep={(agentTypeId) => flowsHook.addStep(agentTypeId)}
+                            onRemoveFlowStep={(agentTypeId, stepId) =>
+                                flowsHook.removeStep(agentTypeId, stepId)
+                            }
+                            onReorderFlowSteps={(agentTypeId, from, to) =>
+                                flowsHook.reorderSteps(agentTypeId, from, to)
+                            }
+                            onRegenerateFlow={handleRegenerateFlow}
                             deploying={deployment.deploying}
                         />
                         <ChatPanel

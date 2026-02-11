@@ -63,7 +63,7 @@ export function ChatPanel({
                 <>
                     {/* Backdrop */}
                     <motion.div
-                        className="fixed inset-0 z-40 bg-black/40"
+                        className="fixed inset-0 z-40 bg-black/20"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -72,24 +72,24 @@ export function ChatPanel({
 
                     {/* Panel */}
                     <motion.div
-                        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-zinc-900 shadow-2xl sm:w-[420px]"
+                        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-white shadow-2xl sm:w-[420px]"
                         initial={{ x: "100%" }}
                         animate={{ x: 0 }}
                         exit={{ x: "100%" }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
                     >
                         {/* Header */}
-                        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+                        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10">
-                                    <Bot className="h-4 w-4 text-violet-400" />
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
+                                    <Bot className="h-4 w-4 text-violet-600" />
                                 </div>
                                 <div>
-                                    <h3 className="text-sm font-semibold text-white">
+                                    <h3 className="text-sm font-semibold text-gray-900">
                                         AI Setup Assistant
                                     </h3>
                                     {focusedAgentName && (
-                                        <p className="text-[11px] text-zinc-500">
+                                        <p className="text-[11px] text-gray-400">
                                             Focused on: {focusedAgentName}
                                         </p>
                                     )}
@@ -97,7 +97,7 @@ export function ChatPanel({
                             </div>
                             <button
                                 onClick={onClose}
-                                className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
+                                className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
                             >
                                 <X className="h-4 w-4" />
                             </button>
@@ -108,7 +108,7 @@ export function ChatPanel({
                             <div className="space-y-4">
                                 {/* Welcome message if no messages */}
                                 {messages.length === 0 && (
-                                    <div className="rounded-lg bg-zinc-800/50 p-3 text-sm text-zinc-400">
+                                    <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
                                         I&apos;ve analyzed your business and set up your agent
                                         fleet. What would you like to change?
                                     </div>
@@ -119,7 +119,7 @@ export function ChatPanel({
                                 ))}
 
                                 {sending && (
-                                    <div className="flex items-center gap-2 text-sm text-zinc-500">
+                                    <div className="flex items-center gap-2 text-sm text-gray-400">
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                         Thinking...
                                     </div>
@@ -130,7 +130,7 @@ export function ChatPanel({
                         </div>
 
                         {/* Input */}
-                        <div className="border-t border-zinc-800 px-4 py-3">
+                        <div className="border-t border-gray-200 px-4 py-3">
                             <div className="flex gap-2">
                                 <Input
                                     ref={inputRef}
@@ -143,7 +143,7 @@ export function ChatPanel({
                                             : "Ask me anything about your agents..."
                                     }
                                     disabled={sending}
-                                    className="border-zinc-700 bg-zinc-800/50 text-white placeholder:text-zinc-500"
+                                    className="border-gray-200 bg-white text-gray-900 placeholder:text-gray-400"
                                 />
                                 <Button
                                     onClick={handleSend}
@@ -173,29 +173,29 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         >
             <div
                 className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-                    isUser ? "bg-zinc-700" : "bg-violet-500/10"
+                    isUser ? "bg-gray-200" : "bg-violet-50"
                 }`}
             >
                 {isUser ? (
-                    <User className="h-3.5 w-3.5 text-zinc-300" />
+                    <User className="h-3.5 w-3.5 text-gray-600" />
                 ) : (
-                    <Bot className="h-3.5 w-3.5 text-violet-400" />
+                    <Bot className="h-3.5 w-3.5 text-violet-600" />
                 )}
             </div>
             <div
                 className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
                     isUser
                         ? "bg-violet-600 text-white"
-                        : "bg-zinc-800 text-zinc-200"
+                        : "bg-gray-100 text-gray-700"
                 }`}
             >
                 {message.content}
                 {message.function_calls && message.function_calls.length > 0 && (
-                    <div className="mt-2 border-t border-zinc-700/50 pt-2">
+                    <div className="mt-2 border-t border-gray-200/50 pt-2">
                         {message.function_calls.map((fc, i) => (
                             <span
                                 key={i}
-                                className="text-[10px] text-zinc-500"
+                                className="text-[10px] text-gray-400"
                             >
                                 {fc.function_name}: {fc.result}
                             </span>

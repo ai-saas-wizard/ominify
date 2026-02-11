@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { deployAgentFleet } from "@/app/actions/agent-deployment-actions";
+import { deployAgentFleetV2 } from "@/app/actions/agent-deployment-actions";
 import type { SuggestedAgent, DeploymentProgress, DeploymentResult } from "../types";
 
 export function useDeployment(clientId: string) {
@@ -12,7 +12,8 @@ export function useDeployment(clientId: string) {
     const deploy = useCallback(
         async (
             enabledAgents: SuggestedAgent[],
-            profileFormData: FormData
+            profileFormData: FormData,
+            conversationFlows?: Record<string, string>
         ): Promise<DeploymentResult | null> => {
             setDeploying(true);
             setResult(null);
@@ -36,8 +37,9 @@ export function useDeployment(clientId: string) {
                         label: `Creating ${agent.name}`,
                         status: "pending" as const,
                         substeps: [
+                            { label: "Generating dynamic prompt", status: "pending" as const },
                             { label: "VAPI assistant created", status: "pending" as const },
-                            ...(agent.sequence_summary
+                            ...(agent.direction === "outbound"
                                 ? [{ label: "Sequence configured", status: "pending" as const }]
                                 : []),
                         ],
@@ -56,7 +58,12 @@ export function useDeployment(clientId: string) {
                     return { ...prev, steps };
                 });
 
-                const deployResult = await deployAgentFleet(clientId, enabledAgents, profileFormData);
+                const deployResult = await deployAgentFleetV2(
+                    clientId,
+                    enabledAgents,
+                    profileFormData,
+                    conversationFlows || {}
+                );
 
                 // Mark profile save as complete
                 setProgress((prev) => {
@@ -77,25 +84,10 @@ export function useDeployment(clientId: string) {
                             return {
                                 ...step,
                                 status: success ? "completed" as const : "failed" as const,
-                                substeps: step.substeps.map((sub, idx) => {
-                                    if (idx === 0) {
-                                        return {
-                                            ...sub,
-                                            status: success ? "completed" as const : "failed" as const,
-                                        };
-                                    }
-                                    if (idx === 1) {
-                                        return {
-                                            ...sub,
-                                            status: agentResult.sequence_id
-                                                ? "completed" as const
-                                                : success
-                                                  ? "completed" as const
-                                                  : "failed" as const,
-                                        };
-                                    }
-                                    return sub;
-                                }),
+                                substeps: step.substeps.map((sub) => ({
+                                    ...sub,
+                                    status: success ? "completed" as const : "failed" as const,
+                                })),
                             };
                         });
 

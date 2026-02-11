@@ -3,35 +3,39 @@
 import OpenAI from "openai";
 import type { AIFieldMeta } from "@/components/onboarding/types";
 import type { AIAnalysisV2Result } from "@/components/onboarding-v2/types";
-import {
-    AGENT_CATALOG,
-    getApplicableAgents,
-    buildSuggestedAgentFromDefinition,
-    type SuggestedAgent,
-} from "@/lib/agent-catalog";
+import type { SuggestedAgent, AgentCategory } from "@/lib/agent-catalog";
 
 // ═══════════════════════════════════════════════════════════
-// V2 AI ANALYSIS — Website analysis + Agent recommendations
-// Extends the V1 schema with agent_suggestions array.
+// V2 AI ANALYSIS — Website analysis + Dynamic Agent Fleet
+// Agents are generated DYNAMICALLY per business, not from
+// a fixed catalog. GPT invents agents specific to the
+// business type, industry, and services.
 // ═══════════════════════════════════════════════════════════
 
 const ANALYSIS_INSTRUCTIONS = `You are a business analyst AI building an AI voice agent call center. You will be given a business website URL. Use web search to find and analyze the website, then:
 1. Extract comprehensive business profile information
-2. Recommend which AI agents would benefit this business
+2. INVENT AI agents SPECIFIC to this business — do NOT use generic templates
 
-For fields you cannot determine, make intelligent inferences but mark with lower confidence.
+CRITICAL: Generate agents that are CUSTOM-TAILORED to this specific business.
+Examples:
+- A dental office might get: "Inbound Receptionist", "New Patient Welcome Caller", "Insurance Verification Agent", "Post-Treatment Review Requester", "Appointment Reminder"
+- An HVAC company might get: "Inbound Receptionist", "Emergency Service Dispatcher", "Lead Follow-Up Specialist", "Seasonal Maintenance Caller", "Review Collector"
+- A law firm might get: "Inbound Intake Specialist", "Case Status Caller", "Consultation Reminder", "Client Follow-Up Agent"
+- A restaurant might get: "Inbound Reservation Agent", "Party/Catering Follow-Up", "Review & Feedback Collector"
 
-IMPORTANT RULES:
-- Use ONLY the exact enum values specified for constrained fields
-- For business_hours, infer typical hours for the industry if not explicitly stated
-- For job_types, extract ALL services mentioned on the website
-- For custom_phrases.always_mention, pull actual phrases/taglines from the website copy
-- If a phone number is found, use it for emergency_phone
-- Default lead_sources should include website_form and phone_call at minimum
-- Infer primary_goal based on the business type
-- business_name: Extract the actual business name from the website
+AGENT RULES:
+- ALWAYS include an inbound receptionist as the first agent (confidence 1.0, enabled true)
+- Generate 4-8 total agents based on the business needs
+- Each agent must have a UNIQUE purpose specific to this business
+- type_id should be a slug (lowercase, underscores) generated from the agent name
+- direction: "inbound" for agents that receive calls, "outbound" for agents that make calls
+- category: classify as "inbound", "follow_up", "marketing", "retention", or "operations"
+- reasoning: explain WHY this specific agent would help THIS business
+- suggested_override_variables: list variable names the agent would need at runtime (e.g. "patient_name", "appointment_date")
+- Set confidence > 0.7 for strongly recommended agents
+- Set enabled=true for agents with confidence > 0.7
 
-FIELD CONSTRAINTS:
+PROFILE FIELD CONSTRAINTS:
 - industry: MUST be one of: home_services, real_estate, healthcare, legal, automotive, restaurant, retail, professional_services, other
 - brand_voice: MUST be one of: professional, friendly, casual, authoritative
 - timezone: MUST be one of: America/New_York, America/Chicago, America/Denver, America/Los_Angeles, America/Phoenix, America/Anchorage, Pacific/Honolulu
@@ -40,22 +44,7 @@ FIELD CONSTRAINTS:
 - lead_sources items: MUST be from: google_ads, facebook_ads, yelp, thumbtack, angi, homeadvisor, referral, website_form, phone_call, other
 - urgency_tier in job_types: MUST be one of: critical, high, medium, low
 - business_hours keys: mon-sun with open (HH:MM), close (HH:MM), closed (boolean)
-- confidence values: MUST be one of: high, medium, low
-
-AGENT RECOMMENDATION RULES:
-- inbound_receptionist MUST always be included with confidence 1.0 and enabled true
-- For each other agent type, assess whether the business would benefit from it
-- Consider the industry, services, business model, and online presence
-- lead_follow_up: recommended for any business that takes leads online (has forms, contact pages)
-- appointment_reminder: recommended for any business that books appointments
-- review_collector: recommended for any service business
-- win_back_caller: recommended for businesses with repeat customers
-- lead_qualifier: recommended for businesses with paid advertising or multiple lead sources
-- Set confidence > 0.7 for agents you strongly recommend
-- Set enabled=true for agents with confidence > 0.7
-- Set enabled=false for optional agents
-- Always include at least 4-5 recommendations beyond inbound
-- reasoning: explain WHY this agent is recommended for THIS specific business`;
+- confidence values: MUST be one of: high, medium, low`;
 
 const RESPONSE_SCHEMA = {
     type: "object" as const,
@@ -149,20 +138,17 @@ const RESPONSE_SCHEMA = {
             items: {
                 type: "object" as const,
                 properties: {
-                    type_id: {
-                        type: "string" as const,
-                        enum: [
-                            "inbound_receptionist", "lead_follow_up", "appointment_reminder",
-                            "no_show_recovery", "review_collector", "win_back_caller",
-                            "lead_qualifier", "upsell_cross_sell", "event_promo_announcer",
-                            "survey_collector", "referral_requester",
-                        ],
-                    },
+                    name: { type: "string" as const },
+                    type_id: { type: "string" as const },
+                    purpose: { type: "string" as const },
+                    direction: { type: "string" as const, enum: ["inbound", "outbound"] },
+                    category: { type: "string" as const, enum: ["inbound", "follow_up", "marketing", "retention", "operations"] },
                     confidence: { type: "number" as const },
                     reasoning: { type: "string" as const },
                     enabled: { type: "boolean" as const },
+                    suggested_override_variables: { type: "array" as const, items: { type: "string" as const } },
                 },
-                required: ["type_id", "confidence", "reasoning", "enabled"] as const,
+                required: ["name", "type_id", "purpose", "direction", "category", "confidence", "reasoning", "enabled", "suggested_override_variables"] as const,
                 additionalProperties: false,
             },
         },
@@ -209,7 +195,7 @@ export async function analyzeBusinessWebsiteV2(websiteUrl: string): Promise<AIAn
         const response = await openai.responses.create({
             model: "gpt-4o",
             instructions: ANALYSIS_INSTRUCTIONS,
-            input: `Search and analyze this business website, then extract all profile information and recommend AI agents: ${websiteUrl}`,
+            input: `Search and analyze this business website, then extract all profile information and invent custom AI agents specific to this business: ${websiteUrl}`,
             tools: [
                 {
                     type: "web_search" as const,
@@ -254,6 +240,31 @@ export async function analyzeBusinessWebsiteV2(websiteUrl: string): Promise<AIAn
         };
     }
 }
+
+// ─── CATEGORY MAPPING ───
+
+const CATEGORY_MAP: Record<string, AgentCategory> = {
+    inbound: "inbound",
+    follow_up: "outbound_follow_up",
+    marketing: "outbound_marketing",
+    retention: "outbound_retention",
+    operations: "outbound_follow_up", // map operations to follow_up for display
+};
+
+// ─── ICON SELECTION ───
+
+const DIRECTION_ICONS: Record<string, string> = {
+    inbound: "Phone",
+    outbound: "Zap",
+};
+
+const CATEGORY_ICONS: Record<string, string> = {
+    inbound: "Phone",
+    follow_up: "Zap",
+    marketing: "Megaphone",
+    retention: "Heart",
+    operations: "ClipboardCheck",
+};
 
 // ─── RESULT MAPPER ───
 
@@ -313,52 +324,93 @@ function mapAIResponseToV2Result(ai: Record<string, unknown>): AIAnalysisV2Resul
         qualification_criteria: qualCriteria ? JSON.stringify(qualCriteria, null, 2) : "",
     };
 
-    // Build agent suggestions from AI recommendations
+    // Build agent suggestions from GPT's DYNAMIC free-form output
     const aiSuggestions = (ai.agent_suggestions as Array<{
+        name: string;
         type_id: string;
+        purpose: string;
+        direction: "inbound" | "outbound";
+        category: string;
         confidence: number;
         reasoning: string;
         enabled: boolean;
+        suggested_override_variables: string[];
     }>) || [];
 
-    const agentSuggestions: SuggestedAgent[] = [];
-    const industry = (ai.industry as string) || "";
+    const agentSuggestions: SuggestedAgent[] = aiSuggestions.map((suggestion) => {
+        const category = CATEGORY_MAP[suggestion.category] || "outbound_follow_up";
+        const confidenceLabel: SuggestedAgent["confidence_label"] =
+            suggestion.confidence >= 0.8 ? "highly_recommended"
+                : suggestion.confidence >= 0.6 ? "recommended"
+                    : "optional";
 
-    // Process AI suggestions — map to catalog definitions
-    for (const suggestion of aiSuggestions) {
-        const catalogDef = AGENT_CATALOG.find((a) => a.type_id === suggestion.type_id);
-        if (!catalogDef) continue;
+        const icon = suggestion.direction === "inbound"
+            ? DIRECTION_ICONS.inbound
+            : CATEGORY_ICONS[suggestion.category] || DIRECTION_ICONS.outbound;
 
-        const suggested = buildSuggestedAgentFromDefinition(
-            catalogDef,
-            suggestion.confidence,
-            suggestion.enabled
-        );
-        agentSuggestions.push(suggested);
-    }
+        return {
+            type_id: suggestion.type_id,
+            name: suggestion.name,
+            description: suggestion.purpose,
+            category,
+            enabled: suggestion.enabled,
+            confidence: suggestion.confidence,
+            confidence_label: confidenceLabel,
+            icon,
+            voice_id: "EXAVITQu4vr4xnSDxMaL",
+            voice_name: "Sarah",
+            sequence_summary: suggestion.direction === "outbound" ? "Dynamic sequence" : null,
+            override_variables: (suggestion.suggested_override_variables || []).map((name) => ({
+                name,
+                description: name.replace(/_/g, " "),
+                default_value: "",
+                example: "",
+            })),
+            custom_instructions: null,
+            is_custom: false,
+            // V2 dynamic fields
+            purpose: suggestion.purpose,
+            direction: suggestion.direction,
+            reasoning: suggestion.reasoning,
+            suggested_override_variables: suggestion.suggested_override_variables,
+        };
+    });
 
-    // Ensure inbound_receptionist is always present
-    if (!agentSuggestions.find((a) => a.type_id === "inbound_receptionist")) {
-        const inboundDef = AGENT_CATALOG.find((a) => a.type_id === "inbound_receptionist")!;
-        agentSuggestions.unshift(buildSuggestedAgentFromDefinition(inboundDef, 1.0, true));
-    }
-
-    // Add any applicable agents that AI didn't mention (as optional)
-    const applicableAgents = getApplicableAgents(industry);
-    for (const def of applicableAgents) {
-        if (!agentSuggestions.find((a) => a.type_id === def.type_id)) {
-            agentSuggestions.push(buildSuggestedAgentFromDefinition(def, 0.3, false));
-        }
+    // Ensure there's always an inbound receptionist
+    if (!agentSuggestions.find((a) => a.direction === "inbound" || a.type_id.includes("inbound") || a.type_id.includes("receptionist"))) {
+        agentSuggestions.unshift({
+            type_id: "inbound_receptionist",
+            name: "Inbound Receptionist",
+            description: "Handles all incoming calls, answers questions, and books appointments",
+            category: "inbound",
+            enabled: true,
+            confidence: 1.0,
+            confidence_label: "highly_recommended",
+            icon: "Phone",
+            voice_id: "EXAVITQu4vr4xnSDxMaL",
+            voice_name: "Sarah",
+            sequence_summary: null,
+            override_variables: [
+                { name: "customer_name", description: "Caller's name if known", default_value: "", example: "" },
+            ],
+            custom_instructions: null,
+            is_custom: false,
+            purpose: "Handles all incoming calls, answers questions, and books appointments",
+            direction: "inbound",
+            reasoning: "Every business needs an inbound receptionist to handle calls 24/7",
+            suggested_override_variables: ["customer_name"],
+        });
     }
 
     // Sort: inbound first, then by confidence descending
     agentSuggestions.sort((a, b) => {
-        if (a.type_id === "inbound_receptionist") return -1;
-        if (b.type_id === "inbound_receptionist") return 1;
+        if (a.direction === "inbound" && b.direction !== "inbound") return -1;
+        if (b.direction === "inbound" && a.direction !== "inbound") return 1;
         return b.confidence - a.confidence;
     });
 
     const businessName = (ai.business_name as string) || "";
+    const industry = (ai.industry as string) || "";
 
     return {
         success: true,

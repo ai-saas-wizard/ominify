@@ -50,7 +50,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
     );
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 px-4">
+        <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
             {/* Floating sparkle accents */}
             <motion.div
                 className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -58,8 +58,8 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1 }}
             >
-                <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-violet-500/5 blur-3xl" />
-                <div className="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-violet-500/5 blur-3xl" />
+                <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-violet-100/50 blur-3xl" />
+                <div className="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-violet-100/50 blur-3xl" />
             </motion.div>
 
             {/* Main content */}
@@ -71,20 +71,20 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
             >
                 {/* Icon */}
                 <motion.div
-                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/10 ring-1 ring-violet-500/20"
+                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-50 ring-1 ring-violet-200"
                     initial={{ scale: 0.8 }}
                     animate={{ scale: 1 }}
                     transition={{ duration: 0.4, delay: 0.2 }}
                 >
-                    <Sparkles className="h-8 w-8 text-violet-400" />
+                    <Sparkles className="h-8 w-8 text-violet-600" />
                 </motion.div>
 
                 {/* Headline */}
                 <div className="text-center">
-                    <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                    <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
                         Let&apos;s build your AI call center
                     </h1>
-                    <p className="mt-3 text-lg text-zinc-400">
+                    <p className="mt-3 text-lg text-gray-500">
                         Paste your website URL. We&apos;ll handle the rest.
                     </p>
                 </div>
@@ -92,7 +92,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                 {/* URL Input */}
                 <div className="w-full space-y-3">
                     <div className="relative">
-                        <Globe className="absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
+                        <Globe className="absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                         <Input
                             type="url"
                             placeholder="www.yourbusiness.com"
@@ -100,14 +100,14 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                             onChange={(e) => setUrl(e.target.value)}
                             onKeyDown={handleKeyDown}
                             disabled={launching}
-                            className="h-14 border-zinc-700 bg-zinc-800/50 pl-12 text-lg text-white placeholder:text-zinc-500 focus:border-violet-500 focus:ring-violet-500/20"
+                            className="h-14 border-gray-200 bg-white pl-12 text-lg text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:ring-violet-500/20"
                         />
                     </div>
                     {error && (
                         <motion.p
                             initial={{ opacity: 0, y: -4 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="text-sm text-red-400"
+                            className="text-sm text-red-500"
                         >
                             {error}
                         </motion.p>
@@ -137,7 +137,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
 
                 {/* Trust badges */}
                 <motion.div
-                    className="flex flex-wrap items-center justify-center gap-4 text-sm text-zinc-500"
+                    className="flex flex-wrap items-center justify-center gap-4 text-sm text-gray-400"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.4 }}
@@ -146,12 +146,12 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                         <Sparkles className="h-3.5 w-3.5" />
                         Fully automated
                     </span>
-                    <span className="text-zinc-700">|</span>
+                    <span className="text-gray-300">|</span>
                     <span className="flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5" />
                         Under 5 minutes
                     </span>
-                    <span className="text-zinc-700">|</span>
+                    <span className="text-gray-300">|</span>
                     <span className="flex items-center gap-1.5">
                         <CreditCard className="h-3.5 w-3.5" />
                         No credit card

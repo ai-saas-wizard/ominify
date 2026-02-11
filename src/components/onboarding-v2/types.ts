@@ -4,14 +4,15 @@ import type {
     OverrideVariableDefinition,
     SuggestedAgent,
 } from "@/lib/agent-catalog";
-import type { AIFieldMeta } from "@/components/onboarding/types";
+import type { AIFieldMeta, TenantProfile } from "@/components/onboarding/types";
 
 // ─── ONBOARDING V2 STATE ───
 
 export type OnboardingV2Phase =
     | "url_input"
     | "analyzing"
-    | "marketplace"
+    | "profile_review"
+    | "agent_fleet"
     | "deploying"
     | "success";
 
@@ -36,6 +37,43 @@ export interface AIAnalysisV2Result {
     businessName: string;
     industry: string;
     error?: string;
+}
+
+// ─── CONVERSATION FLOW ───
+
+export interface ConversationFlowStep {
+    id: string;
+    stepNumber: number;
+    text: string;
+    isEdited: boolean;
+}
+
+// ─── DYNAMIC PROMPT TYPES ───
+
+export interface DynamicPromptRequest {
+    agentTypeId: string;
+    agentName: string;
+    agentPurpose: string;
+    direction: "inbound" | "outbound";
+    businessName: string;
+    businessProfile: TenantProfile;
+    conversationFlow: string;
+    customInstructions?: string;
+}
+
+export interface DynamicPromptResult {
+    systemPrompt: string;
+    firstMessage: string;
+    requiredTools: string[];
+    overrideVariables: { name: string; description: string; default_value: string }[];
+    sequenceStructure?: {
+        steps: Array<{
+            step_order: number;
+            channel: string;
+            delay_minutes: number;
+            content_purpose: string;
+        }>;
+    };
 }
 
 // ─── CHAT ───
@@ -108,4 +146,4 @@ export interface OnboardingV2WizardProps {
 }
 
 // Re-export for convenience
-export type { AgentTypeId, AgentCategory, OverrideVariableDefinition, SuggestedAgent, AIFieldMeta };
+export type { AgentTypeId, AgentCategory, OverrideVariableDefinition, SuggestedAgent, AIFieldMeta, TenantProfile };

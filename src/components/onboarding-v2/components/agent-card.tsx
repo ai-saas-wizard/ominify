@@ -35,10 +35,10 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
         <motion.div
             layout
             className={cn(
-                "rounded-xl border bg-zinc-900/50 transition-colors",
+                "rounded-xl border bg-white shadow-sm transition-colors",
                 agent.enabled
-                    ? "border-zinc-700/50"
-                    : "border-zinc-800/50 opacity-60"
+                    ? "border-gray-200"
+                    : "border-gray-100 opacity-60"
             )}
         >
             <div className="p-4">
@@ -54,15 +54,15 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                             <Icon className={cn("h-5 w-5", category.color)} />
                         </div>
                         <div className="min-w-0">
-                            <h3 className="text-sm font-semibold text-white">{agent.name}</h3>
-                            <p className="mt-0.5 text-xs text-zinc-400 line-clamp-2">
+                            <h3 className="text-sm font-semibold text-gray-900">{agent.name}</h3>
+                            <p className="mt-0.5 text-xs text-gray-500 line-clamp-2">
                                 {agent.description}
                             </p>
                         </div>
                     </div>
 
                     {isRequired ? (
-                        <span className="flex items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-400 ring-1 ring-violet-500/20">
+                        <span className="flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-600 ring-1 ring-violet-200">
                             <Lock className="h-3 w-3" />
                             Required
                         </span>
@@ -93,7 +93,7 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                         {confidence.label}
                     </span>
                     {agent.is_custom && (
-                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400 ring-1 ring-amber-500/20">
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-amber-200">
                             Custom
                         </span>
                     )}
@@ -101,7 +101,7 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
 
                 {/* Sequence summary */}
                 {agent.sequence_summary && (
-                    <p className="mt-2.5 text-[11px] text-zinc-500">
+                    <p className="mt-2.5 text-[11px] text-gray-400">
                         {agent.sequence_summary}
                     </p>
                 )}
@@ -110,14 +110,14 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                 <div className="mt-3 flex items-center gap-2">
                     <button
                         onClick={onCustomize}
-                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-400 transition-colors hover:bg-violet-500/10"
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-600 transition-colors hover:bg-violet-50"
                     >
                         <MessageSquare className="h-3.5 w-3.5" />
                         Customize
                     </button>
                     <button
                         onClick={() => setExpanded(!expanded)}
-                        className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                        className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-700"
                     >
                         Details
                         <ChevronDown
@@ -132,20 +132,20 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
 
             {/* Expanded details */}
             <AnimatedExpand expanded={expanded}>
-                <div className="border-t border-zinc-800 px-4 py-3 text-xs text-zinc-400">
+                <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
                     <div className="space-y-2">
                         <div className="flex justify-between">
-                            <span className="text-zinc-500">Voice</span>
+                            <span className="text-gray-400">Voice</span>
                             <span>{agent.voice_name}</span>
                         </div>
                         {agent.override_variables.length > 0 && (
                             <div>
-                                <span className="text-zinc-500">Dynamic variables:</span>
+                                <span className="text-gray-400">Dynamic variables:</span>
                                 <div className="mt-1 flex flex-wrap gap-1">
                                     {agent.override_variables.map((v) => (
                                         <span
                                             key={v.name}
-                                            className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400"
+                                            className="rounded bg-gray-50 px-1.5 py-0.5 text-[10px] font-mono text-gray-500"
                                         >
                                             {`{{${v.name}}}`}
                                         </span>
@@ -155,8 +155,8 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                         )}
                         {agent.custom_instructions && (
                             <div>
-                                <span className="text-zinc-500">Custom instructions:</span>
-                                <p className="mt-1 text-zinc-300">{agent.custom_instructions}</p>
+                                <span className="text-gray-400">Custom instructions:</span>
+                                <p className="mt-1 text-gray-700">{agent.custom_instructions}</p>
                             </div>
                         )}
                     </div>

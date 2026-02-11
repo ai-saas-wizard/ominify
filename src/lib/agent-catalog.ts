@@ -94,6 +94,11 @@ export interface SuggestedAgent {
     override_variables: OverrideVariableDefinition[];
     custom_instructions: string | null;
     is_custom: boolean;
+    // Dynamic agent fields (V2)
+    purpose?: string;
+    direction?: "inbound" | "outbound";
+    reasoning?: string;
+    suggested_override_variables?: string[];
 }
 
 // ─── CATALOG ───

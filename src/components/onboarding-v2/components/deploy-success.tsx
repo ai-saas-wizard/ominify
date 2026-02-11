@@ -11,7 +11,7 @@ interface DeploySuccessProps {
 
 export function DeploySuccess({ clientId, agentCount, sequenceCount }: DeploySuccessProps) {
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 px-4">
+        <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
             <motion.div
                 className="flex w-full max-w-lg flex-col items-center gap-8"
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -26,19 +26,19 @@ export function DeploySuccess({ clientId, agentCount, sequenceCount }: DeploySuc
                     transition={{ type: "spring", delay: 0.2 }}
                 >
                     <motion.div
-                        className="absolute inset-0 rounded-full bg-emerald-500/20 blur-2xl"
+                        className="absolute inset-0 rounded-full bg-emerald-100 blur-2xl"
                         animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.3, 0.5] }}
                         transition={{ duration: 3, repeat: Infinity }}
                     />
-                    <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 ring-2 ring-emerald-500/30">
-                        <Check className="h-10 w-10 text-emerald-400" />
+                    <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 ring-2 ring-emerald-200">
+                        <Check className="h-10 w-10 text-emerald-600" />
                     </div>
                 </motion.div>
 
                 {/* Heading */}
                 <div className="text-center">
                     <motion.h1
-                        className="text-3xl font-bold text-white"
+                        className="text-3xl font-bold text-gray-900"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
@@ -46,7 +46,7 @@ export function DeploySuccess({ clientId, agentCount, sequenceCount }: DeploySuc
                         Your AI Call Center is Live
                     </motion.h1>
                     <motion.p
-                        className="mt-2 text-zinc-400"
+                        className="mt-2 text-gray-500"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.4 }}
@@ -116,13 +116,13 @@ function QuickActionCard({
     return (
         <a
             href={href}
-            className="group rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-center transition-colors hover:border-zinc-700 hover:bg-zinc-800/50"
+            className="group rounded-xl border border-gray-200 bg-white p-4 text-center shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50/50"
         >
-            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-800 transition-colors group-hover:bg-violet-500/10">
-                <Icon className="h-5 w-5 text-zinc-400 transition-colors group-hover:text-violet-400" />
+            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-50 transition-colors group-hover:bg-violet-50">
+                <Icon className="h-5 w-5 text-gray-400 transition-colors group-hover:text-violet-600" />
             </div>
-            <p className="text-sm font-medium text-white">{label}</p>
-            <p className="mt-0.5 text-xs text-zinc-500">{description}</p>
+            <p className="text-sm font-medium text-gray-900">{label}</p>
+            <p className="mt-0.5 text-xs text-gray-400">{description}</p>
         </a>
     );
 }
