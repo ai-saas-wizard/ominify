@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import type { AIAnalysisResult } from "../types";
 import { ANALYSIS_STAGES } from "../constants";
-import { scrapeWebsite, analyzeBusinessWithAI } from "@/app/actions/ai-onboarding-actions";
+import { analyzeBusinessWebsite } from "@/app/actions/ai-onboarding-actions";
 
 export function useAIAnalysis() {
     const [analyzing, setAnalyzing] = useState(false);
@@ -41,22 +41,12 @@ export function useAIAnalysis() {
         setError(null);
         setResult(null);
 
-        // Start fake stage progression (for UX)
+        // Start stage progression animation (for UX)
         startStageProgression();
 
         try {
-            // Step 1: Scrape website
-            const scrapeResult = await scrapeWebsite(url);
-
-            if (!scrapeResult.success || !scrapeResult.content) {
-                stopStageProgression();
-                setAnalyzing(false);
-                setError(scrapeResult.error || "Failed to access website");
-                return null;
-            }
-
-            // Step 2: Analyze with GPT-4o
-            const analysisResult = await analyzeBusinessWithAI(scrapeResult.content, url);
+            // Single call — GPT-5.3 searches the web and analyzes in one shot
+            const analysisResult = await analyzeBusinessWebsite(url);
 
             stopStageProgression();
             setAnalyzing(false);

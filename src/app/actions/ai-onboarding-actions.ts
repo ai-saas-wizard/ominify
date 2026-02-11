@@ -3,294 +3,202 @@
 import OpenAI from "openai";
 import type { AIAnalysisResult, AIFieldMeta } from "@/components/onboarding/types";
 
-// ─── WEBSITE SCRAPING ───
+// ─── AI ANALYSIS USING RESPONSES API + WEB SEARCH ───
 
-export async function scrapeWebsite(url: string): Promise<{
-    success: boolean;
-    content?: string;
-    error?: string;
-}> {
-    // Validate URL
-    let parsedUrl: URL;
-    try {
-        parsedUrl = new URL(url);
-        if (!parsedUrl.protocol.startsWith("http")) {
-            return { success: false, error: "Please enter a valid URL starting with http:// or https://" };
-        }
-    } catch {
-        return { success: false, error: "Please enter a valid website URL" };
-    }
-
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-
-        const response = await fetch(parsedUrl.toString(), {
-            signal: controller.signal,
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            },
-            redirect: "follow",
-        });
-
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-            return {
-                success: false,
-                error: `We couldn't access this website (Error ${response.status}). Please check the URL and try again.`,
-            };
-        }
-
-        const html = await response.text();
-
-        if (!html || html.length < 100) {
-            return {
-                success: false,
-                error: "We found the website but couldn't extract any content. You can continue manually.",
-            };
-        }
-
-        const content = extractTextFromHTML(html);
-
-        if (!content || content.length < 50) {
-            return {
-                success: false,
-                error: "We couldn't extract meaningful content from this website. You can continue manually.",
-            };
-        }
-
-        return { success: true, content };
-    } catch (err: unknown) {
-        if (err instanceof Error && err.name === "AbortError") {
-            return {
-                success: false,
-                error: "The website took too long to respond. Try again or continue manually.",
-            };
-        }
-        console.error("[SCRAPE] Error:", err);
-        return {
-            success: false,
-            error: "We couldn't reach this website. Please check the URL and try again.",
-        };
-    }
-}
-
-function extractTextFromHTML(html: string): string {
-    const sections: string[] = [];
-
-    // Extract title
-    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    if (titleMatch) {
-        sections.push(`TITLE: ${cleanText(titleMatch[1])}`);
-    }
-
-    // Extract meta description
-    const metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["'][^>]*>/i)
-        || html.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["'][^>]*>/i);
-    if (metaDescMatch) {
-        sections.push(`DESCRIPTION: ${cleanText(metaDescMatch[1])}`);
-    }
-
-    // Extract JSON-LD structured data
-    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-    for (const match of jsonLdMatches) {
-        try {
-            const data = JSON.parse(match[1]);
-            sections.push(`STRUCTURED_DATA: ${JSON.stringify(data).slice(0, 1500)}`);
-        } catch {
-            // ignore invalid JSON-LD
-        }
-    }
-
-    // Strip unwanted tags entirely (including content)
-    let cleaned = html;
-    const stripTags = ["script", "style", "noscript", "svg", "iframe"];
-    for (const tag of stripTags) {
-        cleaned = cleaned.replace(new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, "gi"), "");
-    }
-
-    // Extract headings
-    const headingMatches = cleaned.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi);
-    for (const match of headingMatches) {
-        const text = cleanText(match[2]);
-        if (text.length > 2) {
-            sections.push(`H${match[1]}: ${text}`);
-        }
-    }
-
-    // Extract paragraphs
-    const pMatches = cleaned.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi);
-    for (const match of pMatches) {
-        const text = cleanText(match[1]);
-        if (text.length > 10) {
-            sections.push(text);
-        }
-    }
-
-    // Extract list items
-    const liMatches = cleaned.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi);
-    for (const match of liMatches) {
-        const text = cleanText(match[1]);
-        if (text.length > 5) {
-            sections.push(`- ${text}`);
-        }
-    }
-
-    // Extract phone numbers via regex from full HTML
-    const phoneMatches = html.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g);
-    if (phoneMatches) {
-        const uniquePhones = [...new Set(phoneMatches)];
-        sections.push(`PHONE_NUMBERS: ${uniquePhones.join(", ")}`);
-    }
-
-    // Extract email addresses
-    const emailMatches = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
-    if (emailMatches) {
-        const uniqueEmails = [...new Set(emailMatches)].filter(
-            (e) => !e.includes("example.com") && !e.includes("sentry")
-        );
-        if (uniqueEmails.length > 0) {
-            sections.push(`EMAILS: ${uniqueEmails.join(", ")}`);
-        }
-    }
-
-    // Extract addresses (basic pattern)
-    const addressMatches = html.match(/\d{1,5}\s[\w\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Way|Ct|Court|Pl|Place)[.,]?\s*[\w\s]*,?\s*[A-Z]{2}\s*\d{5}/gi);
-    if (addressMatches) {
-        sections.push(`ADDRESSES: ${[...new Set(addressMatches)].join("; ")}`);
-    }
-
-    const result = sections.join("\n\n");
-    // Truncate to ~8000 chars for GPT-4o context
-    return result.slice(0, 8000);
-}
-
-function cleanText(html: string): string {
-    return html
-        .replace(/<[^>]*>/g, "") // strip HTML tags
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&nbsp;/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-// ─── AI ANALYSIS ───
-
-const ANALYSIS_SYSTEM_PROMPT = `You are a business analyst AI. Given text content scraped from a business website, extract and infer comprehensive business profile information.
+const ANALYSIS_INSTRUCTIONS = `You are a business analyst AI. You will be given a business website URL. Use web search to find and analyze the website content, then extract comprehensive business profile information.
 
 For fields you cannot determine from the website content, make intelligent inferences based on the industry and context, but mark them with lower confidence.
 
-Return a JSON object with the following structure:
-
-{
-  "industry": "one of: home_services, real_estate, healthcare, legal, automotive, restaurant, retail, professional_services, other",
-  "industry_confidence": "high or medium or low",
-  "sub_industry": "specific specialization (e.g., HVAC, Family Law, Pediatrics)",
-  "sub_industry_confidence": "high or medium or low",
-  "business_description": "2-3 sentence summary of the business, its services, and unique value proposition",
-  "business_description_confidence": "high or medium or low",
-  "service_area": {
-    "cities": ["list of cities mentioned or inferred"],
-    "zip_codes": ["zip codes if found"],
-    "radius_miles": 25
-  },
-  "service_area_confidence": "high or medium or low",
-  "job_types": [
-    {
-      "name": "service name",
-      "urgency_tier": "critical or high or medium or low",
-      "avg_ticket": "estimated price like $250",
-      "keywords": "comma-separated relevant keywords"
-    }
-  ],
-  "job_types_confidence": "high or medium or low",
-  "brand_voice": "one of: professional, friendly, casual, authoritative",
-  "brand_voice_confidence": "high or medium or low",
-  "custom_phrases": {
-    "always_mention": ["key phrases from website like family-owned, licensed & insured"],
-    "never_say": ["industry-specific words to avoid"]
-  },
-  "custom_phrases_confidence": "high or medium or low",
-  "greeting_style": "suggested phone greeting using business name and matching their tone",
-  "greeting_style_confidence": "high or medium or low",
-  "timezone": "inferred timezone like America/New_York based on location. Must be one of: America/New_York, America/Chicago, America/Denver, America/Los_Angeles, America/Phoenix, America/Anchorage, Pacific/Honolulu",
-  "timezone_confidence": "high or medium or low",
-  "business_hours": {
-    "mon": { "open": "08:00", "close": "17:00", "closed": false },
-    "tue": { "open": "08:00", "close": "17:00", "closed": false },
-    "wed": { "open": "08:00", "close": "17:00", "closed": false },
-    "thu": { "open": "08:00", "close": "17:00", "closed": false },
-    "fri": { "open": "08:00", "close": "17:00", "closed": false },
-    "sat": { "open": "09:00", "close": "14:00", "closed": false },
-    "sun": { "open": "00:00", "close": "00:00", "closed": true }
-  },
-  "business_hours_confidence": "high or medium or low",
-  "after_hours_behavior": "one of: voicemail, emergency_forward, schedule_callback, ai_handle",
-  "after_hours_behavior_confidence": "high or medium or low",
-  "emergency_phone": "phone number found on website, or empty string if not found",
-  "emergency_phone_confidence": "high or medium or low",
-  "lead_sources": ["inferred from website mentions. Choose from: google_ads, facebook_ads, yelp, thumbtack, angi, homeadvisor, referral, website_form, phone_call, other"],
-  "lead_sources_confidence": "high or medium or low",
-  "primary_goal": "one of: book_appointment, phone_qualification, direct_schedule, collect_info, transfer_to_agent",
-  "primary_goal_confidence": "high or medium or low",
-  "qualification_criteria": {
-    "must_have": ["criteria inferred from business type"],
-    "nice_to_have": ["additional positive signals"],
-    "disqualifiers": ["reasons to decline service"]
-  },
-  "qualification_criteria_confidence": "high or medium or low"
-}
-
-IMPORTANT:
+IMPORTANT RULES:
 - Use ONLY the exact enum values specified for constrained fields
-- For business_hours, infer typical hours for the industry if not explicitly stated
-- For job_types, extract all services mentioned on the website
+- For business_hours, infer typical hours for the industry if not explicitly stated on the website
+- For job_types, extract ALL services mentioned on the website
 - For custom_phrases.always_mention, pull actual phrases/taglines from the website copy
 - If a phone number is found, use it for emergency_phone
 - Default lead_sources should include website_form and phone_call at minimum
-- Infer primary_goal based on the business type (e.g., healthcare -> book_appointment)`;
+- Infer primary_goal based on the business type (e.g., healthcare -> book_appointment, home_services -> direct_schedule)
 
-export async function analyzeBusinessWithAI(
-    websiteContent: string,
-    websiteUrl: string
-): Promise<AIAnalysisResult> {
+FIELD CONSTRAINTS:
+- industry: MUST be one of: home_services, real_estate, healthcare, legal, automotive, restaurant, retail, professional_services, other
+- brand_voice: MUST be one of: professional, friendly, casual, authoritative
+- timezone: MUST be one of: America/New_York, America/Chicago, America/Denver, America/Los_Angeles, America/Phoenix, America/Anchorage, Pacific/Honolulu
+- after_hours_behavior: MUST be one of: voicemail, emergency_forward, schedule_callback, ai_handle
+- primary_goal: MUST be one of: book_appointment, phone_qualification, direct_schedule, collect_info, transfer_to_agent
+- lead_sources items: MUST be from: google_ads, facebook_ads, yelp, thumbtack, angi, homeadvisor, referral, website_form, phone_call, other
+- urgency_tier in job_types: MUST be one of: critical, high, medium, low
+- business_hours keys: mon, tue, wed, thu, fri, sat, sun — each with open (HH:MM), close (HH:MM), closed (boolean)
+- confidence values: MUST be one of: high, medium, low`;
+
+const RESPONSE_SCHEMA = {
+    type: "object" as const,
+    properties: {
+        industry: { type: "string" as const },
+        industry_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        sub_industry: { type: "string" as const },
+        sub_industry_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        business_description: { type: "string" as const },
+        business_description_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        service_area: {
+            type: "object" as const,
+            properties: {
+                cities: { type: "array" as const, items: { type: "string" as const } },
+                zip_codes: { type: "array" as const, items: { type: "string" as const } },
+                radius_miles: { type: "number" as const },
+            },
+            required: ["cities", "zip_codes", "radius_miles"] as const,
+            additionalProperties: false,
+        },
+        service_area_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        job_types: {
+            type: "array" as const,
+            items: {
+                type: "object" as const,
+                properties: {
+                    name: { type: "string" as const },
+                    urgency_tier: { type: "string" as const },
+                    avg_ticket: { type: "string" as const },
+                    keywords: { type: "string" as const },
+                },
+                required: ["name", "urgency_tier", "avg_ticket", "keywords"] as const,
+                additionalProperties: false,
+            },
+        },
+        job_types_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        brand_voice: { type: "string" as const },
+        brand_voice_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        custom_phrases: {
+            type: "object" as const,
+            properties: {
+                always_mention: { type: "array" as const, items: { type: "string" as const } },
+                never_say: { type: "array" as const, items: { type: "string" as const } },
+            },
+            required: ["always_mention", "never_say"] as const,
+            additionalProperties: false,
+        },
+        custom_phrases_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        greeting_style: { type: "string" as const },
+        greeting_style_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        timezone: { type: "string" as const },
+        timezone_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        business_hours: {
+            type: "object" as const,
+            properties: {
+                mon: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                tue: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                wed: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                thu: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                fri: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                sat: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+                sun: { type: "object" as const, properties: { open: { type: "string" as const }, close: { type: "string" as const }, closed: { type: "boolean" as const } }, required: ["open", "close", "closed"] as const, additionalProperties: false },
+            },
+            required: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const,
+            additionalProperties: false,
+        },
+        business_hours_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        after_hours_behavior: { type: "string" as const },
+        after_hours_behavior_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        emergency_phone: { type: "string" as const },
+        emergency_phone_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        lead_sources: { type: "array" as const, items: { type: "string" as const } },
+        lead_sources_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        primary_goal: { type: "string" as const },
+        primary_goal_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+        qualification_criteria: {
+            type: "object" as const,
+            properties: {
+                must_have: { type: "array" as const, items: { type: "string" as const } },
+                nice_to_have: { type: "array" as const, items: { type: "string" as const } },
+                disqualifiers: { type: "array" as const, items: { type: "string" as const } },
+            },
+            required: ["must_have", "nice_to_have", "disqualifiers"] as const,
+            additionalProperties: false,
+        },
+        qualification_criteria_confidence: { type: "string" as const, enum: ["high", "medium", "low"] },
+    },
+    required: [
+        "industry", "industry_confidence",
+        "sub_industry", "sub_industry_confidence",
+        "business_description", "business_description_confidence",
+        "service_area", "service_area_confidence",
+        "job_types", "job_types_confidence",
+        "brand_voice", "brand_voice_confidence",
+        "custom_phrases", "custom_phrases_confidence",
+        "greeting_style", "greeting_style_confidence",
+        "timezone", "timezone_confidence",
+        "business_hours", "business_hours_confidence",
+        "after_hours_behavior", "after_hours_behavior_confidence",
+        "emergency_phone", "emergency_phone_confidence",
+        "lead_sources", "lead_sources_confidence",
+        "primary_goal", "primary_goal_confidence",
+        "qualification_criteria", "qualification_criteria_confidence",
+    ] as const,
+    additionalProperties: false,
+};
+
+/**
+ * Analyzes a business website using OpenAI's Responses API with web search.
+ * GPT-5.3 will search the web itself to find and analyze the business website,
+ * bypassing 403/bot-blocking issues that affect server-side scraping.
+ */
+export async function analyzeBusinessWebsite(websiteUrl: string): Promise<AIAnalysisResult> {
+    // Validate URL
+    try {
+        const parsed = new URL(websiteUrl);
+        if (!parsed.protocol.startsWith("http")) {
+            return { success: false, profile: null, fieldMeta: {}, error: "Please enter a valid URL starting with http:// or https://" };
+        }
+    } catch {
+        return { success: false, profile: null, fieldMeta: {}, error: "Please enter a valid website URL" };
+    }
+
     try {
         const openai = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY,
-            timeout: 30000,
+            timeout: 60000, // 60s — web search + analysis takes longer
         });
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            response_format: { type: "json_object" },
-            max_tokens: 4000,
-            temperature: 0,
-            messages: [
-                { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+        const response = await openai.responses.create({
+            model: "gpt-5.3",
+            instructions: ANALYSIS_INSTRUCTIONS,
+            input: `Search and analyze this business website, then extract all profile information: ${websiteUrl}`,
+            tools: [
                 {
-                    role: "user",
-                    content: `Analyze this business website content and extract all profile information.\n\nWebsite URL: ${websiteUrl}\n\nWebsite Content:\n${websiteContent}`,
+                    type: "web_search" as const,
                 },
             ],
+            text: {
+                format: {
+                    type: "json_schema",
+                    name: "business_profile",
+                    strict: true,
+                    schema: RESPONSE_SCHEMA,
+                },
+            },
+            temperature: 0,
         });
 
-        const content = response.choices[0]?.message?.content;
-        if (!content) {
+        const outputText = response.output_text;
+        if (!outputText) {
             return { success: false, profile: null, fieldMeta: {}, error: "AI returned no response" };
         }
 
-        const parsed = JSON.parse(content);
+        const parsed = JSON.parse(outputText);
         return mapAIResponseToProfile(parsed);
     } catch (error) {
         console.error("[AI ANALYSIS] Error:", error);
+
+        // Check for specific error types
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        if (errorMessage.includes("timeout") || errorMessage.includes("ETIMEDOUT")) {
+            return {
+                success: false,
+                profile: null,
+                fieldMeta: {},
+                error: "AI analysis took too long. Try again or continue manually.",
+            };
+        }
+
         return {
             success: false,
             profile: null,
@@ -299,6 +207,8 @@ export async function analyzeBusinessWithAI(
         };
     }
 }
+
+// ─── PROFILE MAPPER ───
 
 function mapAIResponseToProfile(
     ai: Record<string, unknown>
