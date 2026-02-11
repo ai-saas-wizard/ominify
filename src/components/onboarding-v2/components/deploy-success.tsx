@@ -2,7 +2,6 @@
 
 import { motion } from "framer-motion";
 import { Check, Bot, Workflow, Phone, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface DeploySuccessProps {
     clientId: string;
@@ -90,15 +89,13 @@ export function DeploySuccess({ clientId, agentCount, sequenceCount }: DeploySuc
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.6 }}
                 >
-                    <Button
-                        asChild
-                        className="bg-violet-600 px-8 text-white hover:bg-violet-500"
+                    <a
+                        href={`/client/${clientId}`}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-8 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
                     >
-                        <a href={`/client/${clientId}`}>
-                            Go to Dashboard
-                            <ArrowRight className="ml-2 h-4 w-4" />
-                        </a>
-                    </Button>
+                        Go to Dashboard
+                        <ArrowRight className="h-4 w-4" />
+                    </a>
                 </motion.div>
             </motion.div>
         </div>
