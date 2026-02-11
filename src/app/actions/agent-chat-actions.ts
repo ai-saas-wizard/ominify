@@ -178,6 +178,7 @@ export async function processAgentChatMessage(
         // Process function calls
         if (choice.message.tool_calls) {
             for (const toolCall of choice.message.tool_calls) {
+                if (toolCall.type !== "function") continue;
                 const args = JSON.parse(toolCall.function.arguments);
                 const mod: AgentModification = {
                     modification_id: crypto.randomUUID(),
