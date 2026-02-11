@@ -174,6 +174,7 @@ export interface VoiceContent {
     first_message: string;
     system_prompt: string;
     transfer_number?: string;
+    override_variables?: Record<string, string>;
 }
 
 export interface SequenceEnrollment {
@@ -229,6 +230,7 @@ export interface VapiJobPayload {
     stepId: string;
     urgencyPriority: number;
     retryCount?: number;
+    overrideVariables?: Record<string, string>;
 }
 
 export interface EventJobPayload {

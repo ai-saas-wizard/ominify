@@ -497,6 +497,15 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             });
             voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${toneDirective}`;
 
+            // Pack enrollment custom_variables as override_variables for VAPI assistantOverrides
+            if (enrollment.custom_variables && Object.keys(enrollment.custom_variables).length > 0) {
+                const overrides: Record<string, string> = {};
+                for (const [key, val] of Object.entries(enrollment.custom_variables)) {
+                    overrides[key] = String(val);
+                }
+                voiceContent.override_variables = overrides;
+            }
+
             await vapiQueue.add('vapi:call', {
                 tenantId: enrollment.tenant_id,
                 contactPhone: contact.phone,

@@ -98,6 +98,14 @@ async function makeVapiCall(
     if (assistantConfig.vapi_assistant_id) {
         requestBody.assistantId = assistantConfig.vapi_assistant_id;
         delete requestBody.assistant;
+
+        // Inject override variables for dynamic per-call data (e.g. lead name, campaign)
+        const overrides = assistantConfig.override_variables;
+        if (overrides && Object.keys(overrides).length > 0) {
+            requestBody.assistantOverrides = {
+                variableValues: overrides,
+            };
+        }
     }
 
     const response = await fetch('https://api.vapi.ai/call/phone', {

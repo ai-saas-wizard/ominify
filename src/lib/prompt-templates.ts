@@ -32,8 +32,9 @@ interface PromptResult {
 }
 
 // ─── HELPER FUNCTIONS ───
+// Exported for reuse by agent-prompt-builders.ts
 
-function buildIndustryContext(industry: string, subIndustry: string): string {
+export function buildIndustryContext(industry: string, subIndustry: string): string {
     const industryLabels: Record<string, string> = {
         home_services: 'home services',
         real_estate: 'real estate',
@@ -52,7 +53,7 @@ function buildIndustryContext(industry: string, subIndustry: string): string {
     return label;
 }
 
-function buildServicesText(jobTypes: TenantProfileData['job_types']): string {
+export function buildServicesText(jobTypes: TenantProfileData['job_types']): string {
     if (!jobTypes || jobTypes.length === 0) return 'General services';
 
     return jobTypes
@@ -66,7 +67,7 @@ function buildServicesText(jobTypes: TenantProfileData['job_types']): string {
         .join(', ');
 }
 
-function buildServiceAreaText(serviceArea: TenantProfileData['service_area']): string {
+export function buildServiceAreaText(serviceArea: TenantProfileData['service_area']): string {
     if (!serviceArea) return 'Local area';
 
     const parts: string[] = [];
@@ -79,7 +80,7 @@ function buildServiceAreaText(serviceArea: TenantProfileData['service_area']): s
     return parts.length > 0 ? parts.join(' — ') : 'Local area';
 }
 
-function buildBusinessHoursText(
+export function buildBusinessHoursText(
     hours: TenantProfileData['business_hours'],
     timezone: string
 ): string {
@@ -112,7 +113,7 @@ function formatTime(time24: string): string {
     return m === 0 ? `${hour12} ${period}` : `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
 }
 
-function buildBrandVoiceDirective(brandVoice: string): string {
+export function buildBrandVoiceDirective(brandVoice: string): string {
     const directives: Record<string, string> = {
         professional: `- Maintain a polished, business-like tone.
 - Use proper grammar and clear language.
@@ -130,7 +131,7 @@ function buildBrandVoiceDirective(brandVoice: string): string {
     return directives[brandVoice] || directives.professional;
 }
 
-function buildCustomPhrasesRules(customPhrases: TenantProfileData['custom_phrases']): string {
+export function buildCustomPhrasesRules(customPhrases: TenantProfileData['custom_phrases']): string {
     if (!customPhrases) return '';
 
     const lines: string[] = [];
@@ -143,7 +144,7 @@ function buildCustomPhrasesRules(customPhrases: TenantProfileData['custom_phrase
     return lines.join('\n');
 }
 
-function buildQualificationText(criteria: TenantProfileData['qualification_criteria']): string {
+export function buildQualificationText(criteria: TenantProfileData['qualification_criteria']): string {
     if (!criteria) return '';
 
     const lines: string[] = ['[Qualification Criteria]'];
@@ -203,7 +204,7 @@ function buildPrimaryGoalTask(goal: string): string {
     return tasks[goal] || tasks.collect_info;
 }
 
-function buildAfterHoursText(behavior: string, emergencyPhone: string): string {
+export function buildAfterHoursText(behavior: string, emergencyPhone: string): string {
     const behaviors: Record<string, string> = {
         voicemail: 'After hours: Take a message and let the caller know someone will return their call during business hours.',
         emergency_forward: `After hours: For emergencies, offer to forward to the emergency line at ${emergencyPhone || 'the on-call number'}. For non-urgent matters, take a message.`,
