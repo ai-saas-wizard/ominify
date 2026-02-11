@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { currentUser } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { ArrowLeft, User, Shield, Users, ChevronRight, Webhook } from "lucide-react";
+import { ArrowLeft, User, Shield, Users, ChevronRight, Webhook, Plug } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { UpdateProfileForm } from "@/components/settings/update-profile-form";
 import { getClientMembers } from "@/lib/auth";
@@ -139,6 +139,27 @@ export default async function ClientSettingsPage(props: {
                             <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
                             <p className="text-sm text-gray-500">
                                 {members.length} member{members.length !== 1 ? 's' : ''} • Manage who can access this account
+                            </p>
+                        </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                </div>
+            </Link>
+
+            {/* Integrations Link */}
+            <Link
+                href={`/client/${clientId}/settings/integrations`}
+                className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-blue-300 transition-colors"
+            >
+                <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-100 rounded-lg">
+                            <Plug className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-gray-900">Integrations</h2>
+                            <p className="text-sm text-gray-500">
+                                Connect Google Calendar and other services
                             </p>
                         </div>
                     </div>

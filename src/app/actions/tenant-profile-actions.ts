@@ -112,8 +112,22 @@ export async function completeOnboarding(clientId: string) {
         return { success: false, error: error.message };
     }
 
+    // Auto-create VAPI assistants (non-blocking — onboarding succeeds even if this fails)
+    try {
+        const { createTenantAssistants } = await import("./assistant-creation-actions");
+        const result = await createTenantAssistants(clientId);
+        if (!result.success) {
+            console.error("[ONBOARDING] Assistant creation failed:", result.error);
+        } else {
+            console.log("[ONBOARDING] Assistants created:", result.agents);
+        }
+    } catch (err) {
+        console.error("[ONBOARDING] Assistant creation error:", err);
+    }
+
     revalidatePath(`/client/${clientId}/onboarding`);
     revalidatePath(`/client/${clientId}`);
+    revalidatePath(`/client/${clientId}/agents`);
     revalidatePath("/admin/clients");
     return { success: true };
 }

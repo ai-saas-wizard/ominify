@@ -46,6 +46,70 @@ export interface VapiCall {
     cost?: number;
 }
 
+// ─── CREATE ASSISTANT ───
+
+export interface CreateAssistantPayload {
+    name: string;
+    firstMessage?: string;
+    model: {
+        provider: string;
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        tools?: any[];
+        temperature?: number;
+    };
+    voice?: {
+        provider: string;
+        voiceId: string;
+    };
+    transcriber?: {
+        provider: string;
+        language?: string;
+        model?: string;
+    };
+    server?: {
+        url: string;
+    };
+    maxDurationSeconds?: number;
+    backgroundSound?: string;
+    endCallMessage?: string;
+    voicemailMessage?: string;
+    voicemailDetection?: any;
+    metadata?: Record<string, any>;
+    firstMessageMode?: string;
+}
+
+export async function createAssistant(
+    payload: CreateAssistantPayload,
+    apiKey?: string
+): Promise<VapiAgent | null> {
+    const token = apiKey || DEFAULT_KEY;
+    if (!token) return null;
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/assistant`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            console.error("Failed to create assistant:", await res.text());
+            return null;
+        }
+
+        return await res.json();
+    } catch (error) {
+        console.error("Vapi Client Error (createAssistant):", error);
+        return null;
+    }
+}
+
+// ─── LIST AGENTS ───
+
 export async function listAgents(apiKey?: string): Promise<VapiAgent[]> {
     const token = apiKey || DEFAULT_KEY;
     if (!token) return [];
