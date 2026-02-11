@@ -33,24 +33,12 @@ export default async function OnboardingPage(props: {
     const profile = await getTenantProfile(clientId);
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <div className="max-w-4xl mx-auto px-4 py-8 lg:py-12">
-                {/* Page Header */}
-                <div className="mb-8 text-center">
-                    <h1 className="text-3xl font-bold text-gray-900">
-                        Welcome, {client.name}
-                    </h1>
-                    <p className="mt-2 text-gray-600">
-                        Let&apos;s set up your business profile so we can configure your AI agents perfectly.
-                    </p>
-                </div>
-
-                {/* Wizard */}
-                <OnboardingWizard
-                    clientId={clientId}
-                    initialProfile={profile}
-                />
-            </div>
+        <div className="h-screen">
+            <OnboardingWizard
+                clientId={clientId}
+                clientName={client.name}
+                initialProfile={profile}
+            />
         </div>
     );
 }
