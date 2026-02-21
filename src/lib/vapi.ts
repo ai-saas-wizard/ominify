@@ -56,19 +56,29 @@ export interface CreateAssistantPayload {
         model: string;
         messages: Array<{ role: string; content: string }>;
         tools?: any[];
+        toolIds?: string[];
         temperature?: number;
+        maxTokens?: number;
     };
     voice?: {
         provider: string;
         voiceId: string;
+        model?: string;
+        speed?: number;
+        style?: number;
+        stability?: number;
+        similarityBoost?: number;
+        useSpeakerBoost?: boolean;
     };
     transcriber?: {
         provider: string;
         language?: string;
         model?: string;
+        numerals?: boolean;
     };
     server?: {
         url: string;
+        timeoutSeconds?: number;
     };
     maxDurationSeconds?: number;
     backgroundSound?: string;
@@ -77,6 +87,30 @@ export interface CreateAssistantPayload {
     voicemailDetection?: any;
     metadata?: Record<string, any>;
     firstMessageMode?: string;
+    recordingEnabled?: boolean;
+    endCallFunctionEnabled?: boolean;
+    endCallPhrases?: string[];
+    dialKeypadFunctionEnabled?: boolean;
+    messagePlan?: {
+        idleMessages?: string[];
+    };
+    startSpeakingPlan?: {
+        waitSeconds?: number;
+        smartEndpointingPlan?: {
+            provider?: string;
+            waitFunction?: string;
+        };
+    };
+    stopSpeakingPlan?: {
+        numWords?: number;
+        backoffSeconds?: number;
+    };
+    clientMessages?: string[];
+    serverMessages?: string[];
+    compliancePlan?: {
+        hipaaEnabled?: boolean;
+        pciEnabled?: boolean;
+    };
 }
 
 export async function createAssistant(

@@ -1,13 +1,15 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { ArrowLeft, DollarSign, Download, RefreshCw, Shield, ChevronRight, Umbrella } from "lucide-react";
+import { ArrowLeft, DollarSign, Download, RefreshCw, Shield, ChevronRight, Umbrella, Bot } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { DefaultPricingForm } from "@/components/admin/default-pricing-form";
 import { ExportClientsButton } from "@/components/admin/export-clients-button";
 import { SyncUsageButton } from "@/components/admin/sync-usage-button";
 import { UmbrellaSettingsCard } from "@/components/admin/umbrella-settings-card";
+import { AgentDefaultSettingsEditor } from "@/components/admin/agent-default-settings-editor";
 import { getAllAdmins } from "@/lib/auth";
 import { getActiveUmbrellaWithStats } from "@/app/actions/umbrella-actions";
+import { getAllAgentDefaultSettings } from "@/app/actions/agent-default-settings-actions";
 
 // Get platform settings from database or env
 async function getPlatformSettings() {
@@ -64,6 +66,7 @@ export default async function AdminSettingsPage() {
     const clients = await getAllClientsData();
     const admins = await getAllAdmins();
     const umbrella = await getActiveUmbrellaWithStats();
+    const agentDefaults = await getAllAgentDefaultSettings();
 
     async function updateDefaultPricing(formData: FormData) {
         "use server";
@@ -142,6 +145,25 @@ export default async function AdminSettingsPage() {
                                     <p className="text-xs text-gray-400 mt-1">Create one to enable Type B client onboarding.</p>
                                 </div>
                             )}
+                        </div>
+                    </div>
+
+                    {/* Agent Default Settings */}
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                            <div className="flex items-center gap-3">
+                                <Bot className="w-5 h-5 text-indigo-600" />
+                                <h2 className="text-lg font-semibold text-gray-900">Agent Default Settings</h2>
+                            </div>
+                            <p className="text-sm text-gray-500 mt-1">
+                                VAPI configuration templates applied when deploying new inbound/outbound agents
+                            </p>
+                        </div>
+                        <div className="p-6">
+                            <AgentDefaultSettingsEditor
+                                inboundSettings={agentDefaults.inbound?.settings || null}
+                                outboundSettings={agentDefaults.outbound?.settings || null}
+                            />
                         </div>
                     </div>
 

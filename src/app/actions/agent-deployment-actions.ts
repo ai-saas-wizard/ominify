@@ -11,6 +11,8 @@ import type { TenantProfileData } from "@/lib/prompt-templates";
 import type { SuggestedAgent } from "@/lib/agent-catalog";
 import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import { revalidatePath } from "next/cache";
+import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
+import type { CreateAssistantPayload } from "@/lib/vapi";
 
 // ═══════════════════════════════════════════════════════════
 // AGENT FLEET DEPLOYMENT
@@ -21,6 +23,89 @@ import { revalidatePath } from "next/cache";
 // ═══════════════════════════════════════════════════════════
 
 const TEMPLATE_VERSION = "v2";
+
+/**
+ * Build the VAPI assistant payload by merging default settings template
+ * with dynamic per-agent values.
+ * Falls back to hardcoded defaults if no template exists.
+ */
+function buildVapiPayload(
+    defaults: Record<string, any> | null,
+    overrides: {
+        name: string;
+        systemPrompt: string;
+        firstMessage?: string;
+        tools: any[];
+        voiceId: string;
+        clientId: string;
+        agentType: string;
+        agentCategory: string;
+        templateVersion: string;
+        appUrl: string;
+        maxDurationSeconds?: number;
+        backgroundSound?: string;
+        voicemailDetection?: any;
+    }
+): CreateAssistantPayload {
+    if (!defaults) {
+        // Fallback to hardcoded behavior
+        return {
+            name: overrides.name,
+            firstMessage: overrides.firstMessage,
+            model: {
+                provider: "openai",
+                model: "gpt-4o-mini",
+                messages: [{ role: "system", content: overrides.systemPrompt }],
+                tools: [...overrides.tools, { type: "endCall" }],
+                temperature: 0.7,
+            },
+            voice: {
+                provider: "11labs",
+                voiceId: overrides.voiceId,
+            },
+            transcriber: {
+                provider: "deepgram",
+                language: "en",
+                model: "nova-2",
+            },
+            server: {
+                url: `${overrides.appUrl}/api/webhooks/vapi`,
+            },
+            maxDurationSeconds: overrides.maxDurationSeconds || 300,
+            backgroundSound: overrides.backgroundSound || "office",
+            voicemailDetection: overrides.voicemailDetection,
+            metadata: {
+                clientId: overrides.clientId,
+                agentType: overrides.agentType,
+                agentCategory: overrides.agentCategory,
+                templateVersion: overrides.templateVersion,
+            },
+        };
+    }
+
+    // Merge template defaults with dynamic overrides
+    return {
+        ...defaults,
+        name: overrides.name,
+        firstMessage: overrides.firstMessage,
+        model: {
+            ...defaults.model,
+            messages: [{ role: "system", content: overrides.systemPrompt }],
+            tools: [...overrides.tools, { type: "endCall" }],
+            toolIds: defaults.model?.toolIds || [],
+        },
+        voice: {
+            ...defaults.voice,
+            voiceId: overrides.voiceId || defaults.voice?.voiceId,
+        },
+        metadata: {
+            clientId: overrides.clientId,
+            agentType: overrides.agentType,
+            agentCategory: overrides.agentCategory,
+            templateVersion: overrides.templateVersion,
+        },
+    } as CreateAssistantPayload;
+}
 
 export async function deployAgentFleet(
     clientId: string,
@@ -59,6 +144,13 @@ export async function deployAgentFleet(
         process.env.NEXT_PUBLIC_APP_URL ||
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
+    // 2b. Fetch default settings templates
+    const defaultSettings = await getAllAgentDefaultSettings();
+    const directionDefaults: Record<string, Record<string, any> | null> = {
+        inbound: defaultSettings.inbound?.settings || null,
+        outbound: defaultSettings.outbound?.settings || null,
+    };
+
     // 3. Deploy all agents in parallel
     const deploymentPromises = enabledAgents.map(async (suggestedAgent) => {
         const agentDef = getAgentTypeDefinition(suggestedAgent.type_id);
@@ -75,46 +167,36 @@ export async function deployAgentFleet(
             // Build VAPI tools
             const tools = buildToolsForAgent(agentDef, clientId, APP_URL, profileData.emergency_phone);
 
+            // Determine direction for this agent
+            const direction = suggestedAgent.category === "inbound" ? "inbound" : "outbound";
+            const defaults = directionDefaults[direction];
+
+            // Build merged VAPI payload
+            const vapiPayload = buildVapiPayload(defaults, {
+                name: `${client.name} - ${suggestedAgent.name}`,
+                systemPrompt: promptResult.systemPrompt,
+                firstMessage: promptResult.firstMessage,
+                tools,
+                voiceId: suggestedAgent.voice_id,
+                clientId,
+                agentType: suggestedAgent.type_id,
+                agentCategory: suggestedAgent.category,
+                templateVersion: TEMPLATE_VERSION,
+                appUrl: APP_URL,
+                maxDurationSeconds: agentDef?.default_max_duration_seconds || 300,
+                backgroundSound: agentDef?.background_sound || "office",
+                voicemailDetection: agentDef?.voicemail_detection
+                    ? {
+                          provider: "twilio",
+                          enabled: true,
+                          voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                      }
+                    : undefined,
+            });
+
             // Create VAPI assistant
             const vapiAssistant = await createAssistant(
-                {
-                    name: `${client.name} - ${suggestedAgent.name}`,
-                    firstMessage: promptResult.firstMessage,
-                    model: {
-                        provider: "openai",
-                        model: "gpt-4o-mini",
-                        messages: [{ role: "system", content: promptResult.systemPrompt }],
-                        tools: [...tools, { type: "endCall" }],
-                        temperature: 0.7,
-                    },
-                    voice: {
-                        provider: "11labs",
-                        voiceId: suggestedAgent.voice_id,
-                    },
-                    transcriber: {
-                        provider: "deepgram",
-                        language: "en",
-                        model: "nova-2",
-                    },
-                    server: {
-                        url: `${APP_URL}/api/webhooks/vapi`,
-                    },
-                    maxDurationSeconds: agentDef?.default_max_duration_seconds || 300,
-                    backgroundSound: agentDef?.background_sound || "office",
-                    voicemailDetection: agentDef?.voicemail_detection
-                        ? {
-                              provider: "twilio",
-                              enabled: true,
-                              voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
-                          }
-                        : undefined,
-                    metadata: {
-                        clientId,
-                        agentType: suggestedAgent.type_id,
-                        agentCategory: suggestedAgent.category,
-                        templateVersion: TEMPLATE_VERSION,
-                    },
-                },
+                vapiPayload,
                 client.vapi_key
             );
 
@@ -348,6 +430,13 @@ export async function deployAgentFleetV2(
         process.env.NEXT_PUBLIC_APP_URL ||
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
+    // 2b. Fetch default settings templates
+    const defaultSettings = await getAllAgentDefaultSettings();
+    const directionDefaults: Record<string, Record<string, any> | null> = {
+        inbound: defaultSettings.inbound?.settings || null,
+        outbound: defaultSettings.outbound?.settings || null,
+    };
+
     // 3. Deploy all agents in parallel using DYNAMIC prompt builder
     const deploymentPromises = enabledAgents.map(async (suggestedAgent) => {
         try {
@@ -371,46 +460,34 @@ export async function deployAgentFleetV2(
                 profileData.emergency_phone
             );
 
+            // Determine direction for this agent
+            const direction = suggestedAgent.direction === "inbound" ? "inbound" : "outbound";
+            const defaults = directionDefaults[direction];
+
+            // Build merged VAPI payload
+            const vapiPayload = buildVapiPayload(defaults, {
+                name: `${client.name} - ${suggestedAgent.name}`,
+                systemPrompt: promptResult.systemPrompt,
+                firstMessage: promptResult.firstMessage,
+                tools,
+                voiceId: suggestedAgent.voice_id,
+                clientId,
+                agentType: suggestedAgent.type_id,
+                agentCategory: suggestedAgent.category,
+                templateVersion: "v2-dynamic",
+                appUrl: APP_URL,
+                voicemailDetection: suggestedAgent.direction === "outbound"
+                    ? {
+                          provider: "twilio",
+                          enabled: true,
+                          voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                      }
+                    : undefined,
+            });
+
             // Create VAPI assistant
             const vapiAssistant = await createAssistant(
-                {
-                    name: `${client.name} - ${suggestedAgent.name}`,
-                    firstMessage: promptResult.firstMessage,
-                    model: {
-                        provider: "openai",
-                        model: "gpt-4o-mini",
-                        messages: [{ role: "system", content: promptResult.systemPrompt }],
-                        tools: [...tools, { type: "endCall" }],
-                        temperature: 0.7,
-                    },
-                    voice: {
-                        provider: "11labs",
-                        voiceId: suggestedAgent.voice_id,
-                    },
-                    transcriber: {
-                        provider: "deepgram",
-                        language: "en",
-                        model: "nova-2",
-                    },
-                    server: {
-                        url: `${APP_URL}/api/webhooks/vapi`,
-                    },
-                    maxDurationSeconds: 300,
-                    backgroundSound: "office",
-                    voicemailDetection: suggestedAgent.direction === "outbound"
-                        ? {
-                              provider: "twilio",
-                              enabled: true,
-                              voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
-                          }
-                        : undefined,
-                    metadata: {
-                        clientId,
-                        agentType: suggestedAgent.type_id,
-                        agentCategory: suggestedAgent.category,
-                        templateVersion: "v2-dynamic",
-                    },
-                },
+                vapiPayload,
                 client.vapi_key
             );
 
