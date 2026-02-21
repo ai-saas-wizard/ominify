@@ -1,0 +1,92 @@
+{
+  "name": "{{AGENT_NAME}} (Outbound Agent)",
+  "voice": {
+    "model": "eleven_turbo_v2_5",
+    "speed": 1.1,
+    "voiceId": "{{ELEVENLABS_VOICE_ID}}",
+    "provider": "11labs",
+    "stability": 0.2,
+    "similarityBoost": 0.75
+  },
+  "model": {
+    "model": "gpt-4o-mini",
+    "toolIds": "{{TOOL_IDS}}",
+    "messages": [
+      {
+        "role": "system",
+        "content": "{{SYSTEM_PROMPT}}"
+      }
+    ],
+    "provider": "openai",
+    "temperature": 0.6
+  },
+  "recordingEnabled": true,
+  "firstMessage": "",
+  "voicemailMessage": "",
+  "endCallFunctionEnabled": true,
+  "endCallMessage": "",
+  "transcriber": {
+    "model": "nova-2",
+    "language": "en",
+    "numerals": true,
+    "provider": "deepgram"
+  },
+  "clientMessages": [
+    "transcript",
+    "hang",
+    "function-call",
+    "speech-update",
+    "metadata",
+    "conversation-update",
+    "status-update",
+    "assistant.started"
+  ],
+  "serverMessages": [
+    "end-of-call-report",
+    "status-update",
+    "hang",
+    "function-call",
+    "conversation-update",
+    "assistant.started",
+    "transfer-update",
+    "speech-update"
+  ],
+  "endCallPhrases": [
+    "goodbye",
+    "talk to you soon"
+  ],
+  "firstMessageMode": "assistant-waits-for-user",
+  "voicemailDetection": {
+    "provider": "vapi",
+    "backoffPlan": {
+      "maxRetries": 6,
+      "startAtSeconds": 5,
+      "frequencySeconds": 5
+    },
+    "beepMaxAwaitSeconds": 0
+  },
+  "messagePlan": {
+    "idleMessages": [
+      "Are you still there?"
+    ]
+  },
+  "startSpeakingPlan": {
+    "waitSeconds": 0.7,
+    "smartEndpointingPlan": {
+      "provider": "livekit",
+      "waitFunction": "{{SMART_ENDPOINTING_FORMULA}}"
+    }
+  },
+  "stopSpeakingPlan": {
+    "numWords": 3,
+    "backoffSeconds": 3
+  },
+  "server": {
+    "url": "{{SERVER_WEBHOOK_URL}}",
+    "timeoutSeconds": 20
+  },
+  "compliancePlan": {
+    "hipaaEnabled": false,
+    "pciEnabled": false
+  }
+}

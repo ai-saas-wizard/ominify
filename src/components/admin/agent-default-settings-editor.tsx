@@ -9,7 +9,6 @@ const INBOUND_FALLBACK_DEFAULTS = {
         model: "eleven_flash_v2_5",
         speed: 1.1,
         style: 0.2,
-        voiceId: "ZRwrL4id6j1HPGFkeCzO",
         provider: "11labs",
         stability: 0.4,
         similarityBoost: 0.6,
@@ -20,10 +19,6 @@ const INBOUND_FALLBACK_DEFAULTS = {
         provider: "openai",
         maxTokens: 250,
         temperature: 0.65,
-        toolIds: [
-            "d0b37586-80f0-4e80-b151-2f958bab3e9e",
-            "46f5c9b1-de9e-44b2-bf0a-d31835c3e333",
-        ],
     },
     transcriber: {
         model: "nova-3",
@@ -44,10 +39,7 @@ const INBOUND_FALLBACK_DEFAULTS = {
     },
     messagePlan: { idleMessages: ["Are you still there?"] },
     stopSpeakingPlan: { numWords: 3 },
-    server: {
-        url: "https://primary-production-538b.up.railway.app/webhook/tnhbinboundprocessor",
-        timeoutSeconds: 20,
-    },
+    server: { timeoutSeconds: 20 },
     clientMessages: [
         "transcript", "hang", "function-call", "speech-update",
         "metadata", "conversation-update", "status-update", "assistant.started",
@@ -63,7 +55,6 @@ const OUTBOUND_FALLBACK_DEFAULTS = {
     voice: {
         model: "eleven_turbo_v2_5",
         speed: 1.1,
-        voiceId: "ZRwrL4id6j1HPGFkeCzO",
         provider: "11labs",
         stability: 0.2,
         similarityBoost: 0.75,
@@ -72,7 +63,6 @@ const OUTBOUND_FALLBACK_DEFAULTS = {
         model: "gpt-4o-mini",
         provider: "openai",
         temperature: 0.6,
-        toolIds: ["d0b37586-80f0-4e80-b151-2f958bab3e9e"],
     },
     transcriber: {
         model: "nova-2",
@@ -94,14 +84,10 @@ const OUTBOUND_FALLBACK_DEFAULTS = {
         waitSeconds: 0.7,
         smartEndpointingPlan: {
             provider: "livekit",
-            waitFunction: "(20 + 500 * sqrt(x) + 2500 * x^3 + 700 + 4000 * max(0, x-0.5)) / 2",
         },
     },
     stopSpeakingPlan: { numWords: 3, backoffSeconds: 3 },
-    server: {
-        url: "https://primary-production-538b.up.railway.app/webhook/2d5c917a-e471-47f3-8c0a-69534e4e7a33",
-        timeoutSeconds: 20,
-    },
+    server: { timeoutSeconds: 20 },
     clientMessages: [
         "transcript", "hang", "function-call", "speech-update",
         "metadata", "conversation-update", "status-update", "assistant.started",
