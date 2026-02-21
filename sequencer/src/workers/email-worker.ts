@@ -30,26 +30,59 @@ interface TenantEmailConfig {
 }
 
 /**
- * Get tenant's email configuration
- * For now, use a simple SMTP config from env or tenant settings
+ * Get tenant's email configuration.
+ * 1. Try tenant_email_accounts table (per-tenant SMTP config from frontend)
+ * 2. Fall back to environment defaults (platform-wide SMTP)
  */
 async function getTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig | null> {
-    // In production, fetch from tenant_email_accounts table
-    // For now, use environment defaults
+    // 1. Try per-tenant config from tenant_email_accounts
+    try {
+        const { data: emailAccount } = await supabase
+            .from('tenant_email_accounts')
+            .select('*')
+            .eq('client_id', tenantId)
+            .eq('is_active', true)
+            .single();
 
-    const { data } = await supabase
-        .from('tenant_profiles')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .single();
+        if (emailAccount) {
+            let smtpPass: string | undefined;
+            if (emailAccount.smtp_pass_encrypted) {
+                try {
+                    smtpPass = decrypt(emailAccount.smtp_pass_encrypted);
+                } catch (err) {
+                    console.error(`[EMAIL] Failed to decrypt SMTP password for tenant ${tenantId}:`, err);
+                }
+            }
 
-    if (!data) {
-        console.error(`[EMAIL] No tenant profile for ${tenantId}`);
+            console.log(`[EMAIL] Using tenant-specific email config for ${tenantId} (${emailAccount.from_email})`);
+            return {
+                provider: emailAccount.provider || 'smtp',
+                fromEmail: emailAccount.from_email,
+                fromName: emailAccount.from_name || 'Ominify',
+                smtpHost: emailAccount.smtp_host,
+                smtpPort: emailAccount.smtp_port || 587,
+                smtpUser: emailAccount.smtp_user,
+                smtpPass,
+                smtpSecure: emailAccount.smtp_secure || false,
+                gmailAccessToken: emailAccount.gmail_access_token_encrypted
+                    ? decrypt(emailAccount.gmail_access_token_encrypted)
+                    : undefined,
+                gmailRefreshToken: emailAccount.gmail_refresh_token_encrypted
+                    ? decrypt(emailAccount.gmail_refresh_token_encrypted)
+                    : undefined,
+            };
+        }
+    } catch (err) {
+        // Table may not exist yet or no row — fall through to defaults
+        console.log(`[EMAIL] No tenant email config for ${tenantId}, using env defaults`);
+    }
+
+    // 2. Fall back to environment defaults
+    if (!process.env.SMTP_HOST && !process.env.SMTP_USER) {
+        console.error(`[EMAIL] No email configuration for tenant ${tenantId} and no env defaults`);
         return null;
     }
 
-    // Default SMTP config from environment
-    // In production, each tenant would have their own email config
     return {
         provider: 'smtp',
         fromEmail: process.env.SMTP_FROM_EMAIL || 'noreply@ominify.io',
