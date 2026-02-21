@@ -4,6 +4,115 @@ import { useState } from "react";
 import { Save, Loader2, AlertCircle } from "lucide-react";
 import { updateAgentDefaultSettings } from "@/app/actions/agent-default-settings-actions";
 
+const INBOUND_FALLBACK_DEFAULTS = {
+    voice: {
+        model: "eleven_flash_v2_5",
+        speed: 1.1,
+        style: 0.2,
+        voiceId: "ZRwrL4id6j1HPGFkeCzO",
+        provider: "11labs",
+        stability: 0.4,
+        similarityBoost: 0.6,
+        useSpeakerBoost: false,
+    },
+    model: {
+        model: "gpt-4o-mini",
+        provider: "openai",
+        maxTokens: 250,
+        temperature: 0.65,
+        toolIds: [
+            "d0b37586-80f0-4e80-b151-2f958bab3e9e",
+            "46f5c9b1-de9e-44b2-bf0a-d31835c3e333",
+        ],
+    },
+    transcriber: {
+        model: "nova-3",
+        language: "en",
+        numerals: true,
+        provider: "deepgram",
+    },
+    recordingEnabled: true,
+    endCallFunctionEnabled: true,
+    endCallPhrases: ["goodbye", "talk to you soon"],
+    dialKeypadFunctionEnabled: true,
+    maxDurationSeconds: 3083,
+    firstMessageMode: "assistant-speaks-first-with-model-generated-message",
+    voicemailDetection: {
+        provider: "vapi",
+        backoffPlan: { maxRetries: 6, startAtSeconds: 5, frequencySeconds: 5 },
+        beepMaxAwaitSeconds: 0,
+    },
+    messagePlan: { idleMessages: ["Are you still there?"] },
+    stopSpeakingPlan: { numWords: 3 },
+    server: {
+        url: "https://primary-production-538b.up.railway.app/webhook/tnhbinboundprocessor",
+        timeoutSeconds: 20,
+    },
+    clientMessages: [
+        "transcript", "hang", "function-call", "speech-update",
+        "metadata", "conversation-update", "status-update", "assistant.started",
+    ],
+    serverMessages: [
+        "end-of-call-report", "status-update", "hang", "function-call",
+        "conversation-update", "assistant.started", "transfer-update", "speech-update",
+    ],
+    compliancePlan: { hipaaEnabled: false, pciEnabled: false },
+};
+
+const OUTBOUND_FALLBACK_DEFAULTS = {
+    voice: {
+        model: "eleven_turbo_v2_5",
+        speed: 1.1,
+        voiceId: "ZRwrL4id6j1HPGFkeCzO",
+        provider: "11labs",
+        stability: 0.2,
+        similarityBoost: 0.75,
+    },
+    model: {
+        model: "gpt-4o-mini",
+        provider: "openai",
+        temperature: 0.6,
+        toolIds: ["d0b37586-80f0-4e80-b151-2f958bab3e9e"],
+    },
+    transcriber: {
+        model: "nova-2",
+        language: "en",
+        numerals: true,
+        provider: "deepgram",
+    },
+    recordingEnabled: true,
+    endCallFunctionEnabled: true,
+    endCallPhrases: ["goodbye", "talk to you soon"],
+    firstMessageMode: "assistant-waits-for-user",
+    voicemailDetection: {
+        provider: "vapi",
+        backoffPlan: { maxRetries: 6, startAtSeconds: 5, frequencySeconds: 5 },
+        beepMaxAwaitSeconds: 0,
+    },
+    messagePlan: { idleMessages: ["Are you still there?"] },
+    startSpeakingPlan: {
+        waitSeconds: 0.7,
+        smartEndpointingPlan: {
+            provider: "livekit",
+            waitFunction: "(20 + 500 * sqrt(x) + 2500 * x^3 + 700 + 4000 * max(0, x-0.5)) / 2",
+        },
+    },
+    stopSpeakingPlan: { numWords: 3, backoffSeconds: 3 },
+    server: {
+        url: "https://primary-production-538b.up.railway.app/webhook/2d5c917a-e471-47f3-8c0a-69534e4e7a33",
+        timeoutSeconds: 20,
+    },
+    clientMessages: [
+        "transcript", "hang", "function-call", "speech-update",
+        "metadata", "conversation-update", "status-update", "assistant.started",
+    ],
+    serverMessages: [
+        "end-of-call-report", "status-update", "hang", "function-call",
+        "conversation-update", "assistant.started", "transfer-update", "speech-update",
+    ],
+    compliancePlan: { hipaaEnabled: false, pciEnabled: false },
+};
+
 interface AgentDefaultSettingsEditorProps {
     inboundSettings: Record<string, any> | null;
     outboundSettings: Record<string, any> | null;
@@ -15,10 +124,10 @@ export function AgentDefaultSettingsEditor({
 }: AgentDefaultSettingsEditorProps) {
     const [activeTab, setActiveTab] = useState<"inbound" | "outbound">("inbound");
     const [inboundJson, setInboundJson] = useState(
-        inboundSettings ? JSON.stringify(inboundSettings, null, 2) : "{}"
+        JSON.stringify(inboundSettings || INBOUND_FALLBACK_DEFAULTS, null, 2)
     );
     const [outboundJson, setOutboundJson] = useState(
-        outboundSettings ? JSON.stringify(outboundSettings, null, 2) : "{}"
+        JSON.stringify(outboundSettings || OUTBOUND_FALLBACK_DEFAULTS, null, 2)
     );
     const [isSaving, setIsSaving] = useState(false);
     const [saved, setSaved] = useState(false);
