@@ -358,6 +358,18 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         phone: contact.phone,
         email: contact.email || '',
         company: contact.company || '',
+        // Aliases used by frontend templates (dynamic-prompt-builder / conversation-flow-actions)
+        contact_name: contact.name || contact.first_name || '',
+        customer_name: contact.name || contact.first_name || '',
+        contact_phone: contact.phone || '',
+        contact_email: contact.email || '',
+        // Property / account reference (from contact custom_fields — set by frontend override_variables)
+        property_address: (contact.custom_fields as any)?.property_address || '',
+        // Callback number: tenant phone, then contact phone as fallback
+        callback_number: (tenantProfile as any).phone_number || (tenantProfile as any).emergency_phone || contact.phone || '',
+        // Business / agent context
+        business_name: sequence.name?.split(' - ')[0] || (tenantProfile as any).business_name || '',
+        agent_name: (sequence as any).agent_name || sequence.name || '',
         // Persistent contact custom fields (from manual entry / settings)
         ...(contact.custom_fields || {}),
         // Per-enrollment custom variables (from CSV / webhook — overrides contact fields)

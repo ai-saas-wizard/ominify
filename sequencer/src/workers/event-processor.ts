@@ -106,7 +106,8 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
     }
 
     // 2. Update enrollment based on outcome
-    const wasAnswered = disposition === 'answered' || disposition === 'completed';
+    // "transferred" counts as answered — the caller spoke to the bot and was connected to a human
+    const wasAnswered = disposition === 'answered' || disposition === 'completed' || disposition === 'transferred';
 
     // Increment calls_made
     const { data: enrollment } = await supabase
@@ -158,6 +159,7 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
             callFailureType = 'call_failed';
         }
         // Note: voicemail is not a failure — it's a partial success
+        // Note: transferred calls are successful — caller reached a human
 
         if (callFailureType) {
             console.log(`[EVENT] Call failure (${callFailureType}) for enrollment ${enrollmentId} — triggering self-healing`);

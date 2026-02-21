@@ -158,7 +158,7 @@ async function findMatchingSequence(tenantId: string, leadData: GenericLead, sou
     const { data: sequences, error } = await supabase
         .from('sequences')
         .select('*')
-        .eq('tenant_id', tenantId)
+        .eq('client_id', tenantId)
         .eq('is_active', true)
         .order('urgency_tier', { ascending: true }); // critical first
 
@@ -233,6 +233,16 @@ async function enrollInSequence(
             next_step_at: nextStepAt.toISOString(),
             enrollment_source: source,
             custom_variables: customVariables,
+            sentiment_trend: 'stable',
+            last_emotion: null,
+            recommended_tone: null,
+            is_hot_lead: false,
+            is_at_risk: false,
+            engagement_score: 50,
+            needs_human_intervention: false,
+            contact_replied: false,
+            contact_answered_call: false,
+            appointment_booked: false,
         })
         .select('id')
         .single();

@@ -142,7 +142,7 @@ Return a JSON object with a "sequences" array. Each sequence must have:
             const { data: sequenceData, error: seqError } = await supabase
                 .from('sequences')
                 .insert({
-                    tenant_id: tenantId,
+                    client_id: tenantId,
                     name: seq.name,
                     description: seq.description,
                     trigger_conditions: seq.trigger_conditions,
@@ -199,7 +199,7 @@ export async function regenerateSequences(tenantId: string): Promise<void> {
     await supabase
         .from('sequences')
         .update({ is_active: false })
-        .eq('tenant_id', tenantId)
+        .eq('client_id', tenantId)
         .eq('generated_by_ai', true);
 
     // Generate new ones

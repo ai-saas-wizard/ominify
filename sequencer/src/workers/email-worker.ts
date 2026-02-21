@@ -96,6 +96,7 @@ async function sendViaSMTP(
 /**
  * Send email via Gmail API
  * TODO: Implement Gmail OAuth flow and API sending
+ * Currently falls back to SMTP if SMTP config is available.
  */
 async function sendViaGmailAPI(
     config: TenantEmailConfig,
@@ -104,8 +105,18 @@ async function sendViaGmailAPI(
     html: string,
     text: string
 ): Promise<{ messageId: string }> {
-    // Placeholder - would use googleapis library
-    throw new Error('Gmail API not yet implemented');
+    console.warn('[EMAIL] Gmail API is not yet implemented. Attempting SMTP fallback.');
+
+    // Fall back to SMTP if credentials are available
+    if (config.smtpHost && config.smtpUser) {
+        console.log('[EMAIL] SMTP config available, falling back to SMTP.');
+        return sendViaSMTP(config, to, subject, html, text);
+    }
+
+    throw new Error(
+        'Gmail API is not yet implemented and no SMTP fallback is configured. ' +
+        'Please configure SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) or wait for Gmail API support.'
+    );
 }
 
 /**

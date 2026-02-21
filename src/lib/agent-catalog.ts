@@ -37,7 +37,7 @@ export interface SequenceStepTemplate {
     step_order: number;
     channel: "sms" | "email" | "voice";
     delay_minutes: number;
-    delay_type: "fixed_delay" | "after_previous";
+    delay_type: "after_previous" | "after_enrollment";
     content_purpose: string;
     enable_ai_mutation: boolean;
     skip_conditions: {
@@ -162,7 +162,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 0,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Immediate SMS introducing the business and letting the lead know a specialist will call them shortly. Mention their inquiry if known.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -253,7 +253,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 0,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "SMS reminder about tomorrow's appointment. Include date, time, service type, and option to reply to reschedule.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -310,7 +310,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 30,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Gentle SMS checking in. 'We missed you today. Would you like to reschedule?' No blame, just helpful.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -379,7 +379,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 4320,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Friendly SMS thanking them and asking if they'd share their experience with a Google review. Include review link.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -449,7 +449,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 0,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Re-engagement SMS. 'We miss you!' tone. Reference last service and mention it's time for maintenance. Include special offer if available.",
                     enable_ai_mutation: true,
                     skip_conditions: null,
@@ -518,7 +518,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "voice",
                     delay_minutes: 2,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Immediate qualification call. Introduce yourself, reference their inquiry, ask about needs, timeline, budget. Determine qualification. If qualified, book or transfer. If not, thank politely.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -576,7 +576,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 0,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Brief SMS mentioning their recent service and introducing the complementary service. Friendly, not pushy.",
                     enable_ai_mutation: true,
                     skip_conditions: null,
@@ -635,7 +635,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 0,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Promotional SMS announcing the offer. Brief, exciting, with clear value and any promo code.",
                     enable_ai_mutation: true,
                     skip_conditions: null,
@@ -704,7 +704,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "voice",
                     delay_minutes: 2880,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Brief satisfaction survey. Ask about overall satisfaction (1-5), quality of work, professionalism, would they recommend, anything to improve. Thank them. Flag issues for human follow-up.",
                     enable_ai_mutation: false,
                     skip_conditions: null,
@@ -750,7 +750,7 @@ export const AGENT_CATALOG: AgentTypeDefinition[] = [
                     step_order: 1,
                     channel: "sms",
                     delay_minutes: 10080,
-                    delay_type: "fixed_delay",
+                    delay_type: "after_previous",
                     content_purpose: "Friendly SMS asking if they know anyone who might need similar services. Mention referral incentive. Keep it casual and grateful.",
                     enable_ai_mutation: true,
                     skip_conditions: null,

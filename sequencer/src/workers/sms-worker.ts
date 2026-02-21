@@ -112,12 +112,21 @@ async function logExecution(params: {
  * Update enrollment SMS count
  */
 async function updateEnrollmentSmsCount(enrollmentId: string): Promise<void> {
-    await supabase.rpc('increment_enrollment_sms', { enrollment_id: enrollmentId });
-    // Fallback if RPC doesn't exist
-    await supabase
-        .from('sequence_enrollments')
-        .update({ sms_sent: supabase.rpc('', {}) }) // Will use RPC when available
-        .eq('id', enrollmentId);
+    try {
+        await supabase.rpc('increment_enrollment_sms', { enrollment_id: enrollmentId });
+    } catch {
+        // Fallback: manual increment if RPC doesn't exist
+        const { data: enrollment } = await supabase
+            .from('sequence_enrollments')
+            .select('sms_sent')
+            .eq('id', enrollmentId)
+            .single();
+
+        await supabase
+            .from('sequence_enrollments')
+            .update({ sms_sent: (enrollment?.sms_sent || 0) + 1 })
+            .eq('id', enrollmentId);
+    }
 }
 
 /**

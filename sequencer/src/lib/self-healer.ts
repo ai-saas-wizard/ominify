@@ -161,6 +161,7 @@ export function diagnoseFailure(ctx: FailureContext): HealingAction {
             };
         }
 
+        // TODO: Wire up email provider spam report webhooks (SendGrid/Mailgun) to trigger this path
         case 'email_spam': {
             // Spam filter hit — switch to SMS, don't retry email
             return {

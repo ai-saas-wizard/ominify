@@ -274,6 +274,9 @@ export function buildTemplateVariables(ctx: ConversationContext): Record<string,
         days_since_first_contact: String(ctx.days_since_first_contact),
         last_channel_used: ctx.last_channel_used || '',
         appointment_discussed: ctx.appointment_discussed ? 'yes' : 'no',
+        // Frontend-generated template variables (from dynamic-prompt-builder)
+        last_conversation_context: ctx.formatted_timeline || '',
+        last_conversation_summary: ctx.last_interaction?.summary || '',
     };
 }
 

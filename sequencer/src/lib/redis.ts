@@ -39,7 +39,7 @@ export const smsQueue = new Queue('sms:send', { connection: redisConnection });
 export const emailQueue = new Queue('email:send', { connection: redisConnection });
 export const vapiQueue = new Queue('vapi:calls', { connection: redisConnection });
 export const eventQueue = new Queue('events:process', { connection: redisConnection });
-// Phase 4: Self-Healing queue for async healing actions
+// Reserved for future async healing — currently healing actions are executed synchronously by event-processor
 export const healingQueue = new Queue('healing:actions', { connection: redisConnection });
 // Phase 5: Analytics queue for scheduled analytics jobs
 export const analyticsQueue = new Queue('analytics:compute', { connection: redisConnection });

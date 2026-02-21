@@ -39,9 +39,9 @@ const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }
 };
 
 const DELAY_LABELS: Record<string, string> = {
-    immediate: "Immediately",
-    fixed_delay: "After delay",
-    business_hours_only: "During business hours",
+    after_previous: "After previous step",
+    after_enrollment: "After enrollment",
+    specific_time: "At specific time",
 };
 
 interface Props {
@@ -299,9 +299,9 @@ export function SequenceDetailClient({
                                                                         </span>
                                                                         {step.enable_ai_mutation && <MutationEnabledDot />}
                                                                     </div>
-                                                                    {step.content_template && (
+                                                                    {step.content && (
                                                                         <p className="text-sm text-gray-700 line-clamp-2 mt-1">
-                                                                            {step.content_template}
+                                                                            {step.content}
                                                                         </p>
                                                                     )}
                                                                     {step.subject_line && (

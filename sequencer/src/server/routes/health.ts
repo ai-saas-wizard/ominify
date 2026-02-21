@@ -187,19 +187,33 @@ export async function healthRoutes(fastify: FastifyInstance) {
      * GET /admin/stats
      */
     fastify.get('/admin/stats', async (request, reply) => {
-        const { data: enrollmentStats } = await supabase
+        // Build enrollment stats by status using direct queries
+        const { data: enrollmentRows } = await supabase
             .from('sequence_enrollments')
-            .select('status', { count: 'exact' })
-            .eq('status', 'active');
+            .select('status');
 
-        const { data: execStats } = await supabase
-            .rpc('get_execution_stats'); // Would need to create this RPC
+        const enrollmentCounts: Record<string, number> = {};
+        (enrollmentRows || []).forEach((e: any) => {
+            enrollmentCounts[e.status] = (enrollmentCounts[e.status] || 0) + 1;
+        });
+
+        // Get total execution count
+        const { count: totalExecutions } = await supabase
+            .from('sequence_execution_log')
+            .select('*', { count: 'exact', head: true });
+
+        // Get executions in the last 24 hours
+        const { count: recentExecutions } = await supabase
+            .from('sequence_execution_log')
+            .select('*', { count: 'exact', head: true })
+            .gte('executed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
         return {
-            enrollments: {
-                active: enrollmentStats?.length || 0,
+            enrollments: enrollmentCounts,
+            executions: {
+                total: totalExecutions || 0,
+                last_24h: recentExecutions || 0,
             },
-            executions: execStats || {},
         };
     });
 }

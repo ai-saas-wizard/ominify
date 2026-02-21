@@ -14,9 +14,9 @@ const CHANNEL_OPTIONS = [
 ];
 
 const DELAY_TYPE_OPTIONS = [
-    { value: "immediate", label: "Immediate" },
-    { value: "fixed_delay", label: "Fixed Delay" },
-    { value: "business_hours_only", label: "Business Hours Only" },
+    { value: "after_previous", label: "After Previous Step" },
+    { value: "after_enrollment", label: "After Enrollment" },
+    { value: "specific_time", label: "At Specific Time" },
 ];
 
 const ON_SUCCESS_OPTIONS = [
@@ -37,7 +37,7 @@ interface ExistingStep {
     channel: string;
     delay_minutes: number;
     delay_type: string;
-    content_template: any;
+    content: any;
     skip_conditions: any;
     on_success: any;
     on_failure: any;
@@ -167,7 +167,7 @@ export function SequenceStepEditor({
                             </label>
                             <select
                                 name="delay_type"
-                                defaultValue={existingStep?.delay_type || "fixed_delay"}
+                                defaultValue={existingStep?.delay_type || "after_previous"}
                                 className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500"
                             >
                                 {DELAY_TYPE_OPTIONS.map((opt) => (
@@ -195,7 +195,7 @@ export function SequenceStepEditor({
                         <textarea
                             name="content_template"
                             rows={4}
-                            defaultValue={getDefaultTemplate(channel, existingStep?.content_template)}
+                            defaultValue={getDefaultTemplate(channel, existingStep?.content)}
                             className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm resize-none"
                         />
                     </div>

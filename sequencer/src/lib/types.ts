@@ -114,7 +114,7 @@ export type MutationAggressiveness = 'conservative' | 'moderate' | 'aggressive';
 
 export interface Sequence {
     id: string;
-    tenant_id: string;
+    client_id: string;
     name: string;
     description: string | null;
     trigger_conditions: {

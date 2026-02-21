@@ -96,7 +96,7 @@ export async function getSequenceDetail(sequenceId: string) {
 
 // ─── Create a new sequence ─────────────────────────────────────────────────────
 
-export async function createSequence(clientId: string, formData: FormData) {
+export async function createSequence(clientId: string, formData: FormData, agentId?: string | null) {
     try {
         const name = formData.get("name") as string;
         const description = formData.get("description") as string;
@@ -127,6 +127,7 @@ export async function createSequence(clientId: string, formData: FormData) {
                 urgency_tier: urgency_tier || "medium",
                 trigger_conditions: parsedConditions,
                 is_active: false,
+                agent_id: agentId || null,
             })
             .select("id")
             .single();
@@ -267,6 +268,7 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
     try {
         const channel = formData.get("channel") as string;
         const delay_minutes = parseInt(formData.get("delay_minutes") as string) || 0;
+        const delay_seconds = delay_minutes * 60;
         const delay_type = formData.get("delay_type") as string;
         const content_template = formData.get("content_template") as string;
         const skip_conditions = formData.get("skip_conditions") as string;
@@ -335,9 +337,9 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
                 sequence_id: sequenceId,
                 step_order: nextOrder,
                 channel,
-                delay_minutes,
-                delay_type: delay_type || "fixed_delay",
-                content_template: parsedTemplate,
+                delay_seconds,
+                delay_type: delay_type || "after_previous",
+                content: parsedTemplate,
                 skip_conditions: parsedSkip,
                 on_success: parsedOnSuccess,
                 on_failure: parsedOnFailure,
@@ -375,7 +377,7 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
 export async function updateSequenceStep(stepId: string, formData: FormData) {
     try {
         const channel = formData.get("channel") as string;
-        const delay_minutes = formData.get("delay_minutes") as string;
+        const delay_minutes_raw = formData.get("delay_minutes") as string;
         const delay_type = formData.get("delay_type") as string;
         const content_template = formData.get("content_template") as string;
         const skip_conditions = formData.get("skip_conditions") as string;
@@ -384,12 +386,12 @@ export async function updateSequenceStep(stepId: string, formData: FormData) {
 
         const updates: Record<string, any> = {};
         if (channel) updates.channel = channel;
-        if (delay_minutes !== null) updates.delay_minutes = parseInt(delay_minutes) || 0;
+        if (delay_minutes_raw !== null) updates.delay_seconds = (parseInt(delay_minutes_raw) || 0) * 60;
         if (delay_type) updates.delay_type = delay_type;
 
         if (content_template) {
             try {
-                updates.content_template = JSON.parse(content_template);
+                updates.content = JSON.parse(content_template);
             } catch {
                 return { success: false, error: "Invalid JSON in content template" };
             }
@@ -562,11 +564,24 @@ export async function enrollContact(
             .insert({
                 sequence_id: sequenceId,
                 contact_id: contactId,
-                client_id: clientId,
+                tenant_id: clientId,
                 status: "active",
                 current_step_order: 1,
-                source: source || "manual",
+                enrollment_source: source || "manual",
                 enrolled_at: new Date().toISOString(),
+                next_step_at: new Date().toISOString(),
+                sentiment_trend: "stable",
+                last_emotion: null,
+                recommended_tone: null,
+                is_hot_lead: false,
+                is_at_risk: false,
+                engagement_score: 50,
+                needs_human_intervention: false,
+                custom_variables: {},
+                contact_replied: false,
+                contact_answered_call: false,
+                appointment_booked: false,
+                channel_overrides: {},
             })
             .select("id")
             .single();
@@ -590,7 +605,7 @@ export async function unenrollContact(enrollmentId: string) {
     try {
         const { data: enrollment } = await supabase
             .from("sequence_enrollments")
-            .select("sequence_id, client_id")
+            .select("sequence_id, tenant_id")
             .eq("id", enrollmentId)
             .single();
 
@@ -609,7 +624,7 @@ export async function unenrollContact(enrollmentId: string) {
 
         if (enrollment) {
             revalidatePath(
-                `/client/${enrollment.client_id}/sequences/${enrollment.sequence_id}`
+                `/client/${enrollment.tenant_id}/sequences/${enrollment.sequence_id}`
             );
         }
 
@@ -653,7 +668,7 @@ export async function getExecutionLog(enrollmentId: string) {
             .from("sequence_execution_log")
             .select(`
                 *,
-                sequence_steps(step_order, channel, content_template)
+                sequence_steps(step_order, channel, content)
             `)
             .eq("enrollment_id", enrollmentId)
             .order("executed_at", { ascending: true });
