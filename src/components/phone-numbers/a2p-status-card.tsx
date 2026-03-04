@@ -9,8 +9,14 @@ import {
     AlertTriangle,
     RefreshCw,
     Loader2,
+    Send,
 } from "lucide-react";
-import { startA2PRegistration, checkA2PStatus } from "@/app/actions/twilio-actions";
+import {
+    startA2PRegistration,
+    checkA2PStatus,
+    submitA2PCampaign,
+    type CampaignSubmission,
+} from "@/app/actions/twilio-actions";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -80,6 +86,10 @@ function getOverallStatus(registration: any): { label: string; color: string } {
         return { label: "Registration Failed", color: "text-red-600" };
     }
 
+    if (registration.brand_status === "APPROVED" && !registration.campaign_sid) {
+        return { label: "Brand Approved — Submit Campaign", color: "text-blue-600" };
+    }
+
     if (registration.brand_sid) {
         return { label: "In Progress", color: "text-amber-600" };
     }
@@ -91,9 +101,23 @@ export function A2PStatusCard({ clientId, a2pRegistration }: Props) {
     const router = useRouter();
     const [starting, setStarting] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [submittingCampaign, setSubmittingCampaign] = useState(false);
+    const [showCampaignForm, setShowCampaignForm] = useState(false);
     const [error, setError] = useState("");
 
+    // Campaign form fields
+    const [campaignForm, setCampaignForm] = useState<CampaignSubmission>({
+        description: "",
+        messageFlow: "",
+        sampleMessages: ["", ""],
+        optInMessage: "",
+        optOutMessage: "",
+        helpMessage: "",
+    });
+
     const overallStatus = getOverallStatus(a2pRegistration);
+    const brandApproved = a2pRegistration?.brand_status === "APPROVED";
+    const noCampaignYet = !a2pRegistration?.campaign_sid;
 
     async function handleStartRegistration() {
         setStarting(true);
@@ -122,6 +146,50 @@ export function A2PStatusCard({ clientId, a2pRegistration }: Props) {
         } finally {
             setRefreshing(false);
         }
+    }
+
+    async function handleSubmitCampaign() {
+        // Validate
+        if (!campaignForm.description.trim()) {
+            setError("Campaign description is required.");
+            return;
+        }
+        if (!campaignForm.messageFlow.trim()) {
+            setError("Message flow description is required.");
+            return;
+        }
+        if (!campaignForm.sampleMessages[0].trim() || !campaignForm.sampleMessages[1].trim()) {
+            setError("Both sample messages are required.");
+            return;
+        }
+        if (!campaignForm.optInMessage.trim() || !campaignForm.optOutMessage.trim() || !campaignForm.helpMessage.trim()) {
+            setError("Opt-in, opt-out, and help messages are all required.");
+            return;
+        }
+
+        setSubmittingCampaign(true);
+        setError("");
+        try {
+            const result = await submitA2PCampaign(clientId, campaignForm);
+            if (!result.success) {
+                setError(result.error || "Failed to submit campaign");
+            } else {
+                setShowCampaignForm(false);
+                router.refresh();
+            }
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setSubmittingCampaign(false);
+        }
+    }
+
+    function updateSampleMessage(index: number, value: string) {
+        setCampaignForm((prev) => {
+            const updated = [...prev.sampleMessages] as [string, string];
+            updated[index] = value;
+            return { ...prev, sampleMessages: updated };
+        });
     }
 
     return (
@@ -253,7 +321,7 @@ export function A2PStatusCard({ clientId, a2pRegistration }: Props) {
                                 </p>
                             </div>
                         )}
-                        {a2pRegistration.campaign_status && (
+                        {a2pRegistration.campaign_status && a2pRegistration.campaign_status !== "awaiting_brand" && (
                             <div className="bg-gray-50 rounded-lg p-3">
                                 <p className="text-xs text-gray-500">Campaign Status</p>
                                 <p className={`text-sm font-medium ${
@@ -268,6 +336,162 @@ export function A2PStatusCard({ clientId, a2pRegistration }: Props) {
                             </div>
                         )}
                     </div>
+
+                    {/* Submit Campaign — shown when brand is approved but no campaign yet */}
+                    {brandApproved && noCampaignYet && !showCampaignForm && (
+                        <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg p-4 mt-3">
+                            <CheckCircle2 className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="text-sm text-blue-800 font-medium">Brand Approved — Ready for Campaign</p>
+                                <p className="text-xs text-blue-600 mt-1">
+                                    Your brand has been verified. Now submit your campaign details for carrier approval.
+                                    This describes how you'll use SMS and costs $15 vetting + $15/month.
+                                </p>
+                                <button
+                                    onClick={() => {
+                                        setShowCampaignForm(true);
+                                        setError("");
+                                    }}
+                                    className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                >
+                                    <Send className="w-4 h-4" />
+                                    Submit Campaign
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Campaign Submission Form */}
+                    {showCampaignForm && (
+                        <div className="border border-blue-200 rounded-lg p-4 mt-3 space-y-4">
+                            <h3 className="font-semibold text-gray-900 text-sm">Campaign Details (Low Volume)</h3>
+                            <p className="text-xs text-gray-500">
+                                Carriers review these details to approve your SMS usage. Be specific and honest.
+                            </p>
+
+                            {error && (
+                                <p className="text-red-600 text-sm flex items-center gap-1">
+                                    <AlertTriangle className="w-4 h-4" />
+                                    {error}
+                                </p>
+                            )}
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Campaign Description
+                                </label>
+                                <textarea
+                                    value={campaignForm.description}
+                                    onChange={(e) => setCampaignForm((p) => ({ ...p, description: e.target.value }))}
+                                    placeholder="e.g. Lead follow-up SMS for home services company. We contact leads who submitted inquiry forms to schedule appointments."
+                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                    rows={2}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Message Flow — How do users opt in?
+                                </label>
+                                <textarea
+                                    value={campaignForm.messageFlow}
+                                    onChange={(e) => setCampaignForm((p) => ({ ...p, messageFlow: e.target.value }))}
+                                    placeholder="e.g. Users opt in by submitting a web form on our website requesting a quote. The form includes SMS consent checkbox."
+                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                    rows={2}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Sample Message 1
+                                </label>
+                                <input
+                                    type="text"
+                                    value={campaignForm.sampleMessages[0]}
+                                    onChange={(e) => updateSampleMessage(0, e.target.value)}
+                                    placeholder="e.g. Hi John, this is ABC Plumbing. Following up on your request. When works best to chat?"
+                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Sample Message 2
+                                </label>
+                                <input
+                                    type="text"
+                                    value={campaignForm.sampleMessages[1]}
+                                    onChange={(e) => updateSampleMessage(1, e.target.value)}
+                                    placeholder="e.g. ABC Plumbing here — just checking if you still need help with your AC repair. Reply YES to schedule."
+                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Opt-In Message
+                                    </label>
+                                    <textarea
+                                        value={campaignForm.optInMessage}
+                                        onChange={(e) => setCampaignForm((p) => ({ ...p, optInMessage: e.target.value }))}
+                                        placeholder="e.g. You're now receiving messages from ABC Plumbing. Reply STOP to opt out."
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                        rows={2}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Opt-Out Message
+                                    </label>
+                                    <textarea
+                                        value={campaignForm.optOutMessage}
+                                        onChange={(e) => setCampaignForm((p) => ({ ...p, optOutMessage: e.target.value }))}
+                                        placeholder="e.g. You've been unsubscribed from ABC Plumbing. Reply START to re-subscribe."
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                        rows={2}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Help Message
+                                    </label>
+                                    <textarea
+                                        value={campaignForm.helpMessage}
+                                        onChange={(e) => setCampaignForm((p) => ({ ...p, helpMessage: e.target.value }))}
+                                        placeholder="e.g. For help, contact ABC Plumbing at support@abc.com or call (555) 123-4567. Reply STOP to opt out."
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                        rows={2}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 pt-2">
+                                <button
+                                    onClick={handleSubmitCampaign}
+                                    disabled={submittingCampaign}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50"
+                                >
+                                    {submittingCampaign ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Send className="w-4 h-4" />
+                                    )}
+                                    {submittingCampaign ? "Submitting..." : "Submit Campaign for Review"}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowCampaignForm(false);
+                                        setError("");
+                                    }}
+                                    className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Warning for failed registrations */}
                     {(a2pRegistration.brand_status === "FAILED" || a2pRegistration.campaign_status === "FAILED") && (
@@ -292,6 +516,20 @@ export function A2PStatusCard({ clientId, a2pRegistration }: Props) {
                                 <p className="text-xs text-amber-600 mt-0.5">
                                     Brand registration is being reviewed by The Campaign Registry (TCR). This typically
                                     takes 3-7 business days. Click the refresh button to check for updates.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Info for pending campaign */}
+                    {a2pRegistration.campaign_status === "pending_approval" && (
+                        <div className="flex items-start gap-2 bg-amber-50 rounded-lg p-3 mt-3">
+                            <Clock className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <p className="text-sm text-amber-700 font-medium">Campaign Under Review</p>
+                                <p className="text-xs text-amber-600 mt-0.5">
+                                    Your campaign is being reviewed by carriers. This typically takes 1-3 business days.
+                                    Click the refresh button to check for updates.
                                 </p>
                             </div>
                         </div>

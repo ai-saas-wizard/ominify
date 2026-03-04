@@ -307,6 +307,79 @@ export async function startA2PRegistration(clientId: string) {
     }
 }
 
+export interface CampaignSubmission {
+    description: string;
+    messageFlow: string;
+    sampleMessages: [string, string];
+    optInMessage: string;
+    optOutMessage: string;
+    helpMessage: string;
+}
+
+export async function submitA2PCampaign(clientId: string, campaign: CampaignSubmission) {
+    try {
+        // Get existing registration — brand must be approved
+        const { data: registration } = await supabase
+            .from("tenant_a2p_registrations")
+            .select("*")
+            .eq("client_id", clientId)
+            .single();
+
+        if (!registration) {
+            return { success: false, error: "No A2P registration found. Register your brand first." };
+        }
+
+        if (registration.brand_status !== "APPROVED") {
+            return { success: false, error: "Brand must be approved before submitting a campaign." };
+        }
+
+        if (registration.campaign_sid) {
+            return { success: false, error: "Campaign already submitted." };
+        }
+
+        // Get Twilio account
+        const account = await getTwilioAccount(clientId);
+        if (!account) {
+            return { success: false, error: "Twilio subaccount not found." };
+        }
+
+        if (!account.messaging_service_sid) {
+            return { success: false, error: "Messaging service not configured." };
+        }
+
+        // Submit campaign to Twilio
+        const campaignResult = await registerCampaign(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            account.messaging_service_sid,
+            registration.brand_sid,
+            {
+                description: campaign.description,
+                messageFlow: campaign.messageFlow,
+                sampleMessages: campaign.sampleMessages,
+                optInMessage: campaign.optInMessage,
+                optOutMessage: campaign.optOutMessage,
+                helpMessage: campaign.helpMessage,
+            }
+        );
+
+        // Update DB
+        await supabase
+            .from("tenant_a2p_registrations")
+            .update({
+                campaign_sid: campaignResult.campaignSid,
+                campaign_status: "pending_approval",
+            })
+            .eq("id", registration.id);
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true, campaignStatus: "pending_approval" };
+    } catch (err: any) {
+        console.error("submitA2PCampaign error:", err);
+        return { success: false, error: err.message || "Failed to submit campaign" };
+    }
+}
+
 export async function checkA2PStatus(clientId: string) {
     try {
         // Get existing registration
@@ -345,45 +418,6 @@ export async function checkA2PStatus(clientId: string) {
                     .eq("id", registration.id);
                 registration.brand_status = brandStatus.status;
                 updated = true;
-
-                // If brand approved and no campaign yet, try to create campaign
-                if (brandStatus.status === "APPROVED" && !registration.campaign_sid) {
-                    try {
-                        const { data: profile } = await supabase
-                            .from("tenant_profiles")
-                            .select("company_name, industry, job_types")
-                            .eq("client_id", clientId)
-                            .single();
-
-                        const campaignResult = await registerCampaign(
-                            account.subaccount_sid,
-                            account.auth_token_encrypted,
-                            account.messaging_service_sid,
-                            registration.brand_sid,
-                            {
-                                description: `Lead follow-up SMS for ${profile?.company_name || "business"} - ${profile?.industry || "services"}`,
-                                sampleMessages: [
-                                    `Hi {{name}}, this is ${profile?.company_name}. Following up on your request. When works best to chat?`,
-                                    `${profile?.company_name} here - just checking if you still need help. Reply YES to schedule.`,
-                                ],
-                                companyName: profile?.company_name || "Business",
-                            }
-                        );
-
-                        await supabase
-                            .from("tenant_a2p_registrations")
-                            .update({
-                                campaign_sid: campaignResult.campaignSid,
-                                campaign_status: "pending_approval",
-                            })
-                            .eq("id", registration.id);
-
-                        registration.campaign_sid = campaignResult.campaignSid;
-                        registration.campaign_status = "pending_approval";
-                    } catch (err) {
-                        console.error("Auto-campaign creation failed:", err);
-                    }
-                }
             }
         }
 

@@ -165,11 +165,11 @@ export async function registerBrand(
         policySid: "RNb0d4771c2c98518d916a3d4cd70a8f8b", // Twilio A2P Trust policy
     });
 
-    // Register brand
+    // Register brand (Low Volume Standard — $4.50 one-time, suitable for most tenants)
     const brand = await subClient.messaging.v1.brandRegistrations.create({
         customerProfileBundleSid: customerProfile.sid,
         a2PProfileBundleSid: customerProfile.sid,
-        brandType: "STANDARD",
+        brandType: "STARTER",
     });
 
     return {
@@ -202,8 +202,11 @@ export async function registerCampaign(
     brandSid: string,
     campaignInfo: {
         description: string;
+        messageFlow: string;
         sampleMessages: string[];
-        companyName: string;
+        optInMessage: string;
+        optOutMessage: string;
+        helpMessage: string;
     }
 ) {
     const subClient = getSubClient(subaccountSid, authToken);
@@ -213,16 +216,17 @@ export async function registerCampaign(
         .usAppToPerson.create({
             brandRegistrationSid: brandSid,
             description: campaignInfo.description,
-            messageFlow: campaignInfo.description,
+            messageFlow: campaignInfo.messageFlow,
             messageSamples: campaignInfo.sampleMessages,
-            usAppToPersonUsecase: "MIXED",
+            usAppToPersonUsecase: "LOW_VOLUME",
             hasEmbeddedLinks: true,
             hasEmbeddedPhone: true,
             optInKeywords: ["START", "YES", "SUBSCRIBE"],
             optOutKeywords: ["STOP", "UNSUBSCRIBE", "CANCEL"],
             helpKeywords: ["HELP", "INFO"],
-            optInMessage: `You're now receiving messages from ${campaignInfo.companyName}. Reply STOP to opt out.`,
-            optOutMessage: `You've been unsubscribed from ${campaignInfo.companyName}. Reply START to re-subscribe.`,
+            optInMessage: campaignInfo.optInMessage,
+            optOutMessage: campaignInfo.optOutMessage,
+            helpMessage: campaignInfo.helpMessage,
         });
 
     return {
