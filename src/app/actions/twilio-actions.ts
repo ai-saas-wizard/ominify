@@ -24,7 +24,7 @@ export async function provisionTwilioSubaccount(clientId: string) {
         const { data: existing } = await supabase
             .from("tenant_twilio_accounts")
             .select("id")
-            .eq("tenant_id", clientId)
+            .eq("client_id", clientId)
             .single();
 
         if (existing) {
@@ -47,7 +47,7 @@ export async function provisionTwilioSubaccount(clientId: string) {
 
         // Store in DB
         const { error } = await supabase.from("tenant_twilio_accounts").insert({
-            tenant_id: clientId,
+            client_id: clientId,
             account_type: "type_b_subaccount",
             subaccount_sid: subaccount.sid,
             auth_token_encrypted: subaccount.authToken, // TODO: encrypt with AES-256-GCM
@@ -74,7 +74,7 @@ export async function getTwilioAccount(clientId: string) {
     const { data, error } = await supabase
         .from("tenant_twilio_accounts")
         .select("*")
-        .eq("tenant_id", clientId)
+        .eq("client_id", clientId)
         .single();
 
     if (error && error.code !== "PGRST116") {
@@ -90,7 +90,7 @@ export async function getPhoneNumbers(clientId: string) {
     const { data, error } = await supabase
         .from("tenant_phone_numbers")
         .select("*")
-        .eq("tenant_id", clientId)
+        .eq("client_id", clientId)
         .order("created_at", { ascending: false });
 
     if (error) {
@@ -129,7 +129,7 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
 
         // Store in DB
         const { error } = await supabase.from("tenant_phone_numbers").insert({
-            tenant_id: clientId,
+            client_id: clientId,
             phone_number: purchased.phoneNumber,
             phone_number_sid: purchased.sid,
             friendly_name: purchased.friendlyName,
@@ -171,7 +171,7 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
             .from("tenant_phone_numbers")
             .select("*, tenant_twilio_accounts!inner(subaccount_sid, auth_token_encrypted)")
             .eq("id", phoneNumberId)
-            .eq("tenant_id", clientId)
+            .eq("client_id", clientId)
             .single();
 
         if (!phoneRecord) {
@@ -255,12 +255,12 @@ export async function startA2PRegistration(clientId: string) {
             await supabase
                 .from("tenant_twilio_accounts")
                 .update({ messaging_service_sid: messagingServiceSid })
-                .eq("tenant_id", clientId);
+                .eq("client_id", clientId);
         }
 
         // Store A2P registration
         const { error } = await supabase.from("tenant_a2p_registrations").insert({
-            tenant_id: clientId,
+            client_id: clientId,
             brand_sid: brandResult.brandSid,
             brand_status: "pending",
             customer_profile_sid: brandResult.customerProfileSid,
@@ -286,7 +286,7 @@ export async function checkA2PStatus(clientId: string) {
         const { data: registration } = await supabase
             .from("tenant_a2p_registrations")
             .select("*")
-            .eq("tenant_id", clientId)
+            .eq("client_id", clientId)
             .order("created_at", { ascending: false })
             .limit(1)
             .single();
