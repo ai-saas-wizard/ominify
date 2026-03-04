@@ -111,12 +111,25 @@ export async function searchAvailableNumbers(areaCode?: string, country?: string
     }
 }
 
+const FREE_NUMBER_LIMIT = 2;
+
 export async function purchasePhoneNumberForClient(clientId: string, phoneNumber: string) {
     try {
         // Get Twilio subaccount
         const account = await getTwilioAccount(clientId);
         if (!account) {
             return { success: false, error: "Twilio subaccount not provisioned. Please provision first." };
+        }
+
+        // Check free number limit for umbrella tenants
+        const currentNumbers = await getPhoneNumbers(clientId);
+        const activeCount = currentNumbers.filter((n: any) => n.status === "active").length;
+        if (activeCount >= FREE_NUMBER_LIMIT) {
+            return {
+                success: false,
+                error: "PAYMENT_REQUIRED",
+                message: `You've used your ${FREE_NUMBER_LIMIT} free numbers. Additional numbers cost $10 each.`,
+            };
         }
 
         // Purchase number on subaccount
@@ -205,6 +218,20 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
 
 export async function startA2PRegistration(clientId: string) {
     try {
+        // Check if A2P registration already exists
+        const { data: existingA2P } = await supabase
+            .from("tenant_a2p_registrations")
+            .select("id, brand_status, campaign_status")
+            .eq("client_id", clientId)
+            .single();
+
+        if (existingA2P) {
+            return {
+                success: false,
+                error: "A2P registration already exists. Check the status below.",
+            };
+        }
+
         // Get Twilio account
         const account = await getTwilioAccount(clientId);
         if (!account) {

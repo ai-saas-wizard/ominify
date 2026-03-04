@@ -78,6 +78,12 @@ export function PhoneNumbersManager({
         }
     }
 
+    const [paymentRequired, setPaymentRequired] = useState(false);
+    const [paymentMessage, setPaymentMessage] = useState("");
+
+    const activeNumberCount = phoneNumbers.filter((n: any) => n.status === "active").length;
+    const freeNumbersRemaining = Math.max(0, 2 - activeNumberCount);
+
     async function handlePurchase(phoneNumber: string) {
         setPurchasing(phoneNumber);
         try {
@@ -87,6 +93,10 @@ export function PhoneNumbersManager({
                     prev.filter((n) => n.phoneNumber !== phoneNumber)
                 );
                 router.refresh();
+            } else if (result.error === "PAYMENT_REQUIRED") {
+                setPaymentRequired(true);
+                setPaymentMessage((result as any).message || "Additional numbers require payment.");
+                setShowSearch(false);
             } else {
                 alert(result.error || "Failed to purchase number");
             }
@@ -203,13 +213,28 @@ export function PhoneNumbersManager({
                                 </p>
                             </div>
                         </div>
-                        <button
-                            onClick={() => setShowSearch(!showSearch)}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm"
-                        >
-                            <Plus className="w-4 h-4" />
-                            Purchase Number
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                                {freeNumbersRemaining > 0
+                                    ? `${freeNumbersRemaining} free number${freeNumbersRemaining !== 1 ? "s" : ""} remaining`
+                                    : "Free limit reached"}
+                            </span>
+                            <button
+                                onClick={() => {
+                                    if (activeNumberCount >= 2) {
+                                        setPaymentRequired(true);
+                                        setPaymentMessage("You've used your 2 free numbers. Additional numbers cost $10 each.");
+                                    } else {
+                                        setShowSearch(!showSearch);
+                                        setPaymentRequired(false);
+                                    }
+                                }}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm"
+                            >
+                                <Plus className="w-4 h-4" />
+                                Purchase Number
+                            </button>
+                        </div>
                     </div>
 
                     {/* Phone Numbers Table */}
@@ -286,6 +311,32 @@ export function PhoneNumbersManager({
                         <div className="text-center py-6 text-gray-400">
                             <Phone className="w-8 h-8 mx-auto mb-2" />
                             <p className="text-sm">No phone numbers yet. Purchase one to get started.</p>
+                        </div>
+                    )}
+
+                    {/* Payment Required Banner */}
+                    {paymentRequired && (
+                        <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-4">
+                            <div className="flex items-start gap-3">
+                                <div className="p-1.5 bg-amber-100 rounded-lg shrink-0">
+                                    <Shield className="w-4 h-4 text-amber-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className="font-medium text-amber-900 text-sm">Additional Numbers — $10 each</h4>
+                                    <p className="text-sm text-amber-700 mt-1">
+                                        {paymentMessage}
+                                    </p>
+                                    <p className="text-xs text-amber-600 mt-2">
+                                        Stripe payment integration coming soon. Contact support to purchase additional numbers.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => setPaymentRequired(false)}
+                                    className="text-amber-400 hover:text-amber-600 text-sm"
+                                >
+                                    <XCircle className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
                     )}
 
