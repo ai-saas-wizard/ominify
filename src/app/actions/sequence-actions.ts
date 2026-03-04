@@ -1117,7 +1117,7 @@ export async function getIndustryBenchmarks(clientId: string) {
         const { data: profile } = await supabase
             .from("tenant_profiles")
             .select("industry")
-            .eq("tenant_id", clientId)
+            .eq("client_id", clientId)
             .single();
 
         if (!profile?.industry) {
