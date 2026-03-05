@@ -155,6 +155,17 @@ export async function updateTenantProfileField(
         "lead_sources",
         "primary_goal",
         "qualification_criteria",
+        // A2P 10DLC fields
+        "legal_business_name",
+        "ein_tax_id",
+        "business_address",
+        "business_type",
+        "business_industry",
+        "business_registration_id_type",
+        "business_regions_of_operation",
+        "authorized_rep_1",
+        "authorized_rep_2",
+        "a2p_business_info_complete",
     ];
 
     if (!allowedFields.includes(field)) {

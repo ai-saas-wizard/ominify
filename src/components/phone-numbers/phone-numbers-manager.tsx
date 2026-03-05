@@ -27,6 +27,7 @@ interface Props {
     twilioAccount: any;
     initialPhoneNumbers: any[];
     a2pRegistration: any;
+    tenantProfile: any;
 }
 
 export function PhoneNumbersManager({
@@ -35,6 +36,7 @@ export function PhoneNumbersManager({
     twilioAccount,
     initialPhoneNumbers,
     a2pRegistration,
+    tenantProfile,
 }: Props) {
     const router = useRouter();
     const [phoneNumbers, setPhoneNumbers] = useState(initialPhoneNumbers);
@@ -407,6 +409,7 @@ export function PhoneNumbersManager({
                 <A2PStatusCard
                     clientId={clientId}
                     a2pRegistration={a2pRegistration}
+                    tenantProfile={tenantProfile}
                 />
             )}
         </div>

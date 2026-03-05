@@ -9,6 +9,22 @@ import {
     listPurchasedNumbers,
     createMessagingService,
     addNumberToMessagingService,
+    // TrustHub Customer Profile
+    createSecondaryCustomerProfile,
+    createEndUserBusinessInfo,
+    createEndUserAuthorizedRep,
+    createTrustHubAddress,
+    attachEntityToCustomerProfile,
+    evaluateCustomerProfile,
+    submitCustomerProfile,
+    checkCustomerProfileStatus,
+    // Trust Product
+    createA2PTrustProduct,
+    createEndUserA2PProfile,
+    attachEntityToTrustProduct,
+    evaluateAndSubmitTrustProduct,
+    checkTrustProductStatus,
+    // Brand & Campaign
     registerBrand,
     registerCampaign,
     checkBrandStatus,
@@ -214,99 +230,415 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
     }
 }
 
-// ─── A2P 10DLC Registration ────────────────────────────────────────────────
+// ─── A2P 10DLC Registration Pipeline ──────────────────────────────────────
 
-export async function startA2PRegistration(clientId: string) {
+export interface A2PBusinessInfo {
+    legalBusinessName: string;
+    businessType: string;
+    einTaxId: string;
+    businessIndustry: string;
+    businessRegistrationIdType: string;
+    businessRegionsOfOperation: string;
+    websiteUrl: string;
+    businessAddress: {
+        street: string;
+        city: string;
+        state: string;
+        zip: string;
+        country: string;
+    };
+    authorizedRep1: {
+        first_name: string;
+        last_name: string;
+        email: string;
+        phone: string;
+        job_title: string;
+        job_position: string;
+    };
+    authorizedRep2: {
+        first_name: string;
+        last_name: string;
+        email: string;
+        phone: string;
+        job_title: string;
+        job_position: string;
+    };
+}
+
+// Step 1: Save business info for A2P to tenant_profiles and ensure a2p_registrations row exists
+export async function saveA2PBusinessInfo(clientId: string, info: A2PBusinessInfo) {
     try {
-        // Check if A2P registration already exists
-        const { data: existingA2P } = await supabase
+        // Save business details to tenant_profiles
+        const { error: profileError } = await supabase
+            .from("tenant_profiles")
+            .update({
+                legal_business_name: info.legalBusinessName,
+                business_type: info.businessType,
+                ein_tax_id: info.einTaxId,
+                business_industry: info.businessIndustry,
+                business_registration_id_type: info.businessRegistrationIdType,
+                business_regions_of_operation: info.businessRegionsOfOperation,
+                website: info.websiteUrl,
+                business_address: info.businessAddress,
+                authorized_rep_1: info.authorizedRep1,
+                authorized_rep_2: info.authorizedRep2,
+                a2p_business_info_complete: true,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("client_id", clientId);
+
+        if (profileError) {
+            console.error("saveA2PBusinessInfo profile error:", profileError);
+            return { success: false, error: profileError.message };
+        }
+
+        // Upsert a2p registration row
+        const { data: existing } = await supabase
             .from("tenant_a2p_registrations")
-            .select("id, brand_status, campaign_status")
+            .select("id")
             .eq("client_id", clientId)
             .single();
 
-        if (existingA2P) {
-            return {
-                success: false,
-                error: "A2P registration already exists. Check the status below.",
-            };
+        if (!existing) {
+            const { error: insertError } = await supabase.from("tenant_a2p_registrations").insert({
+                client_id: clientId,
+                current_step: "customer_profile",
+                brand_status: "not_started",
+                campaign_status: "not_started",
+                secondary_profile_status: "not_started",
+                trust_product_status: "not_started",
+            });
+            if (insertError) {
+                console.error("saveA2PBusinessInfo insert error:", insertError);
+                return { success: false, error: insertError.message };
+            }
+        } else {
+            await supabase
+                .from("tenant_a2p_registrations")
+                .update({ current_step: "customer_profile" })
+                .eq("id", existing.id);
         }
 
-        // Get Twilio account
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true };
+    } catch (err: any) {
+        console.error("saveA2PBusinessInfo error:", err);
+        return { success: false, error: err.message || "Failed to save business info" };
+    }
+}
+
+// Step 2: Create TrustHub Customer Profile (submits to Twilio)
+export async function createA2PCustomerProfile(clientId: string) {
+    try {
         const account = await getTwilioAccount(clientId);
-        if (!account) {
-            return { success: false, error: "Twilio subaccount not provisioned" };
-        }
+        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
 
-        // Get tenant profile for business info
         const { data: profile } = await supabase
             .from("tenant_profiles")
             .select("*")
             .eq("client_id", clientId)
             .single();
 
-        if (!profile) {
-            return { success: false, error: "Tenant profile not found. Complete onboarding first." };
+        if (!profile || !profile.a2p_business_info_complete) {
+            return { success: false, error: "Business information not complete. Fill out the form first." };
         }
 
-        // Get client for email
         const { data: client } = await supabase
             .from("clients")
             .select("name, email")
             .eq("id", clientId)
             .single();
 
+        const email = client?.email || "support@ominify.com";
+        const businessName = profile.legal_business_name || client?.name || "Unknown";
+        const address = profile.business_address || {};
+        const rep1 = profile.authorized_rep_1 || {};
+        const rep2 = profile.authorized_rep_2 || {};
+
+        // 1. Create Secondary Customer Profile
+        const customerProfile = await createSecondaryCustomerProfile(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            businessName,
+            email
+        );
+
+        // 2. Create EndUser for business info
+        const businessEndUser = await createEndUserBusinessInfo(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            {
+                businessName,
+                businessType: profile.business_type || "LLC",
+                businessIndustry: profile.business_industry || "ONLINE",
+                businessRegistrationNumber: profile.ein_tax_id || "",
+                businessRegistrationIdType: profile.business_registration_id_type || "EIN",
+                businessRegionsOfOperation: profile.business_regions_of_operation || "USA_AND_CANADA",
+                websiteUrl: profile.website || "",
+            }
+        );
+
+        // 3. Create EndUser for authorized rep 1
+        const rep1EndUser = await createEndUserAuthorizedRep(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            1,
+            {
+                firstName: rep1.first_name || "",
+                lastName: rep1.last_name || "",
+                email: rep1.email || email,
+                phone: rep1.phone || "",
+                businessTitle: rep1.job_title || "",
+                jobPosition: rep1.job_position || "Other",
+            }
+        );
+
+        // 4. Create EndUser for authorized rep 2
+        const rep2EndUser = await createEndUserAuthorizedRep(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            2,
+            {
+                firstName: rep2.first_name || "",
+                lastName: rep2.last_name || "",
+                email: rep2.email || email,
+                phone: rep2.phone || "",
+                businessTitle: rep2.job_title || "",
+                jobPosition: rep2.job_position || "Other",
+            }
+        );
+
+        // 5. Create Address
+        const addressResult = await createTrustHubAddress(
+            account.subaccount_sid,
+            account.auth_token_encrypted,
+            {
+                customerName: businessName,
+                street: address.street || "",
+                city: address.city || "",
+                region: address.state || "",
+                postalCode: address.zip || "",
+                isoCountry: address.country || "US",
+            }
+        );
+
+        // 6. Attach all entities to customer profile
+        await attachEntityToCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid, businessEndUser.sid
+        );
+        await attachEntityToCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid, rep1EndUser.sid
+        );
+        await attachEntityToCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid, rep2EndUser.sid
+        );
+        await attachEntityToCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid, addressResult.sid
+        );
+
+        // 7. Evaluate
+        const evaluation = await evaluateCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid
+        );
+        console.log("[A2P] Customer Profile evaluation:", evaluation);
+
+        // 8. Submit for review
+        await submitCustomerProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            customerProfile.sid
+        );
+
+        // 9. Store all SIDs in DB
+        await supabase
+            .from("tenant_a2p_registrations")
+            .update({
+                secondary_customer_profile_sid: customerProfile.sid,
+                secondary_profile_status: "pending-review",
+                customer_profile_sid: customerProfile.sid,
+                end_user_business_sid: businessEndUser.sid,
+                end_user_rep1_sid: rep1EndUser.sid,
+                end_user_rep2_sid: rep2EndUser.sid,
+                address_sid: addressResult.sid,
+                current_step: "profile_review",
+            })
+            .eq("client_id", clientId);
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true };
+    } catch (err: any) {
+        console.error("createA2PCustomerProfile error:", err);
+        return { success: false, error: err.message || "Failed to create customer profile" };
+    }
+}
+
+// Step 3: Create A2P Trust Product (after customer profile is approved)
+export async function createA2PTrustProductAction(clientId: string) {
+    try {
+        const account = await getTwilioAccount(clientId);
+        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
+
+        const { data: registration } = await supabase
+            .from("tenant_a2p_registrations")
+            .select("*")
+            .eq("client_id", clientId)
+            .single();
+
+        if (!registration) return { success: false, error: "No A2P registration found." };
+        if (registration.secondary_profile_status !== "twilio-approved") {
+            return { success: false, error: "Customer profile must be approved first." };
+        }
+
+        const { data: profile } = await supabase
+            .from("tenant_profiles")
+            .select("*")
+            .eq("client_id", clientId)
+            .single();
+
+        const { data: client } = await supabase
+            .from("clients")
+            .select("name, email")
+            .eq("id", clientId)
+            .single();
+
+        const email = client?.email || "support@ominify.com";
+        const businessName = profile?.legal_business_name || client?.name || "Unknown";
+
+        // 1. Create Trust Product
+        const trustProduct = await createA2PTrustProduct(
+            account.subaccount_sid, account.auth_token_encrypted,
+            `${businessName} - A2P Trust`,
+            email
+        );
+
+        // 2. Create A2P Profile EndUser
+        const a2pEndUser = await createEndUserA2PProfile(
+            account.subaccount_sid, account.auth_token_encrypted,
+            {
+                businessName,
+                brandName: businessName,
+                businessType: profile?.business_type || "LLC",
+                businessIndustry: profile?.business_industry || "ONLINE",
+                businessRegistrationNumber: profile?.ein_tax_id || "",
+                businessRegionsOfOperation: profile?.business_regions_of_operation || "USA_AND_CANADA",
+                websiteUrl: profile?.website || "",
+            }
+        );
+
+        // 3. Attach Secondary Customer Profile to Trust Product
+        await attachEntityToTrustProduct(
+            account.subaccount_sid, account.auth_token_encrypted,
+            trustProduct.sid, registration.secondary_customer_profile_sid
+        );
+
+        // 4. Attach A2P EndUser to Trust Product
+        await attachEntityToTrustProduct(
+            account.subaccount_sid, account.auth_token_encrypted,
+            trustProduct.sid, a2pEndUser.sid
+        );
+
+        // 5. Evaluate and Submit
+        await evaluateAndSubmitTrustProduct(
+            account.subaccount_sid, account.auth_token_encrypted,
+            trustProduct.sid
+        );
+
+        // 6. Update DB
+        await supabase
+            .from("tenant_a2p_registrations")
+            .update({
+                trust_product_sid: trustProduct.sid,
+                trust_product_status: "pending-review",
+                end_user_a2p_profile_sid: a2pEndUser.sid,
+                current_step: "trust_review",
+            })
+            .eq("id", registration.id);
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true };
+    } catch (err: any) {
+        console.error("createA2PTrustProductAction error:", err);
+        return { success: false, error: err.message || "Failed to create trust product" };
+    }
+}
+
+// Step 4: Register Brand (after trust product is approved)
+export async function registerBrandAction(clientId: string) {
+    try {
+        const account = await getTwilioAccount(clientId);
+        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
+
+        const { data: registration } = await supabase
+            .from("tenant_a2p_registrations")
+            .select("*")
+            .eq("client_id", clientId)
+            .single();
+
+        if (!registration) return { success: false, error: "No A2P registration found." };
+        if (registration.trust_product_status !== "twilio-approved") {
+            return { success: false, error: "Trust product must be approved first." };
+        }
+
         // Register brand
         const brandResult = await registerBrand(
             account.subaccount_sid,
             account.auth_token_encrypted,
-            {
-                legalName: profile.company_name || client?.name || "Unknown",
-                contactEmail: client?.email || "support@ominify.com",
-                customerProfileSid: "", // Will be created by registerBrand
-            }
+            registration.trust_product_sid,
+            registration.secondary_customer_profile_sid
         );
 
         // Create messaging service if not exists
         let messagingServiceSid = account.messaging_service_sid;
         if (!messagingServiceSid) {
+            const { data: profile } = await supabase
+                .from("tenant_profiles")
+                .select("legal_business_name")
+                .eq("client_id", clientId)
+                .single();
+
+            const { data: client } = await supabase
+                .from("clients")
+                .select("name")
+                .eq("id", clientId)
+                .single();
+
             const msgService = await createMessagingService(
                 account.subaccount_sid,
                 account.auth_token_encrypted,
-                profile.company_name || client?.name || "OMINIFY Tenant",
+                profile?.legal_business_name || client?.name || "OMINIFY Tenant",
                 clientId
             );
             messagingServiceSid = msgService.sid;
 
-            // Update Twilio account with messaging service SID
             await supabase
                 .from("tenant_twilio_accounts")
                 .update({ messaging_service_sid: messagingServiceSid })
                 .eq("client_id", clientId);
         }
 
-        // Store A2P registration
-        const { error } = await supabase.from("tenant_a2p_registrations").insert({
-            client_id: clientId,
-            brand_sid: brandResult.brandSid,
-            brand_status: "pending",
-            customer_profile_sid: brandResult.customerProfileSid,
-            campaign_status: "awaiting_brand",
-        });
-
-        if (error) {
-            console.error("startA2PRegistration DB error:", error);
-            return { success: false, error: error.message };
-        }
+        // Update DB
+        await supabase
+            .from("tenant_a2p_registrations")
+            .update({
+                brand_sid: brandResult.brandSid,
+                brand_status: "pending",
+                current_step: "brand_review",
+            })
+            .eq("id", registration.id);
 
         revalidatePath(`/client/${clientId}/phone-numbers`);
-        return { success: true, brandStatus: "pending" };
+        return { success: true };
     } catch (err: any) {
-        console.error("startA2PRegistration error:", err);
-        return { success: false, error: err.message || "Failed to start A2P registration" };
+        console.error("registerBrandAction error:", err);
+        return { success: false, error: err.message || "Failed to register brand" };
     }
 }
 
+// Campaign submission
 export interface CampaignSubmission {
     description: string;
     messageFlow: string;
@@ -318,7 +650,6 @@ export interface CampaignSubmission {
 
 export async function submitA2PCampaign(clientId: string, campaign: CampaignSubmission) {
     try {
-        // Get existing registration — brand must be approved
         const { data: registration } = await supabase
             .from("tenant_a2p_registrations")
             .select("*")
@@ -326,7 +657,7 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
             .single();
 
         if (!registration) {
-            return { success: false, error: "No A2P registration found. Register your brand first." };
+            return { success: false, error: "No A2P registration found." };
         }
 
         if (registration.brand_status !== "APPROVED") {
@@ -337,17 +668,10 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
             return { success: false, error: "Campaign already submitted." };
         }
 
-        // Get Twilio account
         const account = await getTwilioAccount(clientId);
-        if (!account) {
-            return { success: false, error: "Twilio subaccount not found." };
-        }
+        if (!account) return { success: false, error: "Twilio subaccount not found." };
+        if (!account.messaging_service_sid) return { success: false, error: "Messaging service not configured." };
 
-        if (!account.messaging_service_sid) {
-            return { success: false, error: "Messaging service not configured." };
-        }
-
-        // Submit campaign to Twilio
         const campaignResult = await registerCampaign(
             account.subaccount_sid,
             account.auth_token_encrypted,
@@ -363,12 +687,12 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
             }
         );
 
-        // Update DB
         await supabase
             .from("tenant_a2p_registrations")
             .update({
                 campaign_sid: campaignResult.campaignSid,
                 campaign_status: "pending_approval",
+                current_step: "campaign_review",
             })
             .eq("id", registration.id);
 
@@ -380,9 +704,9 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
     }
 }
 
+// Poll all pending stages
 export async function checkA2PStatus(clientId: string) {
     try {
-        // Get existing registration
         const { data: registration } = await supabase
             .from("tenant_a2p_registrations")
             .select("*")
@@ -395,56 +719,109 @@ export async function checkA2PStatus(clientId: string) {
             return { success: true, data: null };
         }
 
-        // Get Twilio account
         const account = await getTwilioAccount(clientId);
         if (!account) {
             return { success: true, data: registration };
         }
 
         let updated = false;
+        const updates: Record<string, string> = {};
 
-        // Check brand status if pending
-        if (registration.brand_sid && registration.brand_status === "pending") {
-            const brandStatus = await checkBrandStatus(
-                account.subaccount_sid,
-                account.auth_token_encrypted,
-                registration.brand_sid
-            );
-
-            if (brandStatus.status !== registration.brand_status) {
-                await supabase
-                    .from("tenant_a2p_registrations")
-                    .update({ brand_status: brandStatus.status })
-                    .eq("id", registration.id);
-                registration.brand_status = brandStatus.status;
-                updated = true;
+        // Check customer profile status
+        if (
+            registration.secondary_customer_profile_sid &&
+            (registration.secondary_profile_status === "pending-review" || registration.secondary_profile_status === "in-review")
+        ) {
+            try {
+                const profileStatus = await checkCustomerProfileStatus(
+                    account.subaccount_sid, account.auth_token_encrypted,
+                    registration.secondary_customer_profile_sid
+                );
+                if (profileStatus.status !== registration.secondary_profile_status) {
+                    updates.secondary_profile_status = profileStatus.status;
+                    registration.secondary_profile_status = profileStatus.status;
+                    if (profileStatus.status === "twilio-approved") {
+                        updates.current_step = "trust_product";
+                    }
+                    updated = true;
+                }
+            } catch (err) {
+                console.error("[A2P] Check profile status error:", err);
             }
         }
 
-        // Check campaign status if pending
+        // Check trust product status
+        if (
+            registration.trust_product_sid &&
+            (registration.trust_product_status === "pending-review" || registration.trust_product_status === "in-review")
+        ) {
+            try {
+                const trustStatus = await checkTrustProductStatus(
+                    account.subaccount_sid, account.auth_token_encrypted,
+                    registration.trust_product_sid
+                );
+                if (trustStatus.status !== registration.trust_product_status) {
+                    updates.trust_product_status = trustStatus.status;
+                    registration.trust_product_status = trustStatus.status;
+                    if (trustStatus.status === "twilio-approved") {
+                        updates.current_step = "brand_registration";
+                    }
+                    updated = true;
+                }
+            } catch (err) {
+                console.error("[A2P] Check trust product status error:", err);
+            }
+        }
+
+        // Check brand status
+        if (registration.brand_sid && registration.brand_status === "pending") {
+            try {
+                const brandStatus = await checkBrandStatus(
+                    account.subaccount_sid, account.auth_token_encrypted,
+                    registration.brand_sid
+                );
+                if (brandStatus.status !== registration.brand_status) {
+                    updates.brand_status = brandStatus.status;
+                    registration.brand_status = brandStatus.status;
+                    if (brandStatus.status === "APPROVED") {
+                        updates.current_step = "campaign";
+                    }
+                    updated = true;
+                }
+            } catch (err) {
+                console.error("[A2P] Check brand status error:", err);
+            }
+        }
+
+        // Check campaign status
         if (
             registration.campaign_sid &&
             registration.campaign_status === "pending_approval" &&
             account.messaging_service_sid
         ) {
-            const campaignStatus = await checkCampaignStatus(
-                account.subaccount_sid,
-                account.auth_token_encrypted,
-                account.messaging_service_sid,
-                registration.campaign_sid
-            );
-
-            if (campaignStatus.status !== registration.campaign_status) {
-                await supabase
-                    .from("tenant_a2p_registrations")
-                    .update({ campaign_status: campaignStatus.status })
-                    .eq("id", registration.id);
-                registration.campaign_status = campaignStatus.status;
-                updated = true;
+            try {
+                const campaignStatus = await checkCampaignStatus(
+                    account.subaccount_sid, account.auth_token_encrypted,
+                    account.messaging_service_sid, registration.campaign_sid
+                );
+                if (campaignStatus.status !== registration.campaign_status) {
+                    updates.campaign_status = campaignStatus.status;
+                    registration.campaign_status = campaignStatus.status;
+                    if (campaignStatus.status === "VERIFIED") {
+                        updates.current_step = "complete";
+                    }
+                    updated = true;
+                }
+            } catch (err) {
+                console.error("[A2P] Check campaign status error:", err);
             }
         }
 
         if (updated) {
+            await supabase
+                .from("tenant_a2p_registrations")
+                .update(updates)
+                .eq("id", registration.id);
             revalidatePath(`/client/${clientId}/phone-numbers`);
         }
 

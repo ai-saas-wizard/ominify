@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { getTwilioAccount, getPhoneNumbers, checkA2PStatus } from "@/app/actions/twilio-actions";
+import { getTenantProfile } from "@/app/actions/tenant-profile-actions";
 import { PhoneNumbersManager } from "@/components/phone-numbers/phone-numbers-manager";
 
 export default async function PhoneNumbersPage(props: {
@@ -33,6 +34,7 @@ export default async function PhoneNumbersPage(props: {
     const twilioAccount = await getTwilioAccount(clientId);
     const phoneNumbers = await getPhoneNumbers(clientId);
     const a2pResult = await checkA2PStatus(clientId);
+    const tenantProfile = await getTenantProfile(clientId);
 
     return (
         <div className="p-4 lg:p-8">
@@ -42,6 +44,7 @@ export default async function PhoneNumbersPage(props: {
                 twilioAccount={twilioAccount}
                 initialPhoneNumbers={phoneNumbers}
                 a2pRegistration={a2pResult?.data || null}
+                tenantProfile={tenantProfile}
             />
         </div>
     );
