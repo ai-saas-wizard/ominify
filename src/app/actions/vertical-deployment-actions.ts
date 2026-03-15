@@ -7,6 +7,10 @@ import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import { getVertical } from "@/lib/verticals/registry";
 import { buildREInboundPrompt } from "@/lib/verticals/real-estate-investor/prompts";
 import { buildREInboundTools } from "@/lib/verticals/real-estate-investor/tools";
+import {
+    RE_STRUCTURED_DATA_SCHEMA,
+    RE_STRUCTURED_DATA_PROMPT,
+} from "@/lib/verticals/real-estate-investor/sheets-schema";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import type { CreateAssistantPayload } from "@/lib/vapi";
@@ -345,6 +349,11 @@ function buildVerticalVapiPayload(
             agentType: overrides.agentType,
             agentCategory: overrides.agentCategory,
             templateVersion: overrides.templateVersion,
+        },
+        analysisPlan: {
+            structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
+            structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
+            minMessagesThreshold: 5,
         },
     };
 

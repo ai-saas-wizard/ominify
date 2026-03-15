@@ -1,7 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { ArrowLeft, Calendar, CheckCircle, XCircle, ExternalLink } from "lucide-react";
+import { ArrowLeft, Calendar, CheckCircle, XCircle, ExternalLink, Sheet } from "lucide-react";
 import { getCalendarConnectionStatus, disconnectCalendar, updateCalendarSettings } from "@/lib/google-calendar";
+import { getSheetsConnectionStatus, disconnectSheets } from "@/lib/google-sheets";
 import { revalidatePath } from "next/cache";
 
 export default async function IntegrationsPage(props: {
@@ -14,6 +15,9 @@ export default async function IntegrationsPage(props: {
 
     const calendarStatus = await getCalendarConnectionStatus(clientId);
     const isConnected = calendarStatus?.is_active === true;
+
+    const sheetsStatus = await getSheetsConnectionStatus(clientId);
+    const isSheetsConnected = sheetsStatus?.is_active === true;
 
     const APP_URL = process.env.NEXT_PUBLIC_APP_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
@@ -35,6 +39,12 @@ export default async function IntegrationsPage(props: {
             buffer_minutes: buffer,
             booking_window_days: window,
         });
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+    }
+
+    async function handleSheetsDisconnect() {
+        "use server";
+        await disconnectSheets(clientId);
         revalidatePath(`/client/${clientId}/settings/integrations`);
     }
 
@@ -62,10 +72,22 @@ export default async function IntegrationsPage(props: {
                     <p className="text-green-800">Google Calendar connected successfully!</p>
                 </div>
             )}
+            {searchParams.success === "sheets" && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    <p className="text-green-800">Google Sheets connected successfully! A lead spreadsheet has been created.</p>
+                </div>
+            )}
             {searchParams.error === "denied" && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-center gap-3">
                     <XCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
                     <p className="text-yellow-800">Calendar connection was cancelled.</p>
+                </div>
+            )}
+            {searchParams.error === "sheets_denied" && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-center gap-3">
+                    <XCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+                    <p className="text-yellow-800">Google Sheets connection was cancelled.</p>
                 </div>
             )}
             {searchParams.error === "failed" && (
@@ -73,6 +95,14 @@ export default async function IntegrationsPage(props: {
                     <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
                     <p className="text-red-800">
                         Failed to connect Google Calendar. Please try again.
+                    </p>
+                </div>
+            )}
+            {searchParams.error === "sheets_failed" && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+                    <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                    <p className="text-red-800">
+                        Failed to connect Google Sheets. Please try again.
                     </p>
                 </div>
             )}
@@ -201,6 +231,95 @@ export default async function IntegrationsPage(props: {
                         >
                             <ExternalLink className="w-4 h-4" />
                             Connect Google Calendar
+                        </a>
+                    )}
+                </div>
+            </div>
+
+            {/* Google Sheets Card */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <Sheet className="w-5 h-5 text-gray-600" />
+                            <h2 className="text-lg font-semibold text-gray-900">
+                                Google Sheets
+                            </h2>
+                        </div>
+                        {isSheetsConnected ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700">
+                                <CheckCircle className="w-4 h-4" />
+                                Connected
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600">
+                                Not connected
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                <div className="p-6">
+                    <p className="text-gray-600 mb-6">
+                        Connect Google Sheets to automatically log call data from your AI agents.
+                        A lead spreadsheet is created automatically with all the right columns.
+                    </p>
+
+                    {isSheetsConnected ? (
+                        <div className="space-y-6">
+                            {/* Connection Info */}
+                            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                                <p className="text-sm text-gray-500">
+                                    Connected since:{" "}
+                                    <span className="text-gray-900 font-medium">
+                                        {sheetsStatus?.connected_at
+                                            ? new Date(sheetsStatus.connected_at).toLocaleDateString()
+                                            : "Unknown"}
+                                    </span>
+                                </p>
+                                {sheetsStatus?.google_sheet_url && (
+                                    <p className="text-sm text-gray-500">
+                                        Spreadsheet:{" "}
+                                        <a
+                                            href={sheetsStatus.google_sheet_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1"
+                                        >
+                                            Open in Google Sheets
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="bg-emerald-50 rounded-lg p-4">
+                                <p className="text-sm text-emerald-800">
+                                    Call data is automatically logged after each qualifying call.
+                                    Caller name, property details, situation, appointment status, and more
+                                    are extracted and added as a new row.
+                                </p>
+                            </div>
+
+                            {/* Disconnect */}
+                            <div className="pt-4 border-t border-gray-200">
+                                <form action={handleSheetsDisconnect}>
+                                    <button
+                                        type="submit"
+                                        className="text-sm text-red-600 hover:text-red-800 font-medium transition"
+                                    >
+                                        Disconnect Google Sheets
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    ) : (
+                        <a
+                            href={`/api/integrations/google-sheets/authorize?clientId=${clientId}`}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition shadow-sm"
+                        >
+                            <ExternalLink className="w-4 h-4" />
+                            Connect Google Sheets
                         </a>
                     )}
                 </div>

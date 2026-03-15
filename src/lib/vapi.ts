@@ -111,6 +111,14 @@ export interface CreateAssistantPayload {
         hipaaEnabled?: boolean;
         pciEnabled?: boolean;
     };
+    analysisPlan?: {
+        summaryPrompt?: string;
+        structuredDataSchema?: Record<string, any>;
+        structuredDataPrompt?: string;
+        successEvaluationPrompt?: string;
+        successEvaluationRubric?: string;
+        minMessagesThreshold?: number;
+    };
 }
 
 export async function createAssistant(

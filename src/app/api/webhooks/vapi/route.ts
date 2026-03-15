@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { recordCallUsage } from "@/lib/billing";
 import { extractContactInfo } from "@/lib/openai-extractor";
+import { getSheetsConnectionStatus, appendLeadRow } from "@/lib/google-sheets";
+import { buildSheetRow } from "@/lib/verticals/real-estate-investor/sheets-schema";
 import crypto from "crypto";
 
 /**
@@ -348,6 +350,61 @@ async function persistCallRecord(
 }
 
 
+// Append call data to Google Sheets (if client has Sheets connected)
+async function appendCallToSheet(
+    call: NonNullable<VapiWebhookPayload['message']['call']>,
+    artifact?: VapiWebhookPayload['message']['artifact']
+) {
+    try {
+        if (!call.orgId) return;
+
+        const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
+        if (!clientId) return;
+
+        // Check if client has Google Sheets connected
+        const sheetsStatus = await getSheetsConnectionStatus(clientId);
+        if (!sheetsStatus?.is_active || !sheetsStatus?.google_sheet_id) return;
+
+        // Only log calls with structured data (meaningful conversations)
+        const structuredData = call.analysis?.structuredData;
+        if (!structuredData || Object.keys(structuredData).length === 0) {
+            console.log('[VAPI WEBHOOK] No structured data for sheets, skipping:', call.id);
+            return;
+        }
+
+        // Calculate duration
+        const startedAt = call.startedAt ? new Date(call.startedAt) : null;
+        const endedAt = call.endedAt ? new Date(call.endedAt) : null;
+        const durationSeconds = startedAt && endedAt
+            ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
+            : 0;
+        const mins = Math.floor(durationSeconds / 60);
+        const secs = durationSeconds % 60;
+        const durationFormatted = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+        // Get recording URL
+        const recordingUrl = call.artifact?.recordingUrl || artifact?.recordingUrl || null;
+
+        // Build row from structured data + call metadata
+        const row = buildSheetRow(structuredData, {
+            date: startedAt
+                ? startedAt.toLocaleString('en-US', { timeZone: 'America/New_York' })
+                : new Date().toLocaleString('en-US'),
+            durationFormatted,
+            recordingUrl,
+            callerPhone: call.customer?.number || null,
+        });
+
+        const success = await appendLeadRow(clientId, row);
+        if (success) {
+            console.log('[VAPI WEBHOOK] Sheet row appended for call:', call.id);
+        }
+    } catch (error) {
+        // Fail silently — never block the webhook response for a sheets error
+        console.error('[VAPI WEBHOOK] Error appending to sheet:', error);
+    }
+}
+
 // Handle End of Call - Cleanup and History
 async function handleEndOfCall(
     call: NonNullable<VapiWebhookPayload['message']['call']>,
@@ -385,6 +442,10 @@ async function handleEndOfCall(
                 }
             }
         }
+
+        // 5. Append to Google Sheets (if connected)
+        await appendCallToSheet(call, artifact);
+
         console.log('[VAPI WEBHOOK] handleEndOfCall completed for:', call.id);
 
     } catch (error) {
