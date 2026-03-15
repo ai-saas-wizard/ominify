@@ -1,8 +1,10 @@
 import { supabase } from "@/lib/supabase";
-import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap, Ban } from "lucide-react";
+import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap } from "lucide-react";
 import Link from "next/link";
 import { CreateClientDialog } from "@/components/admin/create-client-dialog";
 import { DisableClientButton } from "@/components/admin/disable-client-button";
+import { ClientCard } from "@/components/admin/client-card";
+import { Badge } from "@/components/ui/badge";
 
 // Fetch clients with umbrella + profile data
 async function getClients() {
@@ -91,34 +93,32 @@ export default async function AdminClientsPage() {
                         Type B — Umbrella Clients
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {umbrellaClients.map((client) => (
-                            <div key={client.id} className={`bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-all ${client.disabled ? "border-red-200 opacity-75" : "border-indigo-100"}`}>
+                        {umbrellaClients.map((client, i) => (
+                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} variant="umbrella">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-indigo-50 text-indigo-600"}`}>
-                                            {client.disabled ? <Ban className="w-5 h-5" /> : (client.name?.[0]?.toUpperCase() || "C")}
+                                            {client.name?.[0]?.toUpperCase() || "C"}
                                         </div>
                                         <div>
-                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400 line-through" : "text-gray-900"}`}>{client.name}</h3>
-                                            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
-                                                <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">
+                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400" : "text-gray-900"}`}>{client.name}</h3>
+                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-indigo-100 text-indigo-700 border-indigo-200">
                                                     UMBRELLA
-                                                </span>
+                                                </Badge>
                                                 {client.disabled && (
-                                                    <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                                                    <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border-red-200">
                                                         DISABLED
-                                                    </span>
+                                                    </Badge>
                                                 )}
-                                                <span>•</span>
-                                                <span>{client.email || "No email"}</span>
+                                                <span className="text-xs text-gray-400 truncate max-w-[140px]">{client.email || "No email"}</span>
                                             </div>
                                         </div>
                                     </div>
-                                    <DisableClientButton clientId={client.id} disabled={!!client.disabled} />
+                                    <DisableClientButton clientId={client.id} clientName={client.name} disabled={!!client.disabled} />
                                 </div>
 
-                                <div className="space-y-2 pt-2 border-t border-indigo-50 mt-3">
-                                    {/* Concurrency + Onboarding */}
+                                <div className="space-y-2 pt-3 border-t border-gray-100 mt-3">
                                     {client.concurrency_cap && (
                                         <div className="flex items-center text-gray-500 gap-2 text-sm">
                                             <Zap className="w-3.5 h-3.5" />
@@ -126,7 +126,6 @@ export default async function AdminClientsPage() {
                                         </div>
                                     )}
 
-                                    {/* Onboarding status */}
                                     <div className="flex items-center justify-between text-sm">
                                         <div className="flex items-center gap-2">
                                             {client.onboarding_completed ? (
@@ -147,7 +146,7 @@ export default async function AdminClientsPage() {
                                         </Link>
                                     </div>
                                 </div>
-                            </div>
+                            </ClientCard>
                         ))}
                     </div>
                 </div>
@@ -173,31 +172,32 @@ export default async function AdminClientsPage() {
                             <p className="text-gray-400 text-sm">No Type A clients yet.</p>
                         </div>
                     ) : (
-                        customClients.map((client) => (
-                            <div key={client.id} className={`bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-all ${client.disabled ? "border-red-200 opacity-75" : ""}`}>
+                        customClients.map((client, i) => (
+                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} variant="custom">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-blue-50 text-blue-600"}`}>
-                                            {client.disabled ? <Ban className="w-5 h-5" /> : (client.name?.[0]?.toUpperCase() || "C")}
+                                            {client.name?.[0]?.toUpperCase() || "C"}
                                         </div>
                                         <div>
-                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400 line-through" : "text-gray-900"}`}>{client.name}</h3>
-                                            <div className="flex items-center gap-1 text-xs text-gray-500">
-                                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">CUSTOM</span>
+                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400" : "text-gray-900"}`}>{client.name}</h3>
+                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                                    CUSTOM
+                                                </Badge>
                                                 {client.disabled && (
-                                                    <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                                                    <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border-red-200">
                                                         DISABLED
-                                                    </span>
+                                                    </Badge>
                                                 )}
-                                                <span>•</span>
-                                                <span>{client.email || "No email"}</span>
+                                                <span className="text-xs text-gray-400 truncate max-w-[140px]">{client.email || "No email"}</span>
                                             </div>
                                         </div>
                                     </div>
-                                    <DisableClientButton clientId={client.id} disabled={!!client.disabled} />
+                                    <DisableClientButton clientId={client.id} clientName={client.name} disabled={!!client.disabled} />
                                 </div>
 
-                                <div className="space-y-3 pt-2 border-t mt-4">
+                                <div className="space-y-3 pt-3 border-t border-gray-100 mt-3">
                                     <div className="flex items-center justify-between text-sm">
                                         <div className="flex items-center text-gray-500 gap-2">
                                             <Key className="w-4 h-4" />
@@ -210,7 +210,7 @@ export default async function AdminClientsPage() {
                                         </Link>
                                     </div>
                                 </div>
-                            </div>
+                            </ClientCard>
                         ))
                     )}
                 </div>
