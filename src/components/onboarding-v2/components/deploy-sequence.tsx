@@ -2,19 +2,22 @@
 
 import { motion } from "framer-motion";
 import { Check, Loader2, AlertCircle, Rocket } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { DeploymentProgress } from "../types";
 
 interface DeploySequenceProps {
     progress: DeploymentProgress;
+    onRetry?: () => void;
+    onBackToProfile?: () => void;
 }
 
-export function DeploySequence({ progress }: DeploySequenceProps) {
+export function DeploySequence({ progress, onRetry, onBackToProfile }: DeploySequenceProps) {
     const percentage = progress.totalAgents > 0
         ? Math.round((progress.completedAgents / progress.totalAgents) * 100)
         : 0;
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
+        <div aria-live="polite" className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
             <motion.div
                 className="flex w-full max-w-lg flex-col items-center gap-8"
                 initial={{ opacity: 0, y: 20 }}
@@ -110,9 +113,23 @@ export function DeploySequence({ progress }: DeploySequenceProps) {
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="w-full rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600"
+                        className="w-full space-y-3"
                     >
-                        {progress.error}
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600" role="alert">
+                            {progress.error}
+                        </div>
+                        <div className="flex justify-center gap-3">
+                            {onRetry && (
+                                <Button onClick={onRetry} className="bg-violet-600 text-white hover:bg-violet-500">
+                                    Try Again
+                                </Button>
+                            )}
+                            {onBackToProfile && (
+                                <Button onClick={onBackToProfile} variant="outline">
+                                    Back to Profile
+                                </Button>
+                            )}
+                        </div>
                     </motion.div>
                 )}
             </motion.div>

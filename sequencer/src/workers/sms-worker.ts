@@ -336,7 +336,7 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
 }
 
 // Create the worker
-const smsWorker = new Worker<SmsJobPayload>('sms:send', processSmsJob, {
+const smsWorker = new Worker<SmsJobPayload>('sms-send', processSmsJob, {
     connection: redisConnection,
     concurrency: 10,
     limiter: {

@@ -114,8 +114,8 @@ export async function deployAgentFleet(
 ): Promise<DeploymentResult> {
     // 1. Save tenant profile
     const saveResult = await saveTenantProfile(clientId, profileFormData);
-    if (!saveResult) {
-        return { success: false, agents: [], error: "Failed to save profile" };
+    if (!saveResult || !saveResult.success) {
+        return { success: false, agents: [], error: saveResult?.error || "Failed to save profile" };
     }
 
     // 2. Fetch client and profile
@@ -400,8 +400,8 @@ export async function deployAgentFleetV2(
 ): Promise<DeploymentResult> {
     // 1. Save tenant profile
     const saveResult = await saveTenantProfile(clientId, profileFormData);
-    if (!saveResult) {
-        return { success: false, agents: [], error: "Failed to save profile" };
+    if (!saveResult || !saveResult.success) {
+        return { success: false, agents: [], error: saveResult?.error || "Failed to save profile" };
     }
 
     // 2. Fetch client and profile

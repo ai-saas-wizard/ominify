@@ -110,16 +110,23 @@ export function useDeployment(clientId: string) {
                     prev ? { ...prev, error: errorMsg } : prev
                 );
                 setDeploying(false);
-                return null;
+                return { success: false, agents: [], error: errorMsg };
             }
         },
         [clientId]
     );
+
+    const reset = useCallback(() => {
+        setDeploying(false);
+        setProgress(null);
+        setResult(null);
+    }, []);
 
     return {
         deploying,
         progress,
         result,
         deploy,
+        reset,
     };
 }

@@ -230,7 +230,7 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
 }
 
 // Create the worker with priority support
-const vapiWorker = new Worker<VapiJobPayload>('vapi:calls', processVapiJob, {
+const vapiWorker = new Worker<VapiJobPayload>('vapi-calls', processVapiJob, {
     connection: redisConnection,
     concurrency: 5, // Process multiple jobs, but concurrency is really managed by the manager
     lockDuration: 60000, // 1 minute lock (calls can take time to initiate)

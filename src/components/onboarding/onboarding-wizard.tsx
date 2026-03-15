@@ -26,6 +26,7 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
     const [currentStep, setCurrentStep] = useState(0);
     const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
     const [completing, setCompleting] = useState(false);
+    const [completeError, setCompleteError] = useState<string | null>(null);
     const [direction, setDirection] = useState(1);
     const prevStepRef = useRef(0);
 
@@ -94,6 +95,7 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
 
     const handleComplete = useCallback(async () => {
         setCompleting(true);
+        setCompleteError(null);
 
         // Save all data first
         const fd = formHook.buildFormData();
@@ -101,6 +103,7 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
 
         if (!saveResult.success) {
             setCompleting(false);
+            setCompleteError(saveResult.error || "Failed to save your profile. Please try again.");
             return;
         }
 
@@ -109,6 +112,8 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
 
         if (result.success) {
             window.location.href = `/client/${clientId}`;
+        } else {
+            setCompleteError(result.error || "Failed to complete onboarding. Please try again.");
         }
     }, [clientId, formHook]);
 
@@ -180,6 +185,7 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
                         form={formHook.form}
                         fieldMeta={formHook.fieldMeta}
                         completing={completing}
+                        completeError={completeError}
                         onComplete={handleComplete}
                         onGoToStep={goToStep}
                     />

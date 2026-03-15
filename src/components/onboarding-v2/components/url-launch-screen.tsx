@@ -100,6 +100,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                             onChange={(e) => setUrl(e.target.value)}
                             onKeyDown={handleKeyDown}
                             disabled={launching}
+                            aria-label="Your business website URL"
                             className="h-14 border-gray-200 bg-white pl-12 text-lg text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:ring-violet-500/20"
                         />
                     </div>
@@ -107,6 +108,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                         <motion.p
                             initial={{ opacity: 0, y: -4 }}
                             animate={{ opacity: 1, y: 0 }}
+                            role="alert"
                             className="text-sm text-red-500"
                         >
                             {error}

@@ -10,6 +10,7 @@ export function useAIAnalysisV2() {
     const [currentStage, setCurrentStage] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<AIAnalysisV2Result | null>(null);
+    const [retryCount, setRetryCount] = useState(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const stageRef = useRef(0);
 
@@ -41,10 +42,28 @@ export function useAIAnalysisV2() {
         setCurrentStage(ANALYSIS_STAGES.length - 1);
     }, []);
 
+    const categorizeError = useCallback((msg: string): string => {
+        const lower = msg.toLowerCase();
+        if (lower.includes("timeout") || lower.includes("etimedout") || lower.includes("took too long")) {
+            return "Analysis timed out. The website may be slow to respond. Try again or continue manually.";
+        }
+        if (lower.includes("429") || lower.includes("rate limit")) {
+            return "We're experiencing high demand. Please wait a moment and try again.";
+        }
+        if (lower.includes("403") || lower.includes("blocked") || lower.includes("bot")) {
+            return "This website blocked our analyzer. You can continue manually and fill in your details.";
+        }
+        if (lower.includes("404") || lower.includes("not found")) {
+            return "Website not found. Please check the URL and try again.";
+        }
+        return "Analysis failed. You can try again or continue manually.";
+    }, []);
+
     const analyzeWebsite = useCallback(async (url: string) => {
         setAnalyzing(true);
         setError(null);
         setResult(null);
+        setRetryCount((c) => c + 1);
 
         startStageProgression();
 
@@ -54,7 +73,7 @@ export function useAIAnalysisV2() {
             stopStageProgression();
 
             if (!analysisResult.success) {
-                setError(analysisResult.error || "Analysis failed");
+                setError(categorizeError(analysisResult.error || "Analysis failed"));
                 setAnalyzing(false);
                 return null;
             }
@@ -64,11 +83,12 @@ export function useAIAnalysisV2() {
             return analysisResult;
         } catch (err) {
             stopStageProgression();
-            setError(err instanceof Error ? err.message : "Analysis failed");
+            const msg = err instanceof Error ? err.message : "Analysis failed";
+            setError(categorizeError(msg));
             setAnalyzing(false);
             return null;
         }
-    }, [startStageProgression, stopStageProgression]);
+    }, [startStageProgression, stopStageProgression, categorizeError]);
 
     const resetAnalysis = useCallback(() => {
         if (timerRef.current) {
@@ -86,6 +106,7 @@ export function useAIAnalysisV2() {
         currentStage,
         error,
         result,
+        retryCount,
         analyzeWebsite,
         resetAnalysis,
     };

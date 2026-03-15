@@ -644,7 +644,7 @@ async function processEvent(job: Job<EventJobPayload>): Promise<void> {
 }
 
 // Create the worker
-const eventWorker = new Worker<EventJobPayload>('events:process', processEvent, {
+const eventWorker = new Worker<EventJobPayload>('events-process', processEvent, {
     connection: redisConnection,
     concurrency: 10,
 });

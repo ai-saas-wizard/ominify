@@ -7,7 +7,6 @@ export interface TenantProfile {
     website: string;
     service_area: { cities: string[]; zip_codes: string[]; radius_miles: number };
     job_types: { name: string; urgency_tier: string; avg_ticket: string; keywords: string }[];
-    typical_job_value: string;
     brand_voice: string;
     custom_phrases: string;
     greeting_style: string;

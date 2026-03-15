@@ -35,22 +35,22 @@ redis.on('connect', () => {
 // Queue Definitions
 // ═══════════════════════════════════════════════════════════════════
 
-export const smsQueue = new Queue('sms:send', { connection: redisConnection });
-export const emailQueue = new Queue('email:send', { connection: redisConnection });
-export const vapiQueue = new Queue('vapi:calls', { connection: redisConnection });
-export const eventQueue = new Queue('events:process', { connection: redisConnection });
+export const smsQueue = new Queue('sms-send', { connection: redisConnection });
+export const emailQueue = new Queue('email-send', { connection: redisConnection });
+export const vapiQueue = new Queue('vapi-calls', { connection: redisConnection });
+export const eventQueue = new Queue('events-process', { connection: redisConnection });
 // Reserved for future async healing — currently healing actions are executed synchronously by event-processor
-export const healingQueue = new Queue('healing:actions', { connection: redisConnection });
+export const healingQueue = new Queue('healing-actions', { connection: redisConnection });
 // Phase 5: Analytics queue for scheduled analytics jobs
-export const analyticsQueue = new Queue('analytics:compute', { connection: redisConnection });
+export const analyticsQueue = new Queue('analytics-compute', { connection: redisConnection });
 
 // Queue event listeners for monitoring
-export const smsQueueEvents = new QueueEvents('sms:send', { connection: redisConnection });
-export const emailQueueEvents = new QueueEvents('email:send', { connection: redisConnection });
-export const vapiQueueEvents = new QueueEvents('vapi:calls', { connection: redisConnection });
-export const eventQueueEvents = new QueueEvents('events:process', { connection: redisConnection });
-export const healingQueueEvents = new QueueEvents('healing:actions', { connection: redisConnection });
-export const analyticsQueueEvents = new QueueEvents('analytics:compute', { connection: redisConnection });
+export const smsQueueEvents = new QueueEvents('sms-send', { connection: redisConnection });
+export const emailQueueEvents = new QueueEvents('email-send', { connection: redisConnection });
+export const vapiQueueEvents = new QueueEvents('vapi-calls', { connection: redisConnection });
+export const eventQueueEvents = new QueueEvents('events-process', { connection: redisConnection });
+export const healingQueueEvents = new QueueEvents('healing-actions', { connection: redisConnection });
+export const analyticsQueueEvents = new QueueEvents('analytics-compute', { connection: redisConnection });
 
 /**
  * Get job counts for all queues (for health check)

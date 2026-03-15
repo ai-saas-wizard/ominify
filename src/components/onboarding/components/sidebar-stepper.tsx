@@ -14,7 +14,10 @@ interface SidebarStepperProps {
 }
 
 export function SidebarStepper({ currentStep, completedSteps, onStepClick, clientName }: SidebarStepperProps) {
-    const progressPercent = Math.round((completedSteps.size / (STEPS.length - 1)) * 100);
+    const progressPercent = Math.round((completedSteps.size / STEPS.length) * 100);
+    const maxReachableStep = completedSteps.size > 0
+        ? Math.max(...Array.from(completedSteps)) + 1
+        : 0;
 
     return (
         <div className="flex flex-col h-full">
@@ -25,7 +28,7 @@ export function SidebarStepper({ currentStep, completedSteps, onStepClick, clien
             </div>
 
             {/* Steps */}
-            <nav className="flex-1 px-4 py-6 overflow-y-auto">
+            <nav role="navigation" aria-label="Onboarding steps" className="flex-1 px-4 py-6 overflow-y-auto">
                 <div className="space-y-1">
                     {STEPS.map((step, idx) => {
                         const isActive = idx === currentStep;
@@ -36,14 +39,22 @@ export function SidebarStepper({ currentStep, completedSteps, onStepClick, clien
                             <div key={idx}>
                                 <button
                                     type="button"
-                                    onClick={() => onStepClick(idx)}
+                                    onClick={() => {
+                                        if (idx <= maxReachableStep || isCompleted) {
+                                            onStepClick(idx);
+                                        }
+                                    }}
+                                    aria-current={isActive ? "step" : undefined}
+                                    disabled={idx > maxReachableStep && !isCompleted}
                                     className={cn(
                                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all",
                                         isActive
                                             ? "bg-violet-50 text-violet-700"
                                             : isCompleted
                                             ? "text-gray-700 hover:bg-gray-50"
-                                            : "text-gray-400 hover:bg-gray-50 hover:text-gray-600"
+                                            : idx <= maxReachableStep
+                                            ? "text-gray-400 hover:bg-gray-50 hover:text-gray-600"
+                                            : "text-gray-300 cursor-not-allowed opacity-50"
                                     )}
                                 >
                                     {/* Step indicator */}

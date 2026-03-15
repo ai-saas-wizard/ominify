@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { UrlLaunchScreen } from "./components/url-launch-screen";
 import { AnalysisTheater } from "./components/analysis-theater";
@@ -43,6 +43,26 @@ export function OnboardingV2Wizard({
     const chat = useAgentChat(businessName, industry);
     const flowsHook = useConversationFlows();
     const deployment = useDeployment(clientId);
+
+    // ─── DEBOUNCE REFS ───
+    const deployingRef = useRef(false);
+    const continuingRef = useRef(false);
+
+    // ─── BEFOREUNLOAD WARNING ───
+    const hasUnsavedWork = useMemo(
+        () => phase !== "url_input" && phase !== "success",
+        [phase]
+    );
+
+    useEffect(() => {
+        const handler = (e: BeforeUnloadEvent) => {
+            if (hasUnsavedWork) {
+                e.preventDefault();
+            }
+        };
+        window.addEventListener("beforeunload", handler);
+        return () => window.removeEventListener("beforeunload", handler);
+    }, [hasUnsavedWork]);
 
     // ─── DERIVED ───
     const enabledAgents = useMemo(
@@ -96,11 +116,24 @@ export function OnboardingV2Wizard({
 
     // ─── PHASE 3: PROFILE REVIEW → AGENT FLEET ───
     const handleProfileContinue = useCallback(async () => {
+        if (continuingRef.current) return;
+
+        // Validate profile before proceeding
+        const isValid = profileForm.validate();
+        if (!isValid) return;
+
+        continuingRef.current = true;
         setPhase("agent_fleet");
 
-        // Fire-and-forget flow generation for all enabled agents
-        flowsHook.generateAllFlows(enabledAgents, profileForm.form);
-    }, [enabledAgents, profileForm.form, flowsHook]);
+        // Await flow generation with error handling (non-blocking — flows are optional)
+        try {
+            await flowsHook.generateAllFlows(enabledAgents, profileForm.form);
+        } catch (error) {
+            console.error("[ONBOARDING V2] Flow generation failed:", error);
+        } finally {
+            continuingRef.current = false;
+        }
+    }, [enabledAgents, profileForm, flowsHook]);
 
     const handleBackToProfile = useCallback(() => {
         setPhase("profile_review");
@@ -231,36 +264,56 @@ export function OnboardingV2Wizard({
 
     // ─── DEPLOY ───
     const handleDeploy = useCallback(async () => {
+        if (deployingRef.current) return;
+
+        // Validate before deploying
+        const isValid = profileForm.validate();
+        if (!isValid) {
+            setPhase("profile_review");
+            return;
+        }
+
+        deployingRef.current = true;
         setPhase("deploying");
         setChatOpen(false);
 
-        // Build profile FormData
-        const formData = profileForm.buildFormData();
+        try {
+            // Build profile FormData
+            const formData = profileForm.buildFormData();
 
-        // Add business name if missing
-        if (!formData.get("business_name")) {
-            formData.set("business_name", businessName);
-        }
-        if (!formData.get("industry")) {
-            formData.set("industry", industry);
-        }
-        if (!formData.get("website_url") && websiteUrl) {
-            formData.set("website_url", websiteUrl);
-        }
+            // Add business name if missing
+            if (!formData.get("business_name")) {
+                formData.set("business_name", businessName);
+            }
+            if (!formData.get("industry")) {
+                formData.set("industry", industry);
+            }
+            if (!formData.get("website_url") && websiteUrl) {
+                formData.set("website_url", websiteUrl);
+            }
 
-        // Serialize conversation flows
-        const flowsText = flowsHook.getAllFlowsAsText();
+            // Serialize conversation flows
+            const flowsText = flowsHook.getAllFlowsAsText();
 
-        const result = await deployment.deploy(enabledAgents, formData, flowsText);
+            const result = await deployment.deploy(enabledAgents, formData, flowsText);
 
-        if (result && result.success) {
-            setTimeout(() => setPhase("success"), 1500);
+            if (result && result.success) {
+                setTimeout(() => setPhase("success"), 1500);
+            }
+            // If failed, stay on "deploying" — DeploySequence shows error + retry buttons
+        } finally {
+            deployingRef.current = false;
         }
     }, [profileForm, businessName, industry, websiteUrl, deployment, enabledAgents, flowsHook]);
 
+    const handleDeployRetry = useCallback(() => {
+        deployment.reset();
+        setPhase("agent_fleet");
+    }, [deployment]);
+
     // ─── RENDER ───
     return (
-        <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gray-50">
+        <div role="main" className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gray-50">
             <AnimatePresence mode="wait">
                 {phase === "url_input" && (
                     <motion.div
@@ -317,6 +370,8 @@ export function OnboardingV2Wizard({
                             updateServiceAreaRadius={profileForm.updateServiceAreaRadius}
                             updateHours={profileForm.updateHours}
                             toggleLeadSource={profileForm.toggleLeadSource}
+                            validationErrors={profileForm.validationErrors}
+                            validationWarnings={profileForm.validationWarnings}
                             onContinue={handleProfileContinue}
                         />
                     </motion.div>
@@ -376,7 +431,14 @@ export function OnboardingV2Wizard({
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <DeploySequence progress={deployment.progress} />
+                        <DeploySequence
+                            progress={deployment.progress}
+                            onRetry={handleDeployRetry}
+                            onBackToProfile={() => {
+                                deployment.reset();
+                                setPhase("profile_review");
+                            }}
+                        />
                     </motion.div>
                 )}
 

@@ -30,7 +30,7 @@ export default async function OnboardingPage(props: {
 
     // Gate: Only UMBRELLA (Type B) clients can access onboarding
     if (client.account_type !== "UMBRELLA") {
-        redirect(`/client/${clientId}`);
+        redirect(`/client/${clientId}?notice=custom_no_onboarding`);
     }
 
     // Fetch existing tenant profile (may be partially filled)

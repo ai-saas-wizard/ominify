@@ -242,7 +242,7 @@ async function processEmailJob(job: Job<EmailJobPayload>): Promise<{ messageId: 
 }
 
 // Create the worker
-const emailWorker = new Worker<EmailJobPayload>('email:send', processEmailJob, {
+const emailWorker = new Worker<EmailJobPayload>('email-send', processEmailJob, {
     connection: redisConnection,
     concurrency: 5,
     limiter: {

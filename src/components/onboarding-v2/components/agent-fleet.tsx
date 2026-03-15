@@ -12,6 +12,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import {
+    AlertDialog,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogFooter,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogAction,
+    AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { CATEGORY_CONFIG, CONFIDENCE_CONFIG } from "../constants";
 import { ConversationFlowEditor } from "./conversation-flow-editor";
@@ -132,6 +143,7 @@ function FleetAgentCard({
                 <div className="mt-3 flex items-center gap-2">
                     <button
                         onClick={onCustomize}
+                        aria-label={`Customize ${agent.name}`}
                         className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-600 transition-colors hover:bg-violet-50"
                     >
                         <MessageSquare className="h-3.5 w-3.5" />
@@ -238,7 +250,7 @@ export function AgentFleet({
                         customize via chat, and edit conversation flows before deploying.
                     </p>
 
-                    <div className="grid gap-4 lg:grid-cols-2">
+                    <div role="list" aria-label="AI agents" className="grid gap-4 lg:grid-cols-2">
                         <AnimatePresence mode="popLayout">
                             {suggestedAgents.map((agent) => (
                                 <motion.div
@@ -274,20 +286,39 @@ export function AgentFleet({
                     <div className="text-sm text-gray-500">
                         <span className="font-medium text-gray-900">{enabledCount}</span> agent{enabledCount !== 1 ? "s" : ""} ready to deploy
                     </div>
-                    <Button
-                        onClick={onDeploy}
-                        disabled={deploying || enabledCount === 0}
-                        className="bg-violet-600 px-6 text-white hover:bg-violet-500 disabled:opacity-50"
-                    >
-                        <Rocket className="mr-2 h-4 w-4" />
-                        Deploy {enabledCount} Agent{enabledCount !== 1 ? "s" : ""}
-                    </Button>
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button
+                                disabled={deploying || enabledCount === 0}
+                                className="bg-violet-600 px-6 text-white hover:bg-violet-500 disabled:opacity-50"
+                            >
+                                <Rocket className="mr-2 h-4 w-4" />
+                                Deploy {enabledCount} Agent{enabledCount !== 1 ? "s" : ""}
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                    Deploy {enabledCount} Agent{enabledCount !== 1 ? "s" : ""}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will create VAPI assistants and configure sequences for your AI agents.
+                                    You can customize them further after deployment.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={onDeploy}>Deploy Now</AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                 </div>
             </div>
 
             {/* Floating chat button */}
             <motion.button
                 onClick={onOpenChat}
+                aria-label="Open chat to customize agents"
                 className="fixed bottom-24 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-violet-600 text-white shadow-lg shadow-violet-500/20 transition-colors hover:bg-violet-500"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}

@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import type { TenantProfile, AIFieldMeta } from "@/components/onboarding/types";
 import type { AIAnalysisV2Result } from "../types";
 import { DAYS_OF_WEEK } from "@/components/onboarding/constants";
+import { validateProfile, sanitizeForPrompt, type ValidationError } from "@/lib/onboarding-validation";
 
 // ─── DEFAULT PROFILE BUILDER ───
 
@@ -48,7 +49,6 @@ export function buildDefaultProfile(initial: Record<string, unknown> | null): Te
             radius_miles: existingServiceArea?.radius_miles || 25,
         },
         job_types: existingJobTypes || [],
-        typical_job_value: "",
         brand_voice: (initial?.brand_voice as string) || "professional",
         custom_phrases: initial?.custom_phrases ? JSON.stringify(initial.custom_phrases, null, 2) : "",
         greeting_style: (initial?.greeting_style as string) || "",
@@ -70,6 +70,8 @@ export function useProfileForm(initialProfile: Record<string, unknown> | null) {
     const [form, setForm] = useState<TenantProfile>(() => buildDefaultProfile(initialProfile));
     const [fieldMeta, setFieldMeta] = useState<Record<string, AIFieldMeta>>({});
     const [aiOriginalValues, setAIOriginalValues] = useState<Partial<TenantProfile>>({});
+    const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+    const [validationWarnings, setValidationWarnings] = useState<ValidationError[]>([]);
 
     // ─── FIELD UPDATES ───
 
@@ -119,19 +121,33 @@ export function useProfileForm(initialProfile: Record<string, unknown> | null) {
         }
     }, [aiOriginalValues]);
 
+    // ─── VALIDATION ───
+
+    const validate = useCallback((): boolean => {
+        const result = validateProfile(form);
+        setValidationErrors(result.errors);
+        setValidationWarnings(result.warnings);
+        return result.valid;
+    }, [form]);
+
+    const clearValidation = useCallback(() => {
+        setValidationErrors([]);
+        setValidationWarnings([]);
+    }, []);
+
     // ─── FORM DATA BUILDER ───
 
     const buildFormData = useCallback((): FormData => {
         const fd = new FormData();
         fd.set("industry", form.industry);
         fd.set("sub_industry", form.sub_industry);
-        fd.set("business_description", form.business_description);
+        fd.set("business_description", sanitizeForPrompt(form.business_description, "business_description"));
         fd.set("website", form.website);
         fd.set("service_area", JSON.stringify(form.service_area));
         fd.set("job_types", JSON.stringify(form.job_types));
         fd.set("brand_voice", form.brand_voice);
         fd.set("custom_phrases", form.custom_phrases);
-        fd.set("greeting_style", form.greeting_style);
+        fd.set("greeting_style", sanitizeForPrompt(form.greeting_style, "greeting_style"));
         fd.set("timezone", form.timezone);
         fd.set("business_hours", JSON.stringify(form.business_hours));
         fd.set("after_hours_behavior", form.after_hours_behavior);
@@ -206,10 +222,14 @@ export function useProfileForm(initialProfile: Record<string, unknown> | null) {
     return {
         form,
         fieldMeta,
+        validationErrors,
+        validationWarnings,
         updateField,
         applyV2Analysis,
         resetFieldToAI,
         buildFormData,
+        validate,
+        clearValidation,
         addJobType,
         updateJobType,
         removeJobType,

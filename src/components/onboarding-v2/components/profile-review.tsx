@@ -20,6 +20,7 @@ import {
     formatLeadSourceLabel,
 } from "@/components/onboarding/constants";
 import type { TenantProfile, AIFieldMeta } from "../types";
+import { validatePhoneNumber, type ValidationError } from "@/lib/onboarding-validation";
 
 // ─── PROPS ───
 
@@ -37,7 +38,31 @@ interface ProfileReviewProps {
     updateServiceAreaRadius: (value: number) => void;
     updateHours: (day: string, field: "open" | "close" | "closed", value: string | boolean) => void;
     toggleLeadSource: (source: string) => void;
+    validationErrors?: ValidationError[];
+    validationWarnings?: ValidationError[];
     onContinue: () => void;
+}
+
+// ─── FIELD ERROR DISPLAY ───
+
+function FieldError({ field, errors }: { field: string; errors?: ValidationError[] }) {
+    const error = errors?.find((e) => e.field === field);
+    if (!error) return null;
+    return (
+        <p className="mt-1 text-xs text-red-500" role="alert">
+            {error.message}
+        </p>
+    );
+}
+
+function FieldWarning({ field, warnings }: { field: string; warnings?: ValidationError[] }) {
+    const warning = warnings?.find((e) => e.field === field);
+    if (!warning) return null;
+    return (
+        <p className="mt-1 text-xs text-amber-600" role="status">
+            {warning.message}
+        </p>
+    );
 }
 
 // ─── SECTION WRAPPER ───
@@ -149,14 +174,29 @@ export function ProfileReview({
     updateServiceAreaRadius,
     updateHours,
     toggleLeadSource,
+    validationErrors,
+    validationWarnings,
     onContinue,
 }: ProfileReviewProps) {
+    const [phoneError, setPhoneError] = useState<string | null>(null);
+
     const enabledCount = Object.keys(fieldMeta).filter(
         (k) => fieldMeta[k]?.aiGenerated
     ).length;
 
+    const handlePhoneBlur = useCallback(() => {
+        if (form.emergency_phone) {
+            const result = validatePhoneNumber(form.emergency_phone);
+            setPhoneError(result.valid ? null : (result.error || null));
+        } else {
+            setPhoneError(null);
+        }
+    }, [form.emergency_phone]);
+
+    const hasErrors = validationErrors && validationErrors.length > 0;
+
     return (
-        <div className="flex min-h-screen flex-col bg-gray-50">
+        <div role="form" aria-label="Business profile review" className="flex min-h-screen flex-col bg-gray-50">
             {/* Header */}
             <div className="border-b border-gray-200 bg-white px-4 py-5 sm:px-6">
                 <div className="mx-auto max-w-3xl">
@@ -183,6 +223,7 @@ export function ProfileReview({
                                 <select
                                     value={form.industry}
                                     onChange={(e) => updateField("industry", e.target.value)}
+                                    aria-label="Industry"
                                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
                                 >
                                     <option value="">Select industry...</option>
@@ -190,6 +231,7 @@ export function ProfileReview({
                                         <option key={i.value} value={i.value}>{i.label}</option>
                                     ))}
                                 </select>
+                                <FieldError field="industry" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -208,9 +250,11 @@ export function ProfileReview({
                                     value={form.business_description}
                                     onChange={(e) => updateField("business_description", e.target.value)}
                                     rows={3}
+                                    aria-label="Business description"
                                     placeholder="Describe your business, services, and what makes you unique..."
                                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
                                 />
+                                <FieldError field="business_description" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -236,6 +280,7 @@ export function ProfileReview({
                                     placeholder="Austin, Round Rock, Cedar Park..."
                                     className="border-gray-200 bg-white text-gray-900"
                                 />
+                                <FieldWarning field="service_area" warnings={validationWarnings} />
                             </div>
 
                             <div>
@@ -316,6 +361,7 @@ export function ProfileReview({
                                     <Plus className="h-3.5 w-3.5" />
                                     Add Job Type
                                 </button>
+                                <FieldWarning field="job_types" warnings={validationWarnings} />
                             </div>
                         </div>
                     </Section>
@@ -342,6 +388,7 @@ export function ProfileReview({
                                         </button>
                                     ))}
                                 </div>
+                                <FieldError field="brand_voice" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -361,9 +408,11 @@ export function ProfileReview({
                                     value={form.greeting_style}
                                     onChange={(e) => updateField("greeting_style", e.target.value)}
                                     rows={2}
+                                    aria-label="Greeting style"
                                     placeholder="How should agents greet callers? e.g. 'Thank you for calling [Business], this is [Agent Name], how can I help you today?'"
                                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
                                 />
+                                <FieldWarning field="greeting_style" warnings={validationWarnings} />
                             </div>
                         </div>
                     </Section>
@@ -382,6 +431,7 @@ export function ProfileReview({
                                         <option key={tz.value} value={tz.value}>{tz.label}</option>
                                     ))}
                                 </select>
+                                <FieldError field="timezone" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -420,6 +470,12 @@ export function ProfileReview({
                                         );
                                     })}
                                 </div>
+                                {Object.values(form.business_hours).every((d) => d.closed) && (
+                                    <div className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700" role="alert">
+                                        All days are set to closed. Your agents won&apos;t have any available business hours.
+                                    </div>
+                                )}
+                                <FieldError field="business_hours" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -437,13 +493,19 @@ export function ProfileReview({
                             </div>
 
                             <div>
-                                <FieldLabel label="Emergency Phone Number" field="emergency_phone" fieldMeta={fieldMeta} resetFieldToAI={resetFieldToAI} />
+                                <FieldLabel label={`Emergency Phone Number${form.after_hours_behavior === "emergency_forward" ? " *" : ""}`} field="emergency_phone" fieldMeta={fieldMeta} resetFieldToAI={resetFieldToAI} />
                                 <Input
                                     value={form.emergency_phone}
                                     onChange={(e) => updateField("emergency_phone", e.target.value)}
+                                    onBlur={handlePhoneBlur}
                                     placeholder="+1 (555) 123-4567"
+                                    aria-label="Emergency phone number"
                                     className="border-gray-200 bg-white text-gray-900"
                                 />
+                                {phoneError && (
+                                    <p className="mt-1 text-xs text-red-500" role="alert">{phoneError}</p>
+                                )}
+                                <FieldError field="emergency_phone" errors={validationErrors} />
                             </div>
                         </div>
                     </Section>
@@ -469,6 +531,7 @@ export function ProfileReview({
                                         </button>
                                     ))}
                                 </div>
+                                <FieldWarning field="lead_sources" warnings={validationWarnings} />
                             </div>
 
                             <div>
@@ -483,6 +546,7 @@ export function ProfileReview({
                                         <option key={g.value} value={g.value}>{g.label}</option>
                                     ))}
                                 </select>
+                                <FieldError field="primary_goal" errors={validationErrors} />
                             </div>
 
                             <div>
@@ -502,7 +566,14 @@ export function ProfileReview({
 
             {/* Fixed bottom bar */}
             <div className="fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white/90 px-4 py-4 backdrop-blur-lg sm:px-6">
-                <div className="mx-auto flex max-w-3xl items-center justify-end">
+                <div className="mx-auto flex max-w-3xl items-center justify-between">
+                    {hasErrors ? (
+                        <p className="text-xs text-red-500" role="alert">
+                            Please fix {validationErrors!.length} required field{validationErrors!.length !== 1 ? "s" : ""} above
+                        </p>
+                    ) : (
+                        <div />
+                    )}
                     <Button
                         onClick={onContinue}
                         className="bg-violet-600 px-6 text-white hover:bg-violet-500"

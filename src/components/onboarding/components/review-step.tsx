@@ -9,6 +9,7 @@ interface ReviewStepProps {
     form: TenantProfile;
     fieldMeta: Record<string, AIFieldMeta>;
     completing: boolean;
+    completeError?: string | null;
     onComplete: () => void;
     onGoToStep: (step: number) => void;
 }
@@ -55,7 +56,7 @@ function SectionCard({
     );
 }
 
-export function ReviewStep({ form, fieldMeta, completing, onComplete, onGoToStep }: ReviewStepProps) {
+export function ReviewStep({ form, fieldMeta, completing, completeError, onComplete, onGoToStep }: ReviewStepProps) {
     const hasAIData = Object.values(fieldMeta).some((m) => m.aiGenerated);
 
     return (
@@ -144,6 +145,13 @@ export function ReviewStep({ form, fieldMeta, completing, onComplete, onGoToStep
                     value={GOAL_OPTIONS.find((g) => g.value === form.primary_goal)?.label}
                 />
             </SectionCard>
+
+            {/* Error */}
+            {completeError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600" role="alert">
+                    {completeError}
+                </div>
+            )}
 
             {/* Complete Button */}
             <div className="pt-4">
