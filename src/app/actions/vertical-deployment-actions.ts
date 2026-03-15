@@ -195,6 +195,7 @@ export async function deployVerticalAgents(
                     persona_name: formData.agentPersonaName,
                     markets: formData.markets,
                     deal_types: formData.dealTypes,
+                    appointment_type: formData.appointmentType,
                     transfer_phone: formData.transferPhone,
                     business_phone: formData.businessPhone,
                 },

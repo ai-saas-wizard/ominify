@@ -19,12 +19,26 @@ export function buildREInboundPrompt(formData: REInvestorFormData): {
         markets,
         dealTypes,
         timezone,
+        appointmentType,
         transferPhone,
         businessPhone,
     } = formData;
 
     // Format phone for spoken reading (digit by digit with dashes)
     const spokenBusinessPhone = formatPhoneForSpeech(businessPhone);
+
+    // Build appointment type context for prompt injection
+    const appointmentTypeContext =
+        appointmentType === "phone_only"
+            ? `All appointments are phone appointments. When confirming with the seller, always say "${ownerName} will give you a call" — NEVER say they will "come out" or "visit" or "meet you at the house."`
+            : appointmentType === "in_person"
+              ? `All appointments are in-person walkthroughs. When confirming, say "${ownerName} will come out to take a look."`
+              : `Some reps do in-person walkthroughs, others do phone calls. The calendar tool will indicate the appointment type — confirm accordingly.`;
+
+    const appointmentConfirmLine =
+        appointmentType === "phone_only"
+            ? `"Perfect! So I have you down for [Day, Date] at [Time]. ${ownerName} will be giving you a call to go over everything. Does that all sound right?"`
+            : `"Perfect! So I have you down for [Day, Date] at [Time] at [Full Address with Zip]. ${ownerName} will be the one coming out to meet with you. Does that all sound right?"`;
 
     // Format deal types for context
     const dealTypesFormatted = dealTypes
@@ -673,6 +687,9 @@ Match their energy. Be upbeat if they're positive.
 
 ## APPOINTMENT BOOKING
 
+### Appointment Type
+${appointmentTypeContext}
+
 ### Pre-Check
 Before offering appointment, verify you have:
 - ✓ Caller's name
@@ -680,7 +697,9 @@ Before offering appointment, verify you have:
 - ✓ Basic property info (whatever they could provide)
 
 ### Step 1: Offer Appointment
-"Perfect, thank you for all that information. ... So based on everything you've told me, I think it would really help to have one of our team members come take a look in person. They can give you a much better idea of what we can do. ... What does your schedule look like? Could we send someone over tomorrow or the day after?"
+${appointmentType === "phone_only"
+    ? `"Perfect, thank you for all that information. ... So based on everything you've told me, I think it would really help to have one of our team members give you a call to go over everything in detail. They can give you a much better idea of what we can do. ... What does your schedule look like? Could we set up a call for tomorrow or the day after?"`
+    : `"Perfect, thank you for all that information. ... So based on everything you've told me, I think it would really help to have one of our team members come take a look in person. They can give you a much better idea of what we can do. ... What does your schedule look like? Could we send someone over tomorrow or the day after?"`}
 <wait>
 
 **If hesitant:** "Oh, yeah, no - I totally get wanting to think it through. Really. The visit is just about getting you information so you have clarity. Even if you decide not to do anything, you'll still have really good info."
@@ -710,7 +729,7 @@ Before offering appointment, verify you have:
 - If neither works, ask what does work
 
 ### Step 5: Confirm Booking
-"Perfect! So I have you down for [Day, Date] at [Time] at [Full Address with Zip]. Does that all sound right?"
+${appointmentConfirmLine}
 
 **STOP HERE. Do not proceed to closing until the caller confirms. Wait for their response. If they say something is wrong, correct it and re-confirm. Only move to Call Closing after they confirm the details are correct.**
 

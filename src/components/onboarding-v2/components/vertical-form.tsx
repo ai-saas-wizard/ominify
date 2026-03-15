@@ -50,6 +50,7 @@ export function VerticalForm({
         markets: initialData?.markets ?? "",
         dealTypes: initialData?.dealTypes ?? [],
         timezone: initialData?.timezone ?? "",
+        appointmentType: initialData?.appointmentType ?? "in_person",
         transferPhone: initialData?.transferPhone ?? "",
         businessPhone: initialData?.businessPhone ?? "",
     });
@@ -168,7 +169,7 @@ export function VerticalForm({
         if (newErrors.length > 0) {
             const sectionMap: Record<string, string[]> = {
                 company: ["companyName", "ownerName", "ownerEmail", "agentPersonaName"],
-                operations: ["markets", "dealTypes", "timezone"],
+                operations: ["markets", "dealTypes", "timezone", "appointmentType"],
                 contact: ["transferPhone", "businessPhone"],
             };
             for (const [sectionId, sectionFields] of Object.entries(sectionMap)) {
@@ -192,6 +193,7 @@ export function VerticalForm({
             markets: (fields.markets as string).trim(),
             dealTypes: fields.dealTypes as string[],
             timezone: fields.timezone as string,
+            appointmentType: fields.appointmentType as string,
             transferPhone: (fields.transferPhone as string).trim(),
             businessPhone: (fields.businessPhone as string).trim(),
         };
@@ -364,6 +366,30 @@ function renderField(
                         </option>
                     ))}
                 </select>
+            ) : field.type === "single-select" && field.options ? (
+                <div className="flex flex-wrap gap-2">
+                    {field.options.map((option) => {
+                        const selected = (value as string) === option.value;
+                        return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => updateField(field.key, option.value)}
+                                className={cn(
+                                    "flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors",
+                                    selected
+                                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                        : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                                )}
+                            >
+                                {selected && (
+                                    <Check className="h-3.5 w-3.5" />
+                                )}
+                                {option.label}
+                            </button>
+                        );
+                    })}
+                </div>
             ) : field.type === "multi-select" && field.options ? (
                 <div className="flex flex-wrap gap-2">
                     {field.options.map((option) => {

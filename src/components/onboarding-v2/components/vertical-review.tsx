@@ -105,6 +105,10 @@ export function VerticalReview({
                             value={formatTimezone(formData.timezone)}
                         />
                         <SummaryItem
+                            label="Appointments"
+                            value={formatAppointmentType(formData.appointmentType)}
+                        />
+                        <SummaryItem
                             label="Contact"
                             value={formData.ownerEmail}
                         />
@@ -271,6 +275,15 @@ function DetailItem({
             </div>
         </div>
     );
+}
+
+function formatAppointmentType(type: string): string {
+    const map: Record<string, string> = {
+        in_person: "In-Person Walkthrough",
+        phone_only: "Phone Call Only",
+        both: "Both",
+    };
+    return map[type] || type;
 }
 
 function formatTimezone(tz: string): string {

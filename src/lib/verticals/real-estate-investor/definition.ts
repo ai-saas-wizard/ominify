@@ -88,6 +88,19 @@ export const reInvestorDefinition: VerticalDefinition = {
                     type: "timezone",
                     required: true,
                 },
+                {
+                    key: "appointmentType",
+                    label: "How do your team members meet with sellers?",
+                    type: "single-select",
+                    required: true,
+                    options: [
+                        { value: "in_person", label: "In-Person Walkthrough" },
+                        { value: "phone_only", label: "Phone Call Only" },
+                        { value: "both", label: "Both" },
+                    ],
+                    defaultValue: "in_person",
+                    helpText: "Determines how the AI confirms appointments with sellers",
+                },
             ],
         },
         {

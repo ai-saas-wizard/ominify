@@ -31,6 +31,7 @@ export interface VerticalFormFieldDef {
         | "email"
         | "textarea"
         | "select"
+        | "single-select"
         | "multi-select"
         | "phone"
         | "timezone";
@@ -102,6 +103,7 @@ export interface REInvestorFormData {
     markets: string;
     dealTypes: string[];
     timezone: string;
+    appointmentType: string;
     transferPhone: string;
     businessPhone: string;
 }
