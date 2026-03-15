@@ -76,7 +76,11 @@ export const VOICE_NAMES: Record<string, string> = {
     jsCqWAovK2LkecY7zXl4: "Freya",
     TxGEqnHWrfWFTfGW9XjX: "Josh",
     flq6f7yk4E4fJM5XTYuZ: "Nova",
+    ZRwrL4id6j1HPGFkeCzO: "Sam (RE)",
 };
+
+// ─── VERTICAL VOICE IDS ───
+export const RE_DEFAULT_VOICE_ID = "ZRwrL4id6j1HPGFkeCzO";
 
 // ─── ICON MAP ───
 // Maps agent icon string names to lucide-react icon component names.

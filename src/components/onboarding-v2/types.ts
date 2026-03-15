@@ -9,10 +9,13 @@ import type { AIFieldMeta, TenantProfile } from "@/components/onboarding/types";
 // ─── ONBOARDING V2 STATE ───
 
 export type OnboardingV2Phase =
+    | "path_selection"
     | "url_input"
     | "analyzing"
     | "profile_review"
     | "agent_fleet"
+    | "vertical_form"
+    | "vertical_review"
     | "deploying"
     | "success";
 
@@ -147,3 +150,6 @@ export interface OnboardingV2WizardProps {
 
 // Re-export for convenience
 export type { AgentTypeId, AgentCategory, OverrideVariableDefinition, SuggestedAgent, AIFieldMeta, TenantProfile };
+
+// Re-export vertical types
+export type { VerticalFormData, REInvestorFormData, VerticalDefinition, VerticalValidationResult, VerticalValidationError } from "@/lib/verticals/types";
