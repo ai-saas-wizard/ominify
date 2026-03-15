@@ -1,5 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { canAccessClient, linkClerkIdToMember } from "@/lib/auth";
+import { canAccessClient, isAdmin, linkClerkIdToMember } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { supabase } from "@/lib/supabase";
@@ -56,14 +56,42 @@ export default async function ClientLayout({
         );
     }
 
-    // Check if UMBRELLA client needs onboarding banner
-    let showOnboardingBanner = false;
+    // Check if client is disabled (admins can still access)
     const { data: clientRecord } = await supabase
         .from("clients")
-        .select("account_type")
+        .select("account_type, disabled")
         .eq("id", clientId)
         .single();
 
+    if (clientRecord?.disabled) {
+        const userIsAdmin = await isAdmin(userEmail) || await isAdmin(userId);
+        if (!userIsAdmin) {
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                    <div className="text-center max-w-md mx-auto p-8">
+                        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                        </div>
+                        <h1 className="text-2xl font-bold text-gray-900 mb-2">Account Disabled</h1>
+                        <p className="text-gray-600 mb-6">
+                            This client account has been disabled by an administrator. Please contact support if you believe this is an error.
+                        </p>
+                        <p className="text-sm text-gray-500">
+                            Signed in as: <span className="font-medium">{userEmail}</span>
+                        </p>
+                        <a href="/" className="mt-6 inline-block text-violet-600 hover:underline">
+                            &larr; Go back home
+                        </a>
+                    </div>
+                </div>
+            );
+        }
+    }
+
+    // Check if UMBRELLA client needs onboarding banner
+    let showOnboardingBanner = false;
     if (clientRecord?.account_type === "UMBRELLA") {
         const { data: profile } = await supabase
             .from("tenant_profiles")

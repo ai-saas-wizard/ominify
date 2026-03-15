@@ -1,7 +1,8 @@
 import { supabase } from "@/lib/supabase";
-import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap } from "lucide-react";
+import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap, Ban } from "lucide-react";
 import Link from "next/link";
 import { CreateClientDialog } from "@/components/admin/create-client-dialog";
+import { DisableClientButton } from "@/components/admin/disable-client-button";
 
 // Fetch clients with umbrella + profile data
 async function getClients() {
@@ -91,23 +92,29 @@ export default async function AdminClientsPage() {
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {umbrellaClients.map((client) => (
-                            <div key={client.id} className="bg-white border border-indigo-100 rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
+                            <div key={client.id} className={`bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-all ${client.disabled ? "border-red-200 opacity-75" : "border-indigo-100"}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                                            {client.name?.[0]?.toUpperCase() || "C"}
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-indigo-50 text-indigo-600"}`}>
+                                            {client.disabled ? <Ban className="w-5 h-5" /> : (client.name?.[0]?.toUpperCase() || "C")}
                                         </div>
                                         <div>
-                                            <h3 className="font-semibold text-gray-900">{client.name}</h3>
+                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400 line-through" : "text-gray-900"}`}>{client.name}</h3>
                                             <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
                                                 <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">
                                                     UMBRELLA
                                                 </span>
+                                                {client.disabled && (
+                                                    <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                                                        DISABLED
+                                                    </span>
+                                                )}
                                                 <span>•</span>
                                                 <span>{client.email || "No email"}</span>
                                             </div>
                                         </div>
                                     </div>
+                                    <DisableClientButton clientId={client.id} disabled={!!client.disabled} />
                                 </div>
 
                                 <div className="space-y-2 pt-2 border-t border-indigo-50 mt-3">
@@ -167,21 +174,27 @@ export default async function AdminClientsPage() {
                         </div>
                     ) : (
                         customClients.map((client) => (
-                            <div key={client.id} className="bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-all">
+                            <div key={client.id} className={`bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-all ${client.disabled ? "border-red-200 opacity-75" : ""}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                                            {client.name?.[0]?.toUpperCase() || "C"}
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-blue-50 text-blue-600"}`}>
+                                            {client.disabled ? <Ban className="w-5 h-5" /> : (client.name?.[0]?.toUpperCase() || "C")}
                                         </div>
                                         <div>
-                                            <h3 className="font-semibold text-gray-900">{client.name}</h3>
+                                            <h3 className={`font-semibold ${client.disabled ? "text-gray-400 line-through" : "text-gray-900"}`}>{client.name}</h3>
                                             <div className="flex items-center gap-1 text-xs text-gray-500">
                                                 <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">CUSTOM</span>
+                                                {client.disabled && (
+                                                    <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                                                        DISABLED
+                                                    </span>
+                                                )}
                                                 <span>•</span>
                                                 <span>{client.email || "No email"}</span>
                                             </div>
                                         </div>
                                     </div>
+                                    <DisableClientButton clientId={client.id} disabled={!!client.disabled} />
                                 </div>
 
                                 <div className="space-y-3 pt-2 border-t mt-4">

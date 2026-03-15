@@ -121,3 +121,18 @@ export async function createClientAction(formData: FormData) {
 
     return { success: false, error: "Invalid account type" };
 }
+
+export async function toggleClientDisabled(clientId: string, disabled: boolean) {
+    const { error } = await supabase
+        .from("clients")
+        .update({ disabled })
+        .eq("id", clientId);
+
+    if (error) {
+        console.error("Toggle client disabled error:", error);
+        return { success: false, error: error.message };
+    }
+
+    revalidatePath("/admin/clients");
+    return { success: true };
+}
