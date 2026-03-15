@@ -9,6 +9,7 @@ import {
     CreditCard,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 
 const routes = [
     {
@@ -33,15 +34,22 @@ export const AdminSidebar = () => {
 
     return (
         <div className="flex flex-col h-full bg-white border-r border-gray-200">
-            {/* Text Logo Header */}
+            {/* Logo Header */}
             <div className="p-4 border-b border-gray-100">
-                <Link href="/admin/clients" className="block">
-                    <h1 className="text-xl font-bold tracking-tight">
-                        <span className="bg-gradient-to-r from-indigo-600 to-cyan-600 bg-clip-text text-transparent">
-                            INDRIS
-                        </span>
-                    </h1>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Admin Dashboard</p>
+                <Link href="/admin/clients" className="flex items-center gap-2.5">
+                    <Image
+                        src="/omnify-logo.png"
+                        alt="Omnify CRM"
+                        width={32}
+                        height={32}
+                        className="rounded-lg"
+                    />
+                    <div>
+                        <h1 className="text-base font-bold tracking-tight text-gray-900 leading-none">
+                            Omnify CRM
+                        </h1>
+                        <p className="text-[10px] text-gray-400 mt-0.5">Admin Dashboard</p>
+                    </div>
                 </Link>
             </div>
 
@@ -83,7 +91,7 @@ export const AdminSidebar = () => {
                     </div>
                 </div>
                 <p className="text-[10px] text-gray-400 text-center">
-                    Powered by <span className="font-medium">Elevate With AI</span>
+                    Powered by <span className="font-medium">Omnify CRM</span>
                 </p>
             </div>
         </div>

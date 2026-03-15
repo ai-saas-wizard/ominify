@@ -174,7 +174,7 @@ export const Sidebar = () => {
                 </div>
 
                 <p className="text-[10px] text-gray-400 text-center">
-                    Powered by <span className="font-medium">Elevate With AI</span>
+                    Powered by <span className="font-medium">Omnify CRM</span>
                 </p>
             </div>
         </div>
