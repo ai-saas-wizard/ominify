@@ -340,7 +340,7 @@ function buildToolsForAgent(
                 },
             },
             server: {
-                url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+                url: `${appUrl}/api/vapi/tools/calendar`,
             },
         });
     }
@@ -365,7 +365,7 @@ function buildToolsForAgent(
                 },
             },
             server: {
-                url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+                url: `${appUrl}/api/vapi/tools/calendar`,
             },
         });
     }
@@ -624,7 +624,7 @@ function buildToolsForAgentV2(
                     },
                 },
             },
-            server: { url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}` },
+            server: { url: `${appUrl}/api/vapi/tools/calendar` },
         });
     }
 
@@ -647,7 +647,7 @@ function buildToolsForAgentV2(
                     required: ["date", "time", "customer_name", "customer_phone"],
                 },
             },
-            server: { url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}` },
+            server: { url: `${appUrl}/api/vapi/tools/calendar` },
         });
     }
 

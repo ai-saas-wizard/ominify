@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getCalendarConnectionStatus } from "@/lib/google-calendar";
+import { getSheetsConnectionStatus } from "@/lib/google-sheets";
 
 export default async function AgentEditorPage(props: {
     params: Promise<{ clientId: string, id: string }>;
@@ -27,10 +29,10 @@ export default async function AgentEditorPage(props: {
         notFound();
     }
 
-    // Get agent's DB record (for DB UUID)
+    // Get agent's DB record (for DB UUID + config)
     const { data: agentRecord } = await supabase
         .from('agents')
-        .select('id')
+        .select('id, agent_config')
         .eq('vapi_id', params.id)
         .eq('client_id', params.clientId)
         .single();
@@ -48,6 +50,17 @@ export default async function AgentEditorPage(props: {
         : null;
     const availableNumbers = phoneNumbers.filter(p => !p.agent_id);
 
+    // Check integration connection status for banners
+    const calendarStatus = await getCalendarConnectionStatus(params.clientId);
+    const isCalendarConnected = calendarStatus?.is_active === true;
+
+    const isREAgent = agentRecord?.agent_config?.vertical === 'real_estate_investor';
+    let isSheetsConnected = true;
+    if (isREAgent) {
+        const sheetsStatus = await getSheetsConnectionStatus(params.clientId);
+        isSheetsConnected = sheetsStatus?.is_active === true && !!sheetsStatus?.google_sheet_id;
+    }
+
     return (
         <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
             <Link
@@ -57,6 +70,40 @@ export default async function AgentEditorPage(props: {
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Agents
             </Link>
+
+            {!isCalendarConnected && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+                    <div>
+                        <p className="font-medium text-amber-800">Google Calendar not connected</p>
+                        <p className="text-sm text-amber-600">
+                            Your agents can check availability and book appointments once connected.
+                        </p>
+                    </div>
+                    <Link
+                        href={`/client/${params.clientId}/settings/integrations`}
+                        className="text-sm font-medium text-amber-800 hover:text-amber-900 underline whitespace-nowrap ml-4"
+                    >
+                        Connect Calendar &rarr;
+                    </Link>
+                </div>
+            )}
+
+            {isREAgent && !isSheetsConnected && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+                    <div>
+                        <p className="font-medium text-amber-800">Google Sheets not connected</p>
+                        <p className="text-sm text-amber-600">
+                            Call leads will be automatically logged to a spreadsheet once connected.
+                        </p>
+                    </div>
+                    <Link
+                        href={`/client/${params.clientId}/settings/integrations`}
+                        className="text-sm font-medium text-amber-800 hover:text-amber-900 underline whitespace-nowrap ml-4"
+                    >
+                        Connect Sheets &rarr;
+                    </Link>
+                </div>
+            )}
 
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">{agent.name}</h1>

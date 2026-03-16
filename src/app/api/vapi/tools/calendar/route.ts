@@ -1,26 +1,49 @@
 import { NextResponse } from "next/server";
 import { getAvailableSlots, createEvent } from "@/lib/google-calendar";
+import { supabase } from "@/lib/supabase";
 
 /**
  * VAPI Tool Endpoint: Calendar Operations
  *
  * VAPI calls this when the assistant invokes "check_availability" or "book_appointment".
- * The clientId is passed as a query parameter in the tool's server URL.
+ * Resolves the tenant (clientId) from the assistantId in the VAPI payload.
+ * Falls back to ?clientId= query param for backwards compatibility.
  */
 
 export async function POST(request: Request) {
     try {
+        const body = await request.json();
+
+        // Extract assistantId from VAPI payload
+        const assistantId = body.message?.call?.assistantId
+            || body.message?.assistant?.id
+            || null;
+
+        // Resolve clientId: prefer assistantId lookup, fall back to query param
         const { searchParams } = new URL(request.url);
-        const clientId = searchParams.get("clientId");
+        let clientId = searchParams.get("clientId");
+
+        if (assistantId && !clientId) {
+            const { data: agentRecord } = await supabase
+                .from("agents")
+                .select("client_id")
+                .eq("vapi_id", assistantId)
+                .single();
+
+            if (agentRecord) {
+                clientId = agentRecord.client_id;
+            }
+        }
+
+        console.log('[CALENDAR TOOL] clientId:', clientId, 'assistantId:', assistantId);
 
         if (!clientId) {
+            console.error('[CALENDAR TOOL] Could not resolve clientId. assistantId:', assistantId);
             return NextResponse.json(
                 { results: [{ result: "Configuration error. Unable to access the calendar." }] },
                 { status: 200 }
             );
         }
-
-        const body = await request.json();
 
         // VAPI sends tool calls in the message payload
         const toolCall = body.message?.toolCallList?.[0] || body.message;

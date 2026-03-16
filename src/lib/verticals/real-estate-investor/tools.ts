@@ -33,7 +33,7 @@ export function buildREInboundTools(
             },
         },
         server: {
-            url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+            url: `${appUrl}/api/vapi/tools/calendar`,
         },
     });
 
@@ -75,7 +75,7 @@ export function buildREInboundTools(
             },
         },
         server: {
-            url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+            url: `${appUrl}/api/vapi/tools/calendar`,
         },
     });
 

@@ -10,7 +10,7 @@ import { buildInboundPrompt, buildOutboundPrompt, TenantProfileData } from "@/li
 
 const TEMPLATE_VERSION = "v1";
 
-function buildCalendarTools(clientId: string, appUrl: string) {
+function buildCalendarTools(appUrl: string) {
     return [
         {
             type: "function" as const,
@@ -34,7 +34,7 @@ function buildCalendarTools(clientId: string, appUrl: string) {
                 },
             },
             server: {
-                url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+                url: `${appUrl}/api/vapi/tools/calendar`,
             },
         },
         {
@@ -75,7 +75,7 @@ function buildCalendarTools(clientId: string, appUrl: string) {
                 },
             },
             server: {
-                url: `${appUrl}/api/vapi/tools/calendar?clientId=${clientId}`,
+                url: `${appUrl}/api/vapi/tools/calendar`,
             },
         },
     ];
@@ -111,7 +111,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
     const APP_URL = process.env.NEXT_PUBLIC_APP_URL
         || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
-    const calendarTools = buildCalendarTools(clientId, APP_URL);
+    const calendarTools = buildCalendarTools(APP_URL);
     const profileData = profile as unknown as TenantProfileData;
     const agentIds: { inbound?: string; outbound?: string } = {};
 
