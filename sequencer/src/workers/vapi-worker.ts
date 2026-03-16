@@ -63,11 +63,12 @@ async function makeVapiCall(
     assistantConfig: VoiceContent,
     tenantId: string,
     umbrellaId: string,
-    enrollmentId: string
+    enrollmentId: string,
+    outboundPhoneNumberId?: string
 ): Promise<{ callId: string }> {
     // Build request body for VAPI
     const requestBody: any = {
-        phoneNumberId: null, // We'll use 'from' number or let VAPI pick
+        phoneNumberId: outboundPhoneNumberId || null, // Use agent's assigned number or let VAPI pick
         customer: {
             number: phoneNumber,
         },
@@ -130,7 +131,7 @@ async function makeVapiCall(
  * VAPI Worker processor
  */
 async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: string; status: string }> {
-    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0 } = job.data;
+    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId } = job.data;
 
     console.log(`[VAPI] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}, priority ${urgencyPriority}`);
 
@@ -182,7 +183,8 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             assistantConfig,
             tenantId,
             umbrella.umbrellaId,
-            enrollmentId
+            enrollmentId,
+            phoneNumberId
         );
 
         console.log(`[VAPI] Call initiated: ${result.callId}`);

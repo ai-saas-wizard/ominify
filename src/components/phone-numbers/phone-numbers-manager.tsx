@@ -28,6 +28,7 @@ interface Props {
     initialPhoneNumbers: any[];
     a2pRegistration: any;
     tenantProfile: any;
+    agentMap?: Record<string, string>;
 }
 
 export function PhoneNumbersManager({
@@ -37,6 +38,7 @@ export function PhoneNumbersManager({
     initialPhoneNumbers,
     a2pRegistration,
     tenantProfile,
+    agentMap = {},
 }: Props) {
     const router = useRouter();
     const [phoneNumbers, setPhoneNumbers] = useState(initialPhoneNumbers);
@@ -247,6 +249,7 @@ export function PhoneNumbersManager({
                                     <tr className="text-left text-gray-500 border-b">
                                         <th className="pb-2 pr-4 font-medium">Phone Number</th>
                                         <th className="pb-2 pr-4 font-medium">Friendly Name</th>
+                                        <th className="pb-2 pr-4 font-medium">Agent</th>
                                         <th className="pb-2 pr-4 font-medium">Status</th>
                                         <th className="pb-2 pr-4 font-medium">Capabilities</th>
                                         <th className="pb-2 pr-4 font-medium">Added</th>
@@ -261,6 +264,15 @@ export function PhoneNumbersManager({
                                             </td>
                                             <td className="py-3 pr-4 text-gray-500">
                                                 {number.friendly_name || "—"}
+                                            </td>
+                                            <td className="py-3 pr-4">
+                                                {number.agent_id && agentMap[number.agent_id] ? (
+                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
+                                                        {agentMap[number.agent_id]}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">Unassigned</span>
+                                                )}
                                             </td>
                                             <td className="py-3 pr-4">
                                                 <span

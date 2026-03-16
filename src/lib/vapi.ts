@@ -311,6 +311,111 @@ export interface VapiPhoneNumber {
     provider: string; // 'vapi' | 'twilio' | 'vonage'
 }
 
+// ─── IMPORT PHONE NUMBER ───
+
+export interface ImportPhoneNumberPayload {
+    provider: 'twilio';
+    number: string;
+    twilioAccountSid: string;
+    twilioAuthToken: string;
+    name?: string;
+    assistantId?: string;
+    serverUrl?: string;
+}
+
+export async function importPhoneNumber(
+    payload: ImportPhoneNumberPayload,
+    apiKey?: string
+): Promise<VapiPhoneNumber | null> {
+    const token = apiKey || DEFAULT_KEY;
+    if (!token) return null;
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/phone-number/import`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            console.error("Failed to import phone number:", await res.text());
+            return null;
+        }
+
+        return await res.json();
+    } catch (error) {
+        console.error("Vapi Client Error (importPhoneNumber):", error);
+        return null;
+    }
+}
+
+// ─── UPDATE PHONE NUMBER ───
+
+export async function updatePhoneNumber(
+    phoneNumberId: string,
+    payload: { assistantId?: string | null; name?: string; serverUrl?: string },
+    apiKey?: string
+): Promise<VapiPhoneNumber | null> {
+    const token = apiKey || DEFAULT_KEY;
+    if (!token) return null;
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/phone-number/${phoneNumberId}`, {
+            method: 'PATCH',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            console.error("Failed to update phone number:", await res.text());
+            return null;
+        }
+
+        return await res.json();
+    } catch (error) {
+        console.error("Vapi Client Error (updatePhoneNumber):", error);
+        return null;
+    }
+}
+
+// ─── DELETE PHONE NUMBER ───
+
+export async function deleteVapiPhoneNumber(
+    phoneNumberId: string,
+    apiKey?: string
+): Promise<boolean> {
+    const token = apiKey || DEFAULT_KEY;
+    if (!token) return false;
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/phone-number/${phoneNumberId}`, {
+            method: 'DELETE',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            console.error("Failed to delete phone number:", await res.text());
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.error("Vapi Client Error (deleteVapiPhoneNumber):", error);
+        return false;
+    }
+}
+
+// ─── LIST PHONE NUMBERS ───
+
 export async function listPhoneNumbers(apiKey?: string): Promise<VapiPhoneNumber[]> {
     const key = apiKey || DEFAULT_KEY;
     if (!key) return [];

@@ -231,6 +231,7 @@ export interface VapiJobPayload {
     urgencyPriority: number;
     retryCount?: number;
     overrideVariables?: Record<string, string>;
+    phoneNumberId?: string;  // VAPI phone number ID for outbound caller ID
 }
 
 export interface EventJobPayload {

@@ -30,6 +30,7 @@ import {
     checkBrandStatus,
     checkCampaignStatus,
 } from "@/lib/twilio";
+import { deleteVapiPhoneNumber } from "@/lib/vapi";
 import { revalidatePath } from "next/cache";
 
 // ─── Twilio Subaccount Provisioning ─────────────────────────────────────────
@@ -208,6 +209,23 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
         }
 
         const account = (phoneRecord as any).tenant_twilio_accounts;
+
+        // Clean up VAPI phone number if imported
+        if (phoneRecord.vapi_phone_number_id) {
+            try {
+                // Get VAPI key for this client
+                const { data: client } = await supabase
+                    .from("clients")
+                    .select("vapi_key")
+                    .eq("id", clientId)
+                    .single();
+
+                await deleteVapiPhoneNumber(phoneRecord.vapi_phone_number_id, client?.vapi_key || undefined);
+            } catch (err) {
+                console.error("Failed to delete VAPI phone number:", err);
+                // Continue with Twilio release even if VAPI cleanup fails
+            }
+        }
 
         // Release on Twilio
         await releasePhoneNumber(

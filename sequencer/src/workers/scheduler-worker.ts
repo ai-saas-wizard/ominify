@@ -518,6 +518,19 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 voiceContent.override_variables = overrides;
             }
 
+            // Look up the agent's assigned phone number for outbound caller ID
+            let phoneNumberId: string | null = null;
+            const stepWithAgent = step as SequenceStep & { voice_agent_id?: string };
+            if (stepWithAgent.voice_agent_id) {
+                const { data: phoneRow } = await supabase
+                    .from('tenant_phone_numbers')
+                    .select('vapi_phone_number_id')
+                    .eq('agent_id', stepWithAgent.voice_agent_id)
+                    .eq('status', 'active')
+                    .single();
+                phoneNumberId = phoneRow?.vapi_phone_number_id || null;
+            }
+
             await vapiQueue.add('vapi:call', {
                 tenantId: enrollment.tenant_id,
                 contactPhone: contact.phone,
@@ -525,10 +538,11 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 enrollmentId: enrollment.id,
                 stepId: step.id,
                 urgencyPriority: getCallPriority(sequence.urgency_tier),
+                ...(phoneNumberId ? { phoneNumberId } : {}),
             }, {
                 priority: getCallPriority(sequence.urgency_tier),
             });
-            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}`);
+            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId})` : ''}`);
             break;
         }
     }

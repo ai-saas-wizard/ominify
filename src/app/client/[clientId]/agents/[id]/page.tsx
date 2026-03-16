@@ -1,5 +1,6 @@
-import { getAgent, listPhoneNumbers, listVoices } from "@/lib/vapi";
+import { getAgent, listVoices } from "@/lib/vapi";
 import { AgentEditor } from "@/components/agents/agent-editor";
+import { PhoneNumberAssignment } from "@/components/agents/phone-number-assignment";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -17,9 +18,8 @@ export default async function AgentEditorPage(props: {
         if (data) vapiKey = data.vapi_key;
     }
 
-    const [agent, phoneNumbers, voices] = await Promise.all([
+    const [agent, voices] = await Promise.all([
         getAgent(params.id, vapiKey),
-        listPhoneNumbers(vapiKey),
         listVoices(vapiKey)
     ]);
 
@@ -27,7 +27,26 @@ export default async function AgentEditorPage(props: {
         notFound();
     }
 
-    const assignedNumber = phoneNumbers.find(p => p.assistantId === agent.id);
+    // Get agent's DB record (for DB UUID)
+    const { data: agentRecord } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('vapi_id', params.id)
+        .eq('client_id', params.clientId)
+        .single();
+
+    // Get phone numbers from DB (not VAPI) — assigned to this agent + unassigned
+    const { data: allPhoneNumbers } = await supabase
+        .from('tenant_phone_numbers')
+        .select('id, phone_number, friendly_name, agent_id')
+        .eq('client_id', params.clientId)
+        .eq('status', 'active');
+
+    const phoneNumbers = allPhoneNumbers || [];
+    const assignedNumber = agentRecord
+        ? phoneNumbers.find(p => p.agent_id === agentRecord.id) || null
+        : null;
+    const availableNumbers = phoneNumbers.filter(p => !p.agent_id);
 
     return (
         <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -70,19 +89,16 @@ export default async function AgentEditorPage(props: {
                     </div>
                     <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
                         <h3 className="font-semibold text-gray-900">Deployment</h3>
-                        <div className="space-y-2">
-                            <label className="text-xs font-medium text-gray-500">Phone Number</label>
-                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm border border-gray-100">
-                                {assignedNumber ? (
-                                    <span className="text-gray-900 font-mono tracking-wide">{assignedNumber.number}</span>
-                                ) : (
-                                    <span className="text-gray-400 italic">No number assigned</span>
-                                )}
-                                <button className="text-violet-600 font-medium text-xs hover:underline">
-                                    {assignedNumber ? 'Manage' : 'Buy'}
-                                </button>
-                            </div>
-                        </div>
+                        {agentRecord ? (
+                            <PhoneNumberAssignment
+                                clientId={params.clientId}
+                                agentDbId={agentRecord.id}
+                                assignedNumber={assignedNumber}
+                                availableNumbers={availableNumbers}
+                            />
+                        ) : (
+                            <p className="text-sm text-gray-400 italic">Agent not synced to database yet.</p>
+                        )}
                     </div>
                 </div>
             </div>
