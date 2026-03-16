@@ -22,7 +22,7 @@ const URGENCY_OPTIONS = [
     { value: "low", label: "Low" },
 ];
 
-export function CreateSequenceDialog({ clientId }: { clientId: string }) {
+export function CreateSequenceDialog({ clientId, variant }: { clientId: string; variant?: "default" | "secondary" | "link" }) {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const router = useRouter();
@@ -47,6 +47,29 @@ export function CreateSequenceDialog({ clientId }: { clientId: string }) {
     };
 
     if (!isOpen) {
+        if (variant === "link") {
+            return (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="text-sm text-gray-500 hover:text-violet-600 transition-colors underline underline-offset-2"
+                >
+                    or create manually
+                </button>
+            );
+        }
+
+        if (variant === "secondary") {
+            return (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="border border-gray-300 hover:border-violet-300 hover:text-violet-700 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
+                >
+                    <Plus className="w-4 h-4" />
+                    Create Manually
+                </button>
+            );
+        }
+
         return (
             <button
                 onClick={() => setIsOpen(true)}

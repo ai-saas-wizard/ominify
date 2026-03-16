@@ -2,13 +2,11 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
     Zap,
-    Plus,
-    ToggleLeft,
     ToggleRight,
-    GitBranch,
     Users,
     CheckCircle2,
     ListOrdered,
+    Sparkles,
 } from "lucide-react";
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
 import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
@@ -93,9 +91,9 @@ export default async function SequencesPage({
                         Automated multi-step outreach workflows
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <AIGenerateSequenceDialog clientId={clientId} />
-                    <CreateSequenceDialog clientId={clientId} />
+                    <CreateSequenceDialog clientId={clientId} variant="secondary" />
                 </div>
             </div>
 
@@ -158,13 +156,19 @@ export default async function SequencesPage({
             {/* Sequence Cards Grid */}
             {sequences.length === 0 ? (
                 <div className="bg-white rounded-xl border shadow-sm p-12 text-center">
-                    <GitBranch className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                    <div className="inline-flex p-3 bg-violet-100 rounded-full mb-4">
+                        <Sparkles className="w-8 h-8 text-violet-600" />
+                    </div>
                     <h3 className="text-lg font-medium text-gray-900 mb-1">
-                        No sequences yet
+                        Describe your first sequence
                     </h3>
-                    <p className="text-gray-500 text-sm mb-4">
-                        Create your first sequence to start automating outreach workflows.
+                    <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+                        Tell our AI what you need and it will build a complete multi-channel outreach sequence for you.
                     </p>
+                    <div className="flex flex-col items-center gap-3">
+                        <AIGenerateSequenceDialog clientId={clientId} variant="hero" />
+                        <CreateSequenceDialog clientId={clientId} variant="link" />
+                    </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

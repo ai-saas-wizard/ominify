@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Loader2, X, Wand2 } from "lucide-react";
+import { Sparkles, Loader2, X, Wand2, MessageSquare, Phone, Mail } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateAIStepsForSequence } from "@/app/actions/ai-generate-sequence-actions";
 
@@ -76,6 +76,24 @@ export function AIGenerateStepsDialog({
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* Suggestion Chips */}
+            <div className="px-6 pt-4 pb-1 flex flex-wrap gap-2">
+              {[
+                { label: "Add a follow-up SMS", icon: MessageSquare },
+                { label: "Add a voicemail fallback", icon: Phone },
+                { label: "Add a re-engagement email", icon: Mail },
+              ].map((chip) => (
+                <button
+                  key={chip.label}
+                  onClick={() => setPrompt(chip.label)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-full transition-colors"
+                >
+                  <chip.icon className="w-3 h-3" />
+                  {chip.label}
+                </button>
+              ))}
             </div>
 
             {/* Body */}
