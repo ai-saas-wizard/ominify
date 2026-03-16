@@ -441,7 +441,7 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
             }
         }
 
-        // Insert sequence WITH mutation flags
+        // Insert sequence — match columns from sequencer/src/lib/ai-sequence-generator.ts
         const { data: sequence, error: seqError } = await supabase
             .from("sequences")
             .insert({
@@ -450,7 +450,7 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
                 description: generated.description || null,
                 trigger_type: plan.trigger_type || "manual",
                 urgency_tier: plan.urgency_tier || "medium",
-                ai_generated: true,
+                generated_by_ai: true,
                 is_active: false,
                 enable_adaptive_mutation: true,
                 mutation_aggressiveness: "moderate",
@@ -465,15 +465,22 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
             };
         }
 
-        // Insert steps with mutation settings
+        // Insert steps — match columns from sequencer/src/lib/ai-sequence-generator.ts
+        let insertedCount = 0;
+        const stepErrors: string[] = [];
+
         for (const step of generated.steps) {
+            // Coerce numeric fields — AI may return strings like "1" instead of 1
+            const stepOrder = Number(step.step_order) || (insertedCount + 1);
+            const delaySeconds = Number(step.delay_seconds) || 0;
+
             const { error: stepError } = await supabase
                 .from("sequence_steps")
                 .insert({
                     sequence_id: sequence.id,
-                    step_order: step.step_order,
+                    step_order: stepOrder,
                     channel: step.channel,
-                    delay_seconds: step.delay_seconds || 0,
+                    delay_seconds: delaySeconds,
                     delay_type: step.delay_type || "after_previous",
                     content: step.content,
                     skip_conditions: step.skip_conditions || null,
@@ -481,12 +488,24 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
                     on_failure: step.on_failure || { action: "skip" },
                     enable_ai_mutation: true,
                     mutation_instructions: step.mutation_instructions || null,
-                    is_active: true,
                 });
 
             if (stepError) {
-                console.error(`Error inserting step ${step.step_order}:`, stepError);
+                console.error(`Error inserting step ${stepOrder}:`, stepError);
+                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
+            } else {
+                insertedCount++;
             }
+        }
+
+        // If NO steps were inserted, rollback the sequence and return error
+        if (insertedCount === 0) {
+            console.error("All step inserts failed:", stepErrors);
+            await supabase.from("sequences").delete().eq("id", sequence.id);
+            return {
+                success: false,
+                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
+            };
         }
 
         revalidatePath(`/client/${clientId}/sequences`);
@@ -638,7 +657,7 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
                 description: generated.description || null,
                 trigger_type: options?.triggerType || generated.trigger_type || "manual",
                 urgency_tier: options?.urgencyTier || generated.urgency_tier || "medium",
-                ai_generated: true,
+                generated_by_ai: true,
                 is_active: false,
                 enable_adaptive_mutation: true,
                 mutation_aggressiveness: "moderate",
@@ -653,14 +672,20 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
             };
         }
 
+        let insertedCount = 0;
+        const stepErrors: string[] = [];
+
         for (const step of generated.steps) {
+            const stepOrder = Number(step.step_order) || (insertedCount + 1);
+            const delaySeconds = Number(step.delay_seconds) || 0;
+
             const { error: stepError } = await supabase
                 .from("sequence_steps")
                 .insert({
                     sequence_id: sequence.id,
-                    step_order: step.step_order,
+                    step_order: stepOrder,
                     channel: step.channel,
-                    delay_seconds: step.delay_seconds || 0,
+                    delay_seconds: delaySeconds,
                     delay_type: step.delay_type || "after_previous",
                     content: step.content,
                     skip_conditions: step.skip_conditions || null,
@@ -668,12 +693,22 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
                     on_failure: step.on_failure || { action: "skip" },
                     enable_ai_mutation: true,
                     mutation_instructions: step.mutation_instructions || null,
-                    is_active: true,
                 });
 
             if (stepError) {
-                console.error(`Error inserting step ${step.step_order}:`, stepError);
+                console.error(`Error inserting step ${stepOrder}:`, stepError);
+                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
+            } else {
+                insertedCount++;
             }
+        }
+
+        if (insertedCount === 0) {
+            await supabase.from("sequences").delete().eq("id", sequence.id);
+            return {
+                success: false,
+                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
+            };
         }
 
         revalidatePath(`/client/${clientId}/sequences`);
@@ -825,14 +860,19 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         }
 
         let insertedCount = 0;
+        const stepErrors: string[] = [];
+
         for (const step of generated.steps) {
+            const stepOrder = Number(step.step_order) || (insertedCount + startOrder);
+            const delaySeconds = Number(step.delay_seconds) || 0;
+
             const { error: stepError } = await supabase
                 .from("sequence_steps")
                 .insert({
                     sequence_id: sequenceId,
-                    step_order: step.step_order,
+                    step_order: stepOrder,
                     channel: step.channel,
-                    delay_seconds: step.delay_seconds || 0,
+                    delay_seconds: delaySeconds,
                     delay_type: step.delay_type || "after_previous",
                     content: step.content,
                     skip_conditions: step.skip_conditions || null,
@@ -840,14 +880,21 @@ Respond with ONLY a JSON object (no markdown, no explanation):
                     on_failure: step.on_failure || { action: "skip" },
                     enable_ai_mutation: true,
                     mutation_instructions: step.mutation_instructions || null,
-                    is_active: true,
                 });
 
             if (stepError) {
-                console.error(`Error inserting step ${step.step_order}:`, stepError);
+                console.error(`Error inserting step ${stepOrder}:`, stepError);
+                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
             } else {
                 insertedCount++;
             }
+        }
+
+        if (insertedCount === 0) {
+            return {
+                success: false,
+                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
+            };
         }
 
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
