@@ -119,6 +119,7 @@ export const Sidebar = () => {
                         <Link
                             key={route.href}
                             href={href}
+                            data-walkthrough-id={`nav-${route.href.replace("/", "")}`}
                             className={cn(
                                 "flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors mb-0.5",
                                 isActive
@@ -141,6 +142,7 @@ export const Sidebar = () => {
                         <Link
                             key={route.href}
                             href={href}
+                            data-walkthrough-id={`nav-${route.href.replace("/", "")}`}
                             className={cn(
                                 "flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors mb-0.5",
                                 isActive
