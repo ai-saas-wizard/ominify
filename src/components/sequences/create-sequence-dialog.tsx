@@ -128,20 +128,6 @@ export function CreateSequenceDialog({ clientId }: { clientId: string }) {
                         </select>
                     </div>
 
-                    {/* Trigger Conditions */}
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">
-                            Trigger Conditions{" "}
-                            <span className="text-gray-400 font-normal">(JSON, optional)</span>
-                        </label>
-                        <textarea
-                            name="trigger_conditions"
-                            rows={3}
-                            placeholder='e.g., {"tags": ["vip"], "source": "website"}'
-                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm resize-none"
-                        />
-                    </div>
-
                     {/* Actions */}
                     <div className="flex justify-end gap-2 pt-4">
                         <button

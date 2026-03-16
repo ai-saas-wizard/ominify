@@ -45,6 +45,7 @@ interface FlowToolbarProps {
     isActive: boolean;
     sidebarTab: string | null;
     onSidebarToggle: (tab: string | null) => void;
+    onOpenAIDialog: () => void;
 }
 
 export function FlowToolbar({
@@ -54,6 +55,7 @@ export function FlowToolbar({
     isActive,
     sidebarTab,
     onSidebarToggle,
+    onOpenAIDialog,
 }: FlowToolbarProps) {
     const router = useRouter();
     const [toggling, setToggling] = useState(false);
@@ -202,6 +204,23 @@ export function FlowToolbar({
                             </Link>
                         </TooltipTrigger>
                         <TooltipContent>Learning Dashboard</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+
+                {/* AI Generate Steps */}
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={onOpenAIDialog}
+                                className="w-8 h-8 text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                            >
+                                <Sparkles className="w-4 h-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Generate steps with AI</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
 

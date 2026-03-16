@@ -11,6 +11,7 @@ import {
     ListOrdered,
 } from "lucide-react";
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
+import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
 
 const URGENCY_COLORS: Record<string, string> = {
     critical: "bg-red-100 text-red-700 border-red-200",
@@ -92,7 +93,10 @@ export default async function SequencesPage({
                         Automated multi-step outreach workflows
                     </p>
                 </div>
-                <CreateSequenceDialog clientId={clientId} />
+                <div className="flex items-center gap-2">
+                    <AIGenerateSequenceDialog clientId={clientId} />
+                    <CreateSequenceDialog clientId={clientId} />
+                </div>
             </div>
 
             {/* Summary Stat Cards */}

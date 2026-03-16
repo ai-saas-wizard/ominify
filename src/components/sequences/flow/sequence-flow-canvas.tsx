@@ -26,7 +26,9 @@ import { AddNodeButton } from "./nodes/add-node-button";
 import { FlowEdge } from "./edges/flow-edge";
 import { FlowToolbar } from "./panels/flow-toolbar";
 import { FlowSidebarPanel } from "./panels/flow-sidebar-panel";
-import { SequenceStepEditor } from "@/components/sequences/sequence-step-editor";
+import { SequenceStepEditor } from "@/components/sequences/step-editor";
+import { AIGenerateStepsDialog } from "./panels/ai-generate-steps-dialog";
+import { Sparkles } from "lucide-react";
 
 const nodeTypes: NodeTypes = {
     trigger: TriggerNode,
@@ -68,6 +70,7 @@ export function SequenceFlowCanvas({
     // Step editor state
     const [showStepEditor, setShowStepEditor] = useState(false);
     const [editingStep, setEditingStep] = useState<any>(null);
+    const [showAIDialog, setShowAIDialog] = useState(false);
 
     // Compute flow from steps
     const flowData = useMemo(
@@ -206,6 +209,7 @@ export function SequenceFlowCanvas({
                     isActive={isActive}
                     sidebarTab={sidebarTab}
                     onSidebarToggle={setSidebarTab}
+                    onOpenAIDialog={() => setShowAIDialog(true)}
                 />
             </ReactFlow>
 
@@ -243,6 +247,44 @@ export function SequenceFlowCanvas({
                     </div>
                 )}
             </AnimatePresence>
+
+            {/* AI Generate Steps Dialog */}
+            <AIGenerateStepsDialog
+                clientId={clientId}
+                sequenceId={sequenceId}
+                isOpen={showAIDialog}
+                onClose={() => setShowAIDialog(false)}
+                onGenerated={() => {
+                    setShowAIDialog(false);
+                    router.refresh();
+                }}
+            />
+
+            {/* Empty state CTA */}
+            {steps.length === 0 && !showStepEditor && (
+                <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl border shadow-xl p-8 text-center max-w-sm pointer-events-auto">
+                        <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+                            <Sparkles className="w-6 h-6 text-violet-600" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Describe Your Sequence</h3>
+                        <p className="text-sm text-gray-500 mb-4">Let AI build your follow-up steps, or add them manually.</p>
+                        <button
+                            onClick={() => setShowAIDialog(true)}
+                            className="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all mb-3"
+                        >
+                            <Sparkles className="w-4 h-4" />
+                            Generate with AI
+                        </button>
+                        <button
+                            onClick={() => { setEditingStep(null); setShowStepEditor(true); }}
+                            className="text-sm text-violet-600 hover:text-violet-800 font-medium transition-colors"
+                        >
+                            or add steps manually
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
