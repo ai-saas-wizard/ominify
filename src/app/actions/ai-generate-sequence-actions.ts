@@ -25,6 +25,41 @@ const DEFAULT_PROFILE = {
     job_types: null,
 };
 
+// ─── JSON Extraction Helper ──────────────────────────────────────────────────
+// Many models wrap JSON in markdown code blocks. This extracts the JSON reliably.
+
+function extractJSON(raw: string): any {
+    // Try 1: Direct parse (model returned pure JSON)
+    try {
+        return JSON.parse(raw);
+    } catch {
+        // continue
+    }
+
+    // Try 2: Extract from ```json ... ``` block
+    const jsonBlockMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (jsonBlockMatch) {
+        try {
+            return JSON.parse(jsonBlockMatch[1]);
+        } catch {
+            // continue
+        }
+    }
+
+    // Try 3: Find first { ... } or [ ... ] in the response
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+            return JSON.parse(raw.slice(firstBrace, lastBrace + 1));
+        } catch {
+            // continue
+        }
+    }
+
+    throw new Error("Could not extract valid JSON from model response");
+}
+
 // ═══════════════════════════════════════════════════════════
 // Conversational AI Sequence Generation
 // ═══════════════════════════════════════════════════════════
@@ -108,8 +143,8 @@ CONVERSATION RULES:
 READY_TO_GENERATE
 \`\`\`json
 {
-  "trigger_type": "new_lead|missed_call|form_submission|manual|tag_added|status_change|schedule",
-  "urgency_tier": "critical|high|medium|low",
+  "trigger_type": "new_lead",
+  "urgency_tier": "high",
   "channels": ["sms", "email", "voice"],
   "step_count": 5,
   "goal": "brief description of the goal",
@@ -117,6 +152,10 @@ READY_TO_GENERATE
   "timing_strategy": "brief description of timing approach"
 }
 \`\`\`
+
+Valid trigger_type values: new_lead, missed_call, form_submission, manual, tag_added, status_change, schedule
+Valid urgency_tier values: critical, high, medium, low
+Valid channels: sms, email, voice
 
 IMPORTANT: Only output READY_TO_GENERATE when you genuinely have enough information. Do NOT rush to generate — ask follow-ups if the user's answers are vague.`;
 
@@ -187,11 +226,10 @@ export async function sendConversationMessage(
 
         // Check if AI is ready to generate
         if (raw.includes("READY_TO_GENERATE")) {
-            const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/);
+            const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
             if (jsonMatch) {
                 try {
                     const plan = JSON.parse(jsonMatch[1]) as ConversationPlan;
-                    // Extract the text before READY_TO_GENERATE as the final message
                     const textBefore = raw.split("READY_TO_GENERATE")[0].trim();
                     const finalMessages: ConversationMessage[] = [
                         ...updatedMessages,
@@ -240,7 +278,6 @@ export async function confirmAndGenerate(
     systemPromptContext: string
 ): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
     try {
-        // Fetch tenant profile for generation
         const { data: profile } = await supabase
             .from("tenant_profiles")
             .select("*")
@@ -249,7 +286,13 @@ export async function confirmAndGenerate(
 
         const p = profile || DEFAULT_PROFILE;
 
-        const generationPrompt = `You are an expert marketing automation engineer. Generate a complete multi-channel follow-up sequence based on the conversation and plan below.
+        const userContext = messages
+            .filter((m) => m.role === "user")
+            .map((m) => `- ${m.content}`)
+            .join("\n");
+
+        // Build a concrete example that matches the exact sequencer schema
+        const generationPrompt = `You are an expert marketing automation engineer. Generate a complete multi-channel follow-up sequence as a JSON object.
 
 BUSINESS PROFILE:
 - Business: ${p.business_name || "Business"}
@@ -267,52 +310,67 @@ AGREED PLAN:
 - Goal: ${plan.goal}
 - Strategy: ${plan.timing_strategy}
 
-CONVERSATION CONTEXT (what the user described):
-${messages.filter((m) => m.role === "user").map((m) => `- ${m.content}`).join("\n")}
+WHAT THE USER DESCRIBED:
+${userContext}
 
-GENERATION RULES:
-1. Generate ${plan.step_count} steps (can be ±1 if it makes the sequence better)
+RULES:
+1. Generate exactly ${plan.step_count} steps (can be ±1)
 2. Use ONLY these channels: ${plan.channels.join(", ")}
-3. TCPA compliance: no calls/texts before 8am or after 9pm in the business timezone
-4. Match the ${p.brand_voice || "professional"} brand voice
-5. Use template variables: {{customer_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}
-6. Channel timing guidelines:
-   - SMS: Can be immediate or short delays (0-30min for urgent, hours for medium)
-   - Voice: Add 1-4 hour delay minimum (allow SMS to land first)
-   - Email: Can be immediate or longer delays (4-24h gaps)
-7. Smart skip_conditions: skip steps if the contact already replied/answered/booked
-8. Use jump_to_step in on_success where it makes sense (e.g., after a successful call, skip remaining SMS reminders)
-9. Use retry logic in on_failure for voice (retry_after_seconds: 3600-7200)
-10. Each step needs channel-appropriate mutation_instructions for AI self-improvement
-11. End with an "end_sequence" success action on the final step
+3. TCPA compliance: no calls/texts before 8am or after 9pm
+4. Match the "${p.brand_voice || "professional"}" brand voice
+5. Template variables you can use: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
+6. Channel timing:
+   - SMS: immediate to 30min for urgent, hours for medium
+   - Voice: 1-4 hour delay minimum (let SMS land first)
+   - Email: 4-24 hour gaps
+7. skip_conditions.skip_if values: "contact_replied", "contact_answered_call", "appointment_booked"
+8. on_success action values: "continue", "jump_to_step", "end_sequence"
+9. on_failure action values: "retry_after_seconds", "skip", "end_sequence"
+10. For voice retry: use retry_delay of 3600-7200 (seconds)
+11. Last step should have on_success: {"action": "end_sequence"}
 
-MUTATION INSTRUCTIONS PER CHANNEL:
-- SMS: "Optimize message length, tone, and urgency. Test emoji usage. Vary CTA phrasing."
-- Email: "Test subject lines, preview text, body length, CTA placement. Vary formality level."
-- Voice: "Adjust opening energy, pacing, objection handling approach. Vary first message length."
+EXACT CONTENT FORMAT PER CHANNEL:
 
-OUTPUT FORMAT (JSON only, no markdown):
+For SMS steps, content must be:
+{"body": "Hi {{first_name}}, this is {{business_name}}. We got your inquiry..."}
+
+For email steps, content must be:
+{"subject": "Following up on your inquiry", "body_html": "<p>Hi {{first_name}},</p><p>Thank you for reaching out...</p>", "body_text": "Hi {{first_name}}, Thank you for reaching out..."}
+
+For voice steps, content must be:
+{"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} calling about your recent inquiry.", "system_prompt": "You are a friendly follow-up specialist for {{business_name}}. Your goal is to help the caller with their inquiry and book an appointment if possible. Be conversational, not pushy. If they're not interested, thank them and end the call gracefully."}
+
+EXAMPLE OUTPUT (2-step sequence):
 {
-  "name": "string - descriptive sequence name",
-  "description": "string - what this sequence does",
+  "name": "New Lead Follow-up",
+  "description": "Automated follow-up for new leads with SMS and voice",
   "steps": [
     {
       "step_order": 1,
-      "channel": "sms|email|voice",
+      "channel": "sms",
       "delay_seconds": 0,
-      "delay_type": "after_previous|after_enrollment",
-      "content": {
-        // SMS: { "body": "message text" }
-        // Email: { "subject": "subject line", "body_html": "<p>HTML content</p>", "body_text": "plain text" }
-        // Voice: { "first_message": "opening line", "system_prompt": "full voice AI instructions" }
-      },
-      "skip_conditions": { "skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"] },
-      "on_success": { "action": "continue|jump_to_step|end_sequence", "target_step": null },
-      "on_failure": { "action": "skip|end_sequence|retry_after_seconds", "retry_delay": null },
-      "mutation_instructions": "string - channel-specific AI optimization instructions"
+      "delay_type": "after_enrollment",
+      "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}! We received your inquiry and will be in touch shortly. Reply STOP to opt out."},
+      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
+      "on_success": {"action": "continue"},
+      "on_failure": {"action": "skip"},
+      "mutation_instructions": "Optimize message length and tone. Test emoji usage. Vary CTA phrasing."
+    },
+    {
+      "step_order": 2,
+      "channel": "voice",
+      "delay_seconds": 7200,
+      "delay_type": "after_previous",
+      "content": {"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} following up on your recent inquiry. Do you have a quick moment?", "system_prompt": "You are a follow-up specialist for {{business_name}}. The contact recently submitted an inquiry. Your goal is to understand their needs and book an appointment. Be friendly and professional. If they are busy, offer to call back at a better time. Use the check_availability tool to find open slots and book_appointment to confirm."},
+      "skip_conditions": {"skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"]},
+      "on_success": {"action": "end_sequence"},
+      "on_failure": {"action": "retry_after_seconds", "retry_delay": 3600},
+      "mutation_instructions": "Adjust opening energy and pacing. Vary first message length. Test different objection handling approaches."
     }
   ]
-}`;
+}
+
+NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanation, no markdown formatting, no code blocks. Start with { and end with }.`;
 
         const openrouter = getOpenRouterClient();
 
@@ -320,42 +378,66 @@ OUTPUT FORMAT (JSON only, no markdown):
             model: SEQUENCE_MODEL,
             temperature: 0.7,
             max_tokens: 4000,
-            response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: generationPrompt },
                 {
                     role: "user",
-                    content: "Generate the complete sequence now. Respond with valid JSON only.",
+                    content: `Generate the complete ${plan.step_count}-step sequence for the "${plan.trigger_type}" trigger with ${plan.channels.join(", ")} channels at ${plan.urgency_tier} urgency. Output ONLY valid JSON, nothing else.`,
                 },
             ],
         });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            return { success: false, error: "No response from AI model" };
+            return { success: false, error: "Model didn't return an output. Please try again." };
         }
 
-        const generated = JSON.parse(raw);
+        let generated: any;
+        try {
+            generated = extractJSON(raw);
+        } catch (parseErr) {
+            console.error("Failed to parse AI JSON output:", raw.substring(0, 500));
+            return {
+                success: false,
+                error: "AI returned an invalid response format. Please try again.",
+            };
+        }
 
         // Validate output
         if (!generated.name || typeof generated.name !== "string") {
-            return { success: false, error: "AI output missing valid sequence name" };
+            return { success: false, error: "AI output missing sequence name. Please try again." };
         }
         if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
-            return { success: false, error: "AI output missing valid steps array" };
+            return { success: false, error: "AI output missing steps. Please try again." };
         }
+
+        // Validate and fix each step
         for (const step of generated.steps) {
             if (!step.step_order || !step.channel || !step.content) {
                 return {
                     success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields`,
+                    error: `Step ${step.step_order || "?"} missing required fields. Please try again.`,
                 };
             }
             if (!["sms", "email", "voice"].includes(step.channel)) {
                 return {
                     success: false,
-                    error: `Step ${step.step_order} has invalid channel: ${step.channel}`,
+                    error: `Step ${step.step_order} has invalid channel "${step.channel}". Please try again.`,
                 };
+            }
+
+            // Ensure content has required fields per channel
+            if (step.channel === "sms" && !step.content.body) {
+                step.content.body = "Hi {{first_name}}, this is {{business_name}} following up.";
+            }
+            if (step.channel === "email") {
+                if (!step.content.subject) step.content.subject = "Following up on your inquiry";
+                if (!step.content.body_html) step.content.body_html = `<p>${step.content.body_text || "Hi {{first_name}}, we wanted to follow up."}</p>`;
+                if (!step.content.body_text) step.content.body_text = step.content.body_html?.replace(/<[^>]+>/g, "") || "Hi, we wanted to follow up.";
+            }
+            if (step.channel === "voice") {
+                if (!step.content.first_message) step.content.first_message = "Hi, is this {{first_name}}? This is the team at {{business_name}} calling.";
+                if (!step.content.system_prompt) step.content.system_prompt = `You are a follow-up specialist for {{business_name}}. Be friendly and professional. Help the contact with their inquiry and try to book an appointment.`;
             }
         }
 
@@ -440,7 +522,7 @@ export async function generateAISequence(
 
         const p = profile || DEFAULT_PROFILE;
 
-        let systemPrompt = `You are a marketing automation expert creating a multi-channel follow-up sequence.
+        let systemPrompt = `You are a marketing automation expert. Generate a multi-channel follow-up sequence as a JSON object.
 
 BUSINESS PROFILE:
 - Business: ${p.business_name || "Business"}
@@ -460,31 +542,34 @@ RULES:
 2. Mix channels (sms, email, voice) based on urgency
 3. TCPA compliance: no calls/texts before 8am or after 9pm
 4. Match the brand voice
-5. Include skip_conditions to avoid redundant outreach
-6. Use template variables: {{customer_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}
-7. Include mutation_instructions for each step for AI self-improvement
+5. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
 
-OUTPUT FORMAT (JSON):
+CONTENT FORMAT PER CHANNEL:
+- SMS: {"body": "message text here"}
+- Email: {"subject": "subject", "body_html": "<p>HTML</p>", "body_text": "plain text"}
+- Voice: {"first_message": "opening greeting", "system_prompt": "full agent instructions"}
+
+skip_conditions.skip_if values: "contact_replied", "contact_answered_call", "appointment_booked"
+on_success.action values: "continue", "jump_to_step", "end_sequence"
+on_failure.action values: "retry_after_seconds", "skip", "end_sequence"
+
+Respond with ONLY a JSON object in this format (no markdown, no explanation):
 {
-  "name": "string - sequence name",
-  "description": "string - what this sequence does",
-  "trigger_type": "string - one of: new_lead, missed_call, form_submission, manual, tag_added, status_change, schedule",
-  "urgency_tier": "string - one of: critical, high, medium, low",
+  "name": "Sequence Name",
+  "description": "What this sequence does",
+  "trigger_type": "new_lead",
+  "urgency_tier": "high",
   "steps": [
     {
       "step_order": 1,
-      "channel": "sms|email|voice",
+      "channel": "sms",
       "delay_seconds": 0,
-      "delay_type": "after_previous|after_enrollment",
-      "content": {
-        // SMS: { "body": "string" }
-        // Email: { "subject": "string", "body_html": "string", "body_text": "string" }
-        // Voice: { "first_message": "string", "system_prompt": "string" }
-      },
-      "skip_conditions": { "skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"] },
-      "on_success": { "action": "continue|jump_to_step|end_sequence", "target_step": null },
-      "on_failure": { "action": "skip|end_sequence|retry_after_seconds", "retry_delay": null },
-      "mutation_instructions": "string - channel-specific optimization hints"
+      "delay_type": "after_enrollment",
+      "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}!"},
+      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
+      "on_success": {"action": "continue"},
+      "on_failure": {"action": "skip"},
+      "mutation_instructions": "Optimize tone and CTA."
     }
   ]
 }`;
@@ -501,22 +586,28 @@ OUTPUT FORMAT (JSON):
         const completion = await openrouter.chat.completions.create({
             model: SEQUENCE_MODEL,
             temperature: 0.7,
-            response_format: { type: "json_object" },
+            max_tokens: 4000,
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the sequence now. Respond with valid JSON only.",
+                    content: "Generate the sequence now. Output ONLY valid JSON, nothing else.",
                 },
             ],
         });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            return { success: false, error: "No response from AI model" };
+            return { success: false, error: "Model didn't return an output. Please try again." };
         }
 
-        const generated = JSON.parse(raw);
+        let generated: any;
+        try {
+            generated = extractJSON(raw);
+        } catch {
+            console.error("Failed to parse AI output:", raw.substring(0, 500));
+            return { success: false, error: "AI returned invalid format. Please try again." };
+        }
 
         if (!generated.name || typeof generated.name !== "string") {
             return { success: false, error: "AI output missing valid sequence name" };
@@ -528,7 +619,7 @@ OUTPUT FORMAT (JSON):
             if (!step.step_order || !step.channel || !step.content) {
                 return {
                     success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields (step_order, channel, content)`,
+                    error: `Step ${step.step_order || "?"} missing required fields`,
                 };
             }
             if (!["sms", "email", "voice"].includes(step.channel)) {
@@ -569,7 +660,7 @@ OUTPUT FORMAT (JSON):
                     sequence_id: sequence.id,
                     step_order: step.step_order,
                     channel: step.channel,
-                    delay_seconds: step.delay_seconds,
+                    delay_seconds: step.delay_seconds || 0,
                     delay_type: step.delay_type || "after_previous",
                     content: step.content,
                     skip_conditions: step.skip_conditions || null,
@@ -642,7 +733,7 @@ export async function generateAIStepsForSequence(
 
         const p = profile || DEFAULT_PROFILE;
 
-        const systemPrompt = `You are a marketing automation expert adding steps to an existing multi-channel follow-up sequence.
+        const systemPrompt = `You are a marketing automation expert adding steps to an existing sequence. Generate new steps as a JSON object.
 
 BUSINESS PROFILE:
 - Business: ${p.business_name || "Business"}
@@ -650,11 +741,8 @@ BUSINESS PROFILE:
 - Brand voice: ${p.brand_voice || "professional"}
 - Primary goal: ${p.primary_goal || "book_appointment"}
 - Timezone: ${p.timezone || "America/New_York"}
-- Business hours: ${JSON.stringify(p.business_hours)}
-- Service area: ${JSON.stringify(p.service_area)}
-- Custom phrases: ${JSON.stringify(p.custom_phrases)}
 
-EXISTING SEQUENCE CONTEXT:
+EXISTING SEQUENCE:
 - Name: ${existingSequence.name}
 - Trigger: ${existingSequence.trigger_type}
 - Urgency: ${existingSequence.urgency_tier}
@@ -664,32 +752,28 @@ USER REQUEST:
 ${userPrompt}
 
 RULES:
-1. Generate new steps that complement the existing ones — do NOT duplicate what already exists
+1. Generate NEW steps that complement existing ones — don't duplicate
 2. Step ordering starts at ${startOrder}
-3. Mix channels (sms, email, voice) based on urgency and what channels are already used
-4. TCPA compliance: no calls/texts before 8am or after 9pm
-5. Match the brand voice
-6. Include skip_conditions to avoid redundant outreach
-7. Use template variables: {{customer_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}
-8. Include mutation_instructions for each step
+3. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{callback_number}}
 
-OUTPUT FORMAT (JSON):
+CONTENT FORMAT PER CHANNEL:
+- SMS: {"body": "message text here"}
+- Email: {"subject": "subject", "body_html": "<p>HTML</p>", "body_text": "plain text"}
+- Voice: {"first_message": "opening greeting", "system_prompt": "full agent instructions"}
+
+Respond with ONLY a JSON object (no markdown, no explanation):
 {
   "steps": [
     {
       "step_order": ${startOrder},
-      "channel": "sms|email|voice",
-      "delay_seconds": 0,
-      "delay_type": "after_previous|after_enrollment",
-      "content": {
-        // SMS: { "body": "string" }
-        // Email: { "subject": "string", "body_html": "string", "body_text": "string" }
-        // Voice: { "first_message": "string", "system_prompt": "string" }
-      },
-      "skip_conditions": { "skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"] },
-      "on_success": { "action": "continue|jump_to_step|end_sequence", "target_step": null },
-      "on_failure": { "action": "skip|end_sequence|retry_after_seconds", "retry_delay": null },
-      "mutation_instructions": "string - channel-specific optimization hints"
+      "channel": "sms",
+      "delay_seconds": 3600,
+      "delay_type": "after_previous",
+      "content": {"body": "Hi {{first_name}}, just following up from {{business_name}}."},
+      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
+      "on_success": {"action": "continue"},
+      "on_failure": {"action": "skip"},
+      "mutation_instructions": "Optimize tone and CTA."
     }
   ]
 }`;
@@ -699,22 +783,28 @@ OUTPUT FORMAT (JSON):
         const completion = await openrouter.chat.completions.create({
             model: SEQUENCE_MODEL,
             temperature: 0.7,
-            response_format: { type: "json_object" },
+            max_tokens: 4000,
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the additional steps now. Respond with valid JSON only.",
+                    content: "Generate the additional steps now. Output ONLY valid JSON, nothing else.",
                 },
             ],
         });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            return { success: false, error: "No response from AI model" };
+            return { success: false, error: "Model didn't return an output. Please try again." };
         }
 
-        const generated = JSON.parse(raw);
+        let generated: any;
+        try {
+            generated = extractJSON(raw);
+        } catch {
+            console.error("Failed to parse AI output:", raw.substring(0, 500));
+            return { success: false, error: "AI returned invalid format. Please try again." };
+        }
 
         if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
             return { success: false, error: "AI output missing valid steps array" };
@@ -723,7 +813,7 @@ OUTPUT FORMAT (JSON):
             if (!step.step_order || !step.channel || !step.content) {
                 return {
                     success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields (step_order, channel, content)`,
+                    error: `Step ${step.step_order || "?"} missing required fields`,
                 };
             }
             if (!["sms", "email", "voice"].includes(step.channel)) {
@@ -742,7 +832,7 @@ OUTPUT FORMAT (JSON):
                     sequence_id: sequenceId,
                     step_order: step.step_order,
                     channel: step.channel,
-                    delay_seconds: step.delay_seconds,
+                    delay_seconds: step.delay_seconds || 0,
                     delay_type: step.delay_type || "after_previous",
                     content: step.content,
                     skip_conditions: step.skip_conditions || null,
