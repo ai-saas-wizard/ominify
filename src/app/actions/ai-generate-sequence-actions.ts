@@ -26,32 +26,78 @@ const DEFAULT_PROFILE = {
 };
 
 // ─── JSON Extraction Helper ──────────────────────────────────────────────────
-// Many models wrap JSON in markdown code blocks. This extracts the JSON reliably.
+// GLM-5 is a reasoning model that may wrap output in <think> tags, markdown
+// code blocks, or add explanatory text around JSON. This handles all cases.
 
 function extractJSON(raw: string): any {
+    // Step 0: Strip reasoning/thinking tags that reasoning models add
+    let cleaned = raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+        .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
+        .trim();
+
     // Try 1: Direct parse (model returned pure JSON)
     try {
-        return JSON.parse(raw);
+        return JSON.parse(cleaned);
     } catch {
         // continue
     }
 
-    // Try 2: Extract from ```json ... ``` block
-    const jsonBlockMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    // Try 2: Extract from ```json ... ``` block (greedy to get the largest block)
+    const jsonBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
     if (jsonBlockMatch) {
         try {
-            return JSON.parse(jsonBlockMatch[1]);
+            return JSON.parse(jsonBlockMatch[1].trim());
         } catch {
-            // continue
+            // Try fixing common issues: trailing commas
+            const fixed = jsonBlockMatch[1].trim()
+                .replace(/,\s*}/g, "}")
+                .replace(/,\s*]/g, "]");
+            try {
+                return JSON.parse(fixed);
+            } catch {
+                // continue
+            }
         }
     }
 
-    // Try 3: Find first { ... } or [ ... ] in the response
-    const firstBrace = raw.indexOf("{");
-    const lastBrace = raw.lastIndexOf("}");
+    // Try 3: Find the outermost { ... } in the response
+    let depth = 0;
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i < cleaned.length; i++) {
+        if (cleaned[i] === "{") {
+            if (depth === 0) start = i;
+            depth++;
+        } else if (cleaned[i] === "}") {
+            depth--;
+            if (depth === 0 && start !== -1) {
+                end = i;
+                // Don't break — we want the LAST complete top-level object
+                // Actually, try to parse the FIRST complete one
+                try {
+                    return JSON.parse(cleaned.slice(start, end + 1));
+                } catch {
+                    // Reset and keep looking
+                    start = -1;
+                }
+            }
+        }
+    }
+
+    // Try 4: Last resort — find first { and last } (less precise)
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
     if (firstBrace !== -1 && lastBrace > firstBrace) {
+        const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+        // Fix common JSON issues before parsing
+        const fixed = candidate
+            .replace(/,\s*}/g, "}")
+            .replace(/,\s*]/g, "]")
+            .replace(/\/\/[^\n]*/g, ""); // Strip single-line comments
         try {
-            return JSON.parse(raw.slice(firstBrace, lastBrace + 1));
+            return JSON.parse(fixed);
         } catch {
             // continue
         }
@@ -376,30 +422,35 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
 
         const completion = await openrouter.chat.completions.create({
             model: SEQUENCE_MODEL,
-            temperature: 0.7,
-            max_tokens: 4000,
+            temperature: 0.4,
+            max_tokens: 6000,
             messages: [
                 { role: "system", content: generationPrompt },
                 {
                     role: "user",
-                    content: `Generate the complete ${plan.step_count}-step sequence for the "${plan.trigger_type}" trigger with ${plan.channels.join(", ")} channels at ${plan.urgency_tier} urgency. Output ONLY valid JSON, nothing else.`,
+                    content: `Generate the complete ${plan.step_count}-step sequence for the "${plan.trigger_type}" trigger with ${plan.channels.join(", ")} channels at ${plan.urgency_tier} urgency. Output ONLY the JSON object. Do not include any explanation or markdown. Start your response with { and end with }.`,
                 },
             ],
-        });
+        } as any);
 
-        const raw = completion.choices[0]?.message?.content;
+        // Handle reasoning models: content may be in different fields
+        const choice = completion.choices[0];
+        const raw = choice?.message?.content;
         if (!raw) {
-            return { success: false, error: "Model didn't return an output. Please try again." };
+            console.error("Empty model response. Full choice:", JSON.stringify(choice));
+            return { success: false, error: "Model returned an empty response. Please try again." };
         }
+
+        console.log("[confirmAndGenerate] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch (parseErr) {
-            console.error("Failed to parse AI JSON output:", raw.substring(0, 500));
+            console.error("Failed to parse AI JSON. Raw response:", raw.substring(0, 1000));
             return {
                 success: false,
-                error: "AI returned an invalid response format. Please try again.",
+                error: `AI response could not be parsed as JSON. Response preview: "${raw.substring(0, 100)}...". Please try again.`,
             };
         }
 
@@ -604,28 +655,34 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
 
         const completion = await openrouter.chat.completions.create({
             model: SEQUENCE_MODEL,
-            temperature: 0.7,
-            max_tokens: 4000,
+            temperature: 0.4,
+            max_tokens: 6000,
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the sequence now. Output ONLY valid JSON, nothing else.",
+                    content: "Generate the sequence now. Start your response with { and end with }. No explanation, no markdown.",
                 },
             ],
-        });
+        } as any);
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            return { success: false, error: "Model didn't return an output. Please try again." };
+            console.error("Empty model response:", JSON.stringify(completion.choices[0]));
+            return { success: false, error: "Model returned an empty response. Please try again." };
         }
+
+        console.log("[generateAISequence] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch {
-            console.error("Failed to parse AI output:", raw.substring(0, 500));
-            return { success: false, error: "AI returned invalid format. Please try again." };
+            console.error("Failed to parse AI output:", raw.substring(0, 1000));
+            return {
+                success: false,
+                error: `AI response could not be parsed. Preview: "${raw.substring(0, 80)}...". Please try again.`,
+            };
         }
 
         if (!generated.name || typeof generated.name !== "string") {
@@ -817,28 +874,34 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
         const completion = await openrouter.chat.completions.create({
             model: SEQUENCE_MODEL,
-            temperature: 0.7,
-            max_tokens: 4000,
+            temperature: 0.4,
+            max_tokens: 6000,
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the additional steps now. Output ONLY valid JSON, nothing else.",
+                    content: "Generate the additional steps now. Start your response with { and end with }. No explanation, no markdown.",
                 },
             ],
-        });
+        } as any);
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            return { success: false, error: "Model didn't return an output. Please try again." };
+            console.error("Empty model response:", JSON.stringify(completion.choices[0]));
+            return { success: false, error: "Model returned an empty response. Please try again." };
         }
+
+        console.log("[generateAISteps] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch {
-            console.error("Failed to parse AI output:", raw.substring(0, 500));
-            return { success: false, error: "AI returned invalid format. Please try again." };
+            console.error("Failed to parse AI output:", raw.substring(0, 1000));
+            return {
+                success: false,
+                error: `AI response could not be parsed. Preview: "${raw.substring(0, 80)}...". Please try again.`,
+            };
         }
 
         if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
