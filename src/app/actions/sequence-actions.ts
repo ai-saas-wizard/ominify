@@ -339,6 +339,12 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
             ? existingSteps[0].step_order + 1
             : 1;
 
+        const enable_ai_mutation_raw = formData.get("enable_ai_mutation") as string;
+        const mutation_instructions = formData.get("mutation_instructions") as string;
+        const enableMutation = enable_ai_mutation_raw !== null
+            ? enable_ai_mutation_raw === "true"
+            : true;
+
         const { data, error } = await supabase
             .from("sequence_steps")
             .insert({
@@ -351,6 +357,16 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
                 skip_conditions: parsedSkip,
                 on_success: parsedOnSuccess,
                 on_failure: parsedOnFailure,
+                enable_ai_mutation: enableMutation,
+                mutation_instructions: mutation_instructions || (
+                    channel === "sms"
+                        ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                        : channel === "email"
+                        ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                        : channel === "voice"
+                        ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                        : null
+                ),
             })
             .select("id")
             .single();
@@ -867,20 +883,9 @@ export async function updateStepMutationSettings(
     }
 ) {
     try {
-        // Note: enable_ai_mutation and mutation_instructions columns do not exist
-        // on sequence_steps table. Filter to only valid columns.
-        const validUpdates: Record<string, any> = {};
-        // If these columns are added in the future, uncomment:
-        // if (settings.enable_ai_mutation !== undefined) validUpdates.enable_ai_mutation = settings.enable_ai_mutation;
-        // if (settings.mutation_instructions !== undefined) validUpdates.mutation_instructions = settings.mutation_instructions;
-
-        if (Object.keys(validUpdates).length === 0) {
-            return { success: true }; // Nothing to update
-        }
-
         const { error } = await supabase
             .from("sequence_steps")
-            .update(validUpdates)
+            .update(settings)
             .eq("id", stepId);
 
         if (error) {

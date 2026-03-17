@@ -216,6 +216,14 @@ export async function createAgentSequence(
                 on_success: stepTemplate.on_success,
                 on_failure: stepTemplate.on_failure,
                 is_active: true,
+                enable_ai_mutation: true,
+                mutation_instructions: stepTemplate.channel === "sms"
+                    ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                    : stepTemplate.channel === "email"
+                    ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                    : stepTemplate.channel === "voice"
+                    ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                    : null,
             });
         } catch (err) {
             console.error(`[AUTO-SEQUENCE] Error creating step ${stepTemplate.step_order}:`, err);
@@ -325,6 +333,14 @@ export async function createAgentSequenceFromDynamic(
                 on_success: { action: "continue" },
                 on_failure: { action: "skip" },
                 is_active: true,
+                enable_ai_mutation: true,
+                mutation_instructions: step.channel === "sms"
+                    ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                    : step.channel === "email"
+                    ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                    : step.channel === "voice"
+                    ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                    : null,
             });
         } catch (err) {
             console.error(`[AUTO-SEQUENCE V2] Error creating step ${step.step_order}:`, err);

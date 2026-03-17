@@ -395,6 +395,14 @@ async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
     const stepErrors: string[] = [];
 
     for (const step of steps) {
+        const mutationInstructions = step.channel === "sms"
+            ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+            : step.channel === "email"
+            ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+            : step.channel === "voice"
+            ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+            : null;
+
         const { error: stepError } = await supabase
             .from("sequence_steps")
             .insert({
@@ -407,6 +415,8 @@ async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
                 skip_conditions: step.skip_conditions,
                 on_success: step.on_success,
                 on_failure: step.on_failure,
+                enable_ai_mutation: true,
+                mutation_instructions: mutationInstructions,
             });
 
         if (stepError) {

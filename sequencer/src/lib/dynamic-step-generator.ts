@@ -359,6 +359,8 @@ export async function insertGeneratedStep(params: {
             skip_conditions: result.step.skip_conditions || null,
             on_success: result.step.on_success || { action: 'continue' },
             on_failure: result.step.on_failure || { action: 'skip' },
+            enable_ai_mutation: false,
+            mutation_instructions: null,
             generated_dynamically: true,
         })
         .select('id')
