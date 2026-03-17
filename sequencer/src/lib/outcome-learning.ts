@@ -190,7 +190,19 @@ export async function computeStepAnalytics(
         .gte('executed_at', periodStart.toISOString())
         .lte('executed_at', periodEnd.toISOString());
 
-    const logs = executions || [];
+    // Exclude test enrollments from analytics
+    const allEnrollmentIds = [...new Set((executions || []).map(l => l.enrollment_id).filter(Boolean))];
+    let testEnrollmentIds = new Set<string>();
+    if (allEnrollmentIds.length > 0) {
+        const { data: testEnrollments } = await supabase
+            .from('sequence_enrollments')
+            .select('id')
+            .in('id', allEnrollmentIds)
+            .eq('is_test', true);
+        testEnrollmentIds = new Set((testEnrollments || []).map(e => e.id));
+    }
+
+    const logs = (executions || []).filter(l => !testEnrollmentIds.has(l.enrollment_id));
     const totalExecutions = logs.length;
     if (totalExecutions === 0) return;
 
@@ -209,7 +221,7 @@ export async function computeStepAnalytics(
         return false;
     }).length;
 
-    // Get replies for enrollments that went through this step
+    // Get replies for enrollments that went through this step (already excludes test)
     const enrollmentIds = [...new Set(logs.map(l => l.enrollment_id).filter(Boolean))];
 
     let totalReplies = 0;
@@ -220,7 +232,8 @@ export async function computeStepAnalytics(
         const { data: repliedEnrollments } = await supabase
             .from('sequence_enrollments')
             .select('id, status, contact_replied, appointment_booked, converting_step_id')
-            .in('id', enrollmentIds);
+            .in('id', enrollmentIds)
+            .eq('is_test', false);
 
         if (repliedEnrollments) {
             totalReplies = repliedEnrollments.filter(e => e.contact_replied).length;
@@ -342,11 +355,12 @@ export async function computeSequenceAnalytics(
 
     if (!sequence) return;
 
-    // Get all enrollments for this sequence in the period
+    // Get all non-test enrollments for this sequence in the period
     const { data: enrollments } = await supabase
         .from('sequence_enrollments')
         .select('*')
         .eq('sequence_id', sequenceId)
+        .eq('is_test', false)
         .gte('enrolled_at', periodStart.toISOString())
         .lte('enrolled_at', periodEnd.toISOString());
 

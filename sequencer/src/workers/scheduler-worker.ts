@@ -76,6 +76,7 @@ import { utcToZonedTime } from 'date-fns-tz';
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
+const TEST_MODE_DELAY_SECONDS = 30; // Compressed delay for test enrollments
 
 interface EnrollmentWithContext {
     enrollment: SequenceEnrollment;
@@ -601,8 +602,12 @@ async function advanceToNextStep(
     // ── Dynamic mode: enter awaiting_outcome instead of advancing
     if (sequence?.generation_mode === 'dynamic') {
         const lastChannel = step?.channel || 'sms';
-        const timeoutHours = getOutcomeTimeout(lastChannel as ChannelType);
-        const timeoutAt = new Date(Date.now() + timeoutHours * 60 * 60 * 1000).toISOString();
+        const isTestEnrollment = (enrollment as any).is_test === true;
+        // Test mode: use 30-second timeout instead of hours-long outcome window
+        const timeoutMs = isTestEnrollment
+            ? TEST_MODE_DELAY_SECONDS * 1000
+            : getOutcomeTimeout(lastChannel as ChannelType) * 60 * 60 * 1000;
+        const timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
 
         await supabase
             .from('sequence_enrollments')
@@ -616,7 +621,8 @@ async function advanceToNextStep(
             })
             .eq('id', enrollment.id);
 
-        console.log(`[SCHEDULER] Dynamic enrollment ${enrollment.id} now awaiting outcome (timeout: ${timeoutHours}h)`);
+        const timeoutLabel = isTestEnrollment ? `${TEST_MODE_DELAY_SECONDS}s (test mode)` : `${getOutcomeTimeout(lastChannel as ChannelType)}h`;
+        console.log(`[SCHEDULER] Dynamic enrollment ${enrollment.id} now awaiting outcome (timeout: ${timeoutLabel})`);
         return;
     }
 
@@ -646,7 +652,13 @@ async function advanceToNextStep(
     // Calculate next step time with emotion-based delay adjustment
     let adjustedDelaySeconds = nextStep.delay_seconds;
 
-    if (emotionalState) {
+    // Test mode: compress all delays to 30 seconds
+    const isTestEnrollment = (enrollment as any).is_test === true;
+    if (isTestEnrollment) {
+        const originalDelay = nextStep.delay_seconds;
+        adjustedDelaySeconds = TEST_MODE_DELAY_SECONDS;
+        console.log(`[SCHEDULER] Test mode: delay compressed ${originalDelay}s → ${adjustedDelaySeconds}s for enrollment ${enrollment.id}`);
+    } else if (emotionalState) {
         const multiplier = getEmotionBasedDelayMultiplier({
             sentimentTrend: emotionalState.sentimentTrend,
             isHotLead: emotionalState.isHotLead,
