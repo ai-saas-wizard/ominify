@@ -1153,3 +1153,268 @@ ${STEP_SCHEMA_INSTRUCTIONS}`;
         return { success: false, error: err instanceof Error ? err.message : "An unexpected error occurred" };
     }
 }
+
+// ═══════════════════════════════════════════════════════════
+// Task-Based Sequence Creation (Phase 2)
+// Natural language instruction → dynamic sequence with step 1
+// ═══════════════════════════════════════════════════════════
+
+export interface TaskExtractionResult {
+    goal: string;
+    channels: ("sms" | "email" | "voice")[];
+    max_steps: number;
+    urgency: "critical" | "high" | "medium" | "low";
+    first_step: {
+        channel: "sms" | "email" | "voice";
+        content: Record<string, any>;
+    };
+}
+
+export async function createTaskFromDescription(
+    clientId: string,
+    instruction: string,
+    csvColumns?: string[],
+    availableChannels?: { sms: { ready: boolean }; email: { ready: boolean }; voice: { ready: boolean } }
+): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
+    try {
+        // ── Fetch tenant profile for business context
+        const { data: profile } = await supabase
+            .from("tenant_profiles")
+            .select("*")
+            .eq("client_id", clientId)
+            .single();
+
+        const p = profile || DEFAULT_PROFILE;
+
+        // ── Determine which channels are actually available
+        const readyChannels: string[] = [];
+        if (availableChannels) {
+            if (availableChannels.sms?.ready) readyChannels.push("sms");
+            if (availableChannels.email?.ready) readyChannels.push("email");
+            if (availableChannels.voice?.ready) readyChannels.push("voice");
+        } else {
+            readyChannels.push("sms", "email", "voice");
+        }
+
+        if (readyChannels.length === 0) {
+            return { success: false, error: "No channels are available. Please configure at least one channel (SMS, email, or voice) before creating a task." };
+        }
+
+        // ── Build CSV context for the prompt
+        const csvContext = csvColumns && csvColumns.length > 0
+            ? `\n\nCSV COLUMNS AVAILABLE (use as {{column_name}} placeholders in generated content):\n${csvColumns.map(c => `- {{${c}}}`).join("\n")}\nIMPORTANT: Use these column names as template variables in the step content where appropriate. For example, if there's a "first_name" column, use {{first_name}} in greetings.`
+            : "";
+
+        // ── Build the extraction prompt
+        const extractionPrompt = `You are an expert marketing automation strategist. Analyze a plain-text task instruction and extract a structured plan for an automated outreach sequence.
+
+BUSINESS PROFILE:
+- Business: ${p.business_name || "Business"}
+- Industry: ${buildIndustryContext(p.industry, p.sub_industry)}
+- Brand Voice: ${p.brand_voice || "professional"}
+- Primary Goal: ${p.primary_goal || "book_appointment"}
+- Timezone: ${p.timezone || "America/New_York"}
+
+AVAILABLE CHANNELS (only use these): ${readyChannels.join(", ")}
+${csvContext}
+
+USER INSTRUCTION:
+"${instruction}"
+
+Extract the following as a JSON object:
+{
+  "goal": "brief description of the task's goal (1 sentence)",
+  "channels": ["sms", "email", "voice"],  // subset of available channels that make sense for this task
+  "max_steps": 5,  // reasonable number of steps (1-10) for this task
+  "urgency": "high",  // "critical", "high", "medium", or "low"
+  "sequence_name": "Short Task Name",  // concise name for this task sequence (2-5 words)
+  "first_step": {
+    "channel": "sms",  // best channel for step 1
+    "content": {}  // content object matching the channel format below
+  }
+}
+
+CHANNEL CONTENT FORMATS:
+- SMS: {"body": "Hi {{first_name}}, ..."}
+- Email: {"subject": "Subject", "body_html": "<p>HTML content</p>", "body_text": "Plain text"}
+- Voice: {"first_message": "Opening greeting", "system_prompt": "Full AI agent instructions"}
+
+RULES:
+1. Only include channels from the AVAILABLE CHANNELS list
+2. If the instruction mentions specific channels, prefer those
+3. For urgent/time-sensitive tasks, start with SMS or voice
+4. For informational/nurture tasks, email is fine as first step
+5. Use template variables ({{first_name}}, {{business_name}}, etc.) for personalization
+${csvColumns && csvColumns.length > 0 ? "6. Use CSV column variables where they naturally fit in the content" : ""}
+7. Match the business's brand voice
+8. Keep SMS under 160 characters
+9. TCPA compliance: mention reasonable contact hours
+
+Output ONLY the JSON object.`;
+
+        const openrouter = getOpenRouterClient();
+
+        const completion = await openrouter.chat.completions.create({
+            model: GENERATION_MODEL,
+            temperature: 0.3,
+            max_tokens: 2000,
+            response_format: { type: "json_object" },
+            messages: [
+                { role: "system", content: extractionPrompt },
+                { role: "user", content: "Extract the task plan and generate step 1. Output ONLY the JSON object." },
+            ],
+        });
+
+        const raw = completion.choices[0]?.message?.content;
+        if (!raw) {
+            return { success: false, error: "AI returned an empty response. Please try again." };
+        }
+
+        console.log("[createTaskFromDescription] Raw response length:", raw.length);
+
+        let extracted: any;
+        try {
+            extracted = extractJSON(raw);
+        } catch {
+            return { success: false, error: "Could not parse AI response. Please try again." };
+        }
+
+        // ── Validate extracted plan
+        if (!extracted.goal || !extracted.first_step?.channel || !extracted.first_step?.content) {
+            return { success: false, error: "AI extraction was incomplete. Please provide more detail in your instruction." };
+        }
+
+        // ── Validate and filter channels to only available ones
+        const channels = (extracted.channels || [extracted.first_step.channel])
+            .filter((ch: string) => readyChannels.includes(ch));
+        if (channels.length === 0) {
+            return { success: false, error: "None of the AI-suggested channels are available. Please configure your channels first." };
+        }
+
+        // ── Validate first step channel
+        const firstStepChannel = readyChannels.includes(extracted.first_step.channel)
+            ? extracted.first_step.channel
+            : channels[0];
+
+        // ── Validate first step content using the existing validator
+        const mockStepForValidation = {
+            step_order: 1,
+            channel: firstStepChannel,
+            delay_minutes: 0,
+            delay_type: "immediate",
+            content: extracted.first_step.content,
+            skip_conditions: { skip_if: ["contact_replied", "appointment_booked"] },
+            on_success: { action: "continue" },
+            on_failure: { action: "skip" },
+        };
+
+        const mockSequence = {
+            name: extracted.sequence_name || "Task Sequence",
+            steps: [mockStepForValidation],
+        };
+
+        let validation = validateAndTransformSequence(mockSequence);
+
+        if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+            // Attempt repair
+            try {
+                const repaired = await repairWithAI(mockSequence, validation.errors);
+                validation = validateAndTransformSequence(repaired);
+                if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+                    return { success: false, error: `Step validation failed: ${validation.errors.join(", ")}` };
+                }
+            } catch {
+                return { success: false, error: `Step validation failed: ${validation.errors.join(", ")}` };
+            }
+        }
+
+        // ── Inject VAPI assistant ID for voice steps
+        if (validation.steps![0].channel === "voice") {
+            const vapiId = await getOutboundVapiId(clientId);
+            if (vapiId) {
+                validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
+            }
+        }
+
+        // ── Build sequence strategy for dynamic JIT generation
+        const sequenceStrategy = {
+            goal: extracted.goal,
+            max_steps: Math.min(Math.max(extracted.max_steps || 5, 1), 10),
+            available_channels: channels as ("sms" | "email" | "voice")[],
+            agent_context: instruction,
+            csv_columns: csvColumns || null,
+        };
+
+        const urgency = ["critical", "high", "medium", "low"].includes(extracted.urgency)
+            ? extracted.urgency
+            : "medium";
+
+        // ── Insert sequence with is_task metadata
+        const { data: sequence, error: seqError } = await supabase
+            .from("sequences")
+            .insert({
+                client_id: clientId,
+                name: extracted.sequence_name || "Task Sequence",
+                description: extracted.goal,
+                trigger_type: "manual",
+                urgency_tier: urgency,
+                ai_generated: true,
+                is_active: false,
+                enable_adaptive_mutation: true,
+                mutation_aggressiveness: "moderate",
+                generation_mode: "dynamic",
+                sequence_strategy: sequenceStrategy,
+                metadata: { is_task: true, source_instruction: instruction },
+            })
+            .select("id")
+            .single();
+
+        if (seqError || !sequence) {
+            // If metadata column doesn't exist, retry without it
+            if (seqError?.message?.includes("metadata")) {
+                console.log("[createTaskFromDescription] metadata column not found, inserting without it");
+                const { data: seq2, error: seqError2 } = await insertSequence(
+                    clientId,
+                    extracted.sequence_name || "Task Sequence",
+                    extracted.goal,
+                    "manual",
+                    urgency,
+                    {
+                        generation_mode: "dynamic",
+                        sequence_strategy: { ...sequenceStrategy, is_task: true, source_instruction: instruction },
+                    }
+                );
+
+                if (seqError2 || !seq2) {
+                    return { success: false, error: `Failed to create task sequence: ${seqError2?.message || "Unknown error"}` };
+                }
+
+                // Insert step 1
+                const { insertedCount, stepErrors } = await insertSteps(seq2.id, validation.steps!);
+                if (insertedCount === 0) {
+                    await supabase.from("sequences").delete().eq("id", seq2.id);
+                    return { success: false, error: `Failed to create first step: ${stepErrors[0] || "Unknown error"}` };
+                }
+
+                revalidatePath(`/client/${clientId}/sequences`);
+                return { success: true, sequenceId: seq2.id };
+            }
+
+            return { success: false, error: `Failed to create task sequence: ${seqError?.message || "Unknown error"}` };
+        }
+
+        // ── Insert only step 1 (rest generated JIT at runtime)
+        const { insertedCount, stepErrors } = await insertSteps(sequence.id, validation.steps!);
+
+        if (insertedCount === 0) {
+            await supabase.from("sequences").delete().eq("id", sequence.id);
+            return { success: false, error: `Failed to create first step: ${stepErrors[0] || "Unknown error"}` };
+        }
+
+        revalidatePath(`/client/${clientId}/sequences`);
+        return { success: true, sequenceId: sequence.id };
+    } catch (err) {
+        console.error("createTaskFromDescription error:", err);
+        return { success: false, error: err instanceof Error ? err.message : "An unexpected error occurred" };
+    }
+}
