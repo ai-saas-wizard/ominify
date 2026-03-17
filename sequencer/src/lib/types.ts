@@ -147,6 +147,8 @@ export interface Sequence {
     // Phase 6: Dynamic (JIT) Step Generation
     generation_mode: GenerationMode;
     sequence_strategy: SequenceStrategy | null;
+    // Phase 7: SMS Chatbot Mode
+    enable_chatbot_mode: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -266,6 +268,8 @@ export interface EventJobPayload {
     appointmentBooked?: boolean;
     messageBody?: string;
     deliveryStatus?: string;
+    // Phase 7: SMS Chatbot — inbound phone number for reply routing
+    fromPhone?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -333,6 +337,9 @@ export interface ContactInteraction {
     // Phase 2: Emotional Intelligence
     emotional_analysis: EmotionalAnalysis | Record<string, any> | null;
     engagement_score: number | null;
+
+    // Phase 7: SMS Chatbot metadata (e.g., { source: 'chatbot', turn: 3 })
+    metadata: Record<string, any> | null;
 }
 
 export interface ConversationContext {

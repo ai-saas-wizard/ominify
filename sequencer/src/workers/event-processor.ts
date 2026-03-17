@@ -44,6 +44,8 @@ import {
 import {
     getConversationContext as getConvCtx,
 } from '../lib/conversation-memory.js';
+import { handleInboundSMS } from '../lib/sms-responder.js';
+import { smsQueue } from '../lib/redis.js';
 import type {
     EventJobPayload,
     EnrollmentStatus,
@@ -597,14 +599,222 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
         }
     }
 
-    // 7. Dynamic (JIT) step generation — trigger on SMS reply (lead responded)
-    const smsOutcomeCtx: OutcomeContext = {
-        type: 'sms_reply',
-        details: `Reply: "${(messageBody || '').substring(0, 100)}"`,
-        channel: 'sms',
-        eiAnalysis: eiAnalysis || undefined,
-    };
-    await maybeTriggerDynamicGeneration(enrollmentId, smsOutcomeCtx);
+    // 7. SMS Chatbot Mode — if enrollment's sequence has chatbot enabled, generate AI reply
+    const chatbotHandled = await maybeTriggerChatbotReply(event, enrollmentId, eiAnalysis);
+
+    // 8. Dynamic (JIT) step generation — trigger on SMS reply (lead responded)
+    // Skip JIT generation if chatbot already handled the reply
+    if (!chatbotHandled) {
+        const smsOutcomeCtx: OutcomeContext = {
+            type: 'sms_reply',
+            details: `Reply: "${(messageBody || '').substring(0, 100)}"`,
+            channel: 'sms',
+            eiAnalysis: eiAnalysis || undefined,
+        };
+        await maybeTriggerDynamicGeneration(enrollmentId, smsOutcomeCtx);
+    }
+}
+
+/**
+ * Maybe trigger chatbot reply for an inbound SMS on an active enrollment.
+ * Returns true if chatbot handled the reply (caller should skip JIT generation).
+ *
+ * The chatbot path is enabled when:
+ * - The enrollment exists and is in an active/awaiting_outcome status
+ * - The enrollment's sequence has enable_chatbot_mode = true
+ * - The EI analysis didn't already trigger opt-out or escalation
+ */
+async function maybeTriggerChatbotReply(
+    event: EventJobPayload,
+    enrollmentId: string,
+    eiAnalysis: EmotionalAnalysis | null
+): Promise<boolean> {
+    try {
+        // 1. Fetch enrollment with sequence and contact joins
+        const { data: enrollment } = await supabase
+            .from('sequence_enrollments')
+            .select('*, sequences(*), contacts(*)')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (!enrollment) return false;
+
+        const sequence = (enrollment as any).sequences as any;
+        const contact = (enrollment as any).contacts as any;
+
+        // 2. Guard: sequence must have chatbot mode enabled
+        if (!sequence?.enable_chatbot_mode) return false;
+
+        // 3. Guard: enrollment must be in an active state (not already completed/stopped)
+        const activeStatuses: EnrollmentStatus[] = ['active', 'awaiting_outcome', 'generating_next_step'];
+        if (!activeStatuses.includes(enrollment.status)) {
+            console.log(`[EVENT] Chatbot skipped — enrollment ${enrollmentId} status is ${enrollment.status}`);
+            return false;
+        }
+
+        // 4. Guard: if EI already determined opt-out or escalation, don't chatbot
+        if (eiAnalysis?.intent === 'stop') {
+            console.log(`[EVENT] Chatbot skipped — EI detected opt-out for ${enrollmentId}`);
+            return false;
+        }
+
+        // 5. Guard: if needs_human_intervention is already set, don't chatbot
+        if ((enrollment as any).needs_human_intervention) {
+            console.log(`[EVENT] Chatbot skipped — enrollment ${enrollmentId} needs human intervention`);
+            return false;
+        }
+
+        console.log(`[EVENT] Chatbot mode active for enrollment ${enrollmentId} — generating AI reply`);
+
+        // 6. Call SMS responder
+        const fromPhone = event.fromPhone || contact?.phone || '';
+        const result = await handleInboundSMS({
+            enrollmentId,
+            sequenceId: enrollment.sequence_id,
+            contactId: enrollment.contact_id,
+            clientId: enrollment.tenant_id,
+            inboundMessage: event.messageBody || '',
+            fromPhone,
+        });
+
+        // 7. Act on the chatbot's decision
+        switch (result.action) {
+            case 'reply': {
+                if (!result.message) {
+                    console.error(`[EVENT] Chatbot returned reply without message for ${enrollmentId}`);
+                    return false;
+                }
+
+                // Send the reply SMS via the sms-send queue
+                await smsQueue.add('sms:chatbot-reply', {
+                    tenantId: enrollment.tenant_id,
+                    contactPhone: contact?.phone || fromPhone,
+                    body: result.message,
+                    enrollmentId,
+                    stepId: '', // No specific step — this is a chatbot reply
+                });
+
+                // Record the outbound chatbot interaction with metadata
+                const turnNumber = result.metadata?.turn || 1;
+                await recordInteraction({
+                    clientId: enrollment.tenant_id,
+                    contactId: enrollment.contact_id,
+                    enrollmentId,
+                    channel: 'sms',
+                    direction: 'outbound',
+                    contentBody: result.message,
+                    outcome: 'delivered',
+                    metadata: { source: 'chatbot', turn: turnNumber },
+                });
+
+                console.log(`[EVENT] Chatbot reply sent for ${enrollmentId} (turn ${turnNumber}): "${result.message.substring(0, 60)}..."`);
+                return true;
+            }
+
+            case 'goal_achieved': {
+                const conversionType = result.conversion_type || 'replied';
+                await updateEnrollmentStatus(enrollmentId, {
+                    status: 'completed' as EnrollmentStatus,
+                    contact_replied: true,
+                    completed_at: new Date().toISOString(),
+                });
+
+                // Record the conversion interaction
+                await recordInteraction({
+                    clientId: enrollment.tenant_id,
+                    contactId: enrollment.contact_id,
+                    enrollmentId,
+                    channel: 'sms',
+                    direction: 'inbound',
+                    contentBody: `Goal achieved: ${conversionType}`,
+                    outcome: 'replied',
+                    sentiment: 'positive',
+                    intent: 'interested',
+                });
+
+                // Compute step attribution on conversion
+                try {
+                    await computeStepAttribution(enrollmentId, conversionType as any);
+                } catch (err) {
+                    console.error('[EVENT] Attribution computation failed:', err);
+                }
+
+                // Notify the tenant
+                await createNotification({
+                    clientId: enrollment.tenant_id,
+                    enrollmentId,
+                    contactId: enrollment.contact_id,
+                    type: 'sequence_completed',
+                    title: `Goal achieved: ${conversionType}`,
+                    body: `Chatbot conversation resulted in conversion (${conversionType}) for ${contact?.name || contact?.phone || 'contact'}`,
+                    priority: 'high',
+                    metadata: { conversion_type: conversionType, source: 'chatbot' },
+                });
+
+                console.log(`[EVENT] Chatbot goal achieved for ${enrollmentId}: ${conversionType}`);
+                return true;
+            }
+
+            case 'escalate': {
+                // Flag enrollment for human intervention
+                await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        needs_human_intervention: true,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId);
+
+                // Notify the tenant
+                await createNotification({
+                    clientId: enrollment.tenant_id,
+                    enrollmentId,
+                    contactId: enrollment.contact_id,
+                    type: 'escalation',
+                    title: 'Chatbot escalation — human needed',
+                    body: `Reason: ${result.escalation_reason || 'Unknown'}. Last message: "${(event.messageBody || '').substring(0, 100)}"`,
+                    priority: 'urgent',
+                    metadata: {
+                        escalation_reason: result.escalation_reason,
+                        source: 'chatbot',
+                    },
+                });
+
+                console.log(`[EVENT] Chatbot escalated ${enrollmentId}: ${result.escalation_reason}`);
+                return true;
+            }
+
+            case 'opt_out': {
+                await updateEnrollmentStatus(enrollmentId, {
+                    status: 'manual_stop' as EnrollmentStatus,
+                    contact_replied: true,
+                });
+
+                // Record the opt-out interaction
+                await recordInteraction({
+                    clientId: enrollment.tenant_id,
+                    contactId: enrollment.contact_id,
+                    enrollmentId,
+                    channel: 'sms',
+                    direction: 'inbound',
+                    contentBody: event.messageBody || '',
+                    outcome: 'replied',
+                    sentiment: 'negative',
+                    intent: 'stop',
+                });
+
+                console.log(`[EVENT] Chatbot detected opt-out for ${enrollmentId}`);
+                return true;
+            }
+
+            default:
+                console.error(`[EVENT] Chatbot returned unknown action: ${result.action}`);
+                return false;
+        }
+    } catch (err) {
+        console.error(`[EVENT] Chatbot reply failed for ${enrollmentId}:`, err);
+        return false; // Fallback to JIT generation
+    }
 }
 
 /**

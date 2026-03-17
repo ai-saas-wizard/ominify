@@ -110,6 +110,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 tenantId,
                 enrollmentId: enrollmentId || undefined,
                 messageBody: body,
+                fromPhone: from,
             };
 
             await eventQueue.add('event:sms-reply', event);
@@ -183,6 +184,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 tenantId,
                 enrollmentId: enrollmentId || undefined,
                 messageBody: body,
+                fromPhone: from,
             };
 
             await eventQueue.add('event:sms-reply', event);
