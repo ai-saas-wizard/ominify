@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, UserMinus, Phone, Users } from "lucide-react";
+import { Loader2, UserMinus, Phone, Users, FlaskConical } from "lucide-react";
 import { unenrollContact } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 
@@ -23,6 +23,7 @@ interface Enrollment {
     completed_at: string | null;
     source: string | null;
     contact_id: string;
+    is_test?: boolean;
     contacts: {
         id: string;
         name: string | null;
@@ -132,6 +133,12 @@ export function EnrollmentTable({
                                     >
                                         {enrollment.status}
                                     </span>
+                                    {enrollment.is_test && (
+                                        <span className="inline-flex items-center gap-0.5 ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                                            <FlaskConical className="w-2.5 h-2.5" />
+                                            Test
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-violet-100 text-violet-700 text-xs font-medium rounded-full">

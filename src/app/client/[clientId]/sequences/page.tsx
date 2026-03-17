@@ -10,7 +10,7 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
         .select(`
             *,
             sequence_steps(id, channel, enable_ai_mutation),
-            sequence_enrollments(id, status)
+            sequence_enrollments(id, status, is_test)
         `)
         .eq("client_id", clientId)
         .order("created_at", { ascending: false });
@@ -22,7 +22,12 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
 
     return (data || []).map((seq: any) => {
         const steps = seq.sequence_steps || [];
-        const enrollments = seq.sequence_enrollments || [];
+        const enrollments = (seq.sequence_enrollments || []).filter(
+            (e: any) => !e.is_test
+        );
+
+        const isTask = seq.metadata?.is_task === true ||
+            seq.sequence_strategy?.is_task === true;
 
         return {
             id: seq.id,
@@ -32,6 +37,7 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
             urgency_tier: seq.urgency_tier,
             is_active: seq.is_active,
             generation_mode: seq.generation_mode || null,
+            is_task: isTask,
             created_at: seq.created_at,
             updated_at: seq.updated_at || null,
             step_count: steps.length,

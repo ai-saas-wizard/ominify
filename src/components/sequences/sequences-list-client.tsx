@@ -22,6 +22,7 @@ import {
     Reply,
     CalendarCheck,
     XCircle,
+    Rocket,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,10 @@ import {
 } from "@/components/ui/tooltip";
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
 import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
+import { TaskDialog } from "@/components/sequences/task-dialog";
+import { getChannelReadiness, type ChannelReadiness } from "@/app/actions/sequence-actions";
+import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +61,7 @@ export interface SequenceCardData {
     total_enrolled: number;
     channels: string[];
     ai_mutation_steps: number;
+    is_task?: boolean;
 }
 
 interface SequencesListClientProps {
@@ -290,6 +296,12 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                                         </TooltipContent>
                                     </Tooltip>
                                 )}
+                                {sequence.is_task && (
+                                    <Badge className="bg-sky-50 text-sky-700 border-sky-200 gap-1">
+                                        <Rocket className="w-3 h-3" />
+                                        Task
+                                    </Badge>
+                                )}
                                 {sequence.is_active ? (
                                     <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
                                         <span className="relative flex h-1.5 w-1.5">
@@ -409,10 +421,38 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function SequencesListClient({ clientId, sequences }: SequencesListClientProps) {
+    const router = useRouter();
     const totalSequences = sequences.length;
     const activeSequences = sequences.filter((s) => s.is_active).length;
     const totalEnrolled = sequences.reduce((sum, s) => sum + s.enrolled_count, 0);
     const totalCompleted = sequences.reduce((sum, s) => sum + s.completed_count, 0);
+
+    const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+    const [channelReadiness, setChannelReadiness] = useState<ChannelReadiness>({
+        sms: { ready: false },
+        email: { ready: false },
+        voice: { ready: false },
+    });
+
+    useEffect(() => {
+        getChannelReadiness(clientId).then(setChannelReadiness);
+    }, [clientId]);
+
+    const handleTaskLaunch = useCallback(
+        (sequenceId: string) => {
+            router.push(`/client/${clientId}/sequences/${sequenceId}`);
+            router.refresh();
+        },
+        [clientId, router]
+    );
+
+    const handleTestMode = useCallback(
+        (sequenceId: string) => {
+            router.push(`/client/${clientId}/sequences/${sequenceId}`);
+            router.refresh();
+        },
+        [clientId, router]
+    );
 
     return (
         <TooltipProvider delayDuration={200}>
@@ -441,9 +481,24 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setTaskDialogOpen(true)}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-sky-600 hover:to-blue-700 shadow-sm hover:shadow transition-all"
+                        >
+                            <Rocket className="w-4 h-4" />
+                            New Task
+                        </button>
                         <AIGenerateSequenceDialog clientId={clientId} />
                         <CreateSequenceDialog clientId={clientId} variant="secondary" />
                     </div>
+                    <TaskDialog
+                        open={taskDialogOpen}
+                        onOpenChange={setTaskDialogOpen}
+                        clientId={clientId}
+                        channelReadiness={channelReadiness}
+                        onLaunch={handleTaskLaunch}
+                        onTestMode={handleTestMode}
+                    />
                 </motion.div>
 
                 {/* Summary Stat Cards */}
