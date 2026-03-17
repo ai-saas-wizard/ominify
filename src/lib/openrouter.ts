@@ -12,4 +12,8 @@ export function getOpenRouterClient() {
     });
 }
 
-export const SEQUENCE_MODEL = "z-ai/glm-5";
+// GLM-5 for conversational reasoning (asking clarifying questions)
+export const CONVERSATION_MODEL = "z-ai/glm-5";
+
+// GPT-4o-mini for structured JSON generation (fast, cheap, reliable JSON output)
+export const GENERATION_MODEL = "openai/gpt-4o-mini";

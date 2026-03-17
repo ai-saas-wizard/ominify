@@ -2,7 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
-import { getOpenRouterClient, SEQUENCE_MODEL } from "@/lib/openrouter";
+import { getOpenRouterClient, CONVERSATION_MODEL, GENERATION_MODEL } from "@/lib/openrouter";
 import {
     buildIndustryContext,
     buildServicesText,
@@ -253,7 +253,7 @@ export async function sendConversationMessage(
         const openrouter = getOpenRouterClient();
 
         const completion = await openrouter.chat.completions.create({
-            model: SEQUENCE_MODEL,
+            model: CONVERSATION_MODEL,
             temperature: 0.7,
             max_tokens: 1000,
             messages: [
@@ -421,17 +421,18 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
         const openrouter = getOpenRouterClient();
 
         const completion = await openrouter.chat.completions.create({
-            model: SEQUENCE_MODEL,
+            model: GENERATION_MODEL,
             temperature: 0.4,
             max_tokens: 6000,
+            response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: generationPrompt },
                 {
                     role: "user",
-                    content: `Generate the complete ${plan.step_count}-step sequence for the "${plan.trigger_type}" trigger with ${plan.channels.join(", ")} channels at ${plan.urgency_tier} urgency. Output ONLY the JSON object. Do not include any explanation or markdown. Start your response with { and end with }.`,
+                    content: `Generate the complete ${plan.step_count}-step sequence for the "${plan.trigger_type}" trigger with ${plan.channels.join(", ")} channels at ${plan.urgency_tier} urgency. Output ONLY the JSON object.`,
                 },
             ],
-        } as any);
+        });
 
         // Handle reasoning models: content may be in different fields
         const choice = completion.choices[0];
@@ -654,17 +655,18 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
         const openrouter = getOpenRouterClient();
 
         const completion = await openrouter.chat.completions.create({
-            model: SEQUENCE_MODEL,
+            model: GENERATION_MODEL,
             temperature: 0.4,
             max_tokens: 6000,
+            response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the sequence now. Start your response with { and end with }. No explanation, no markdown.",
+                    content: "Generate the sequence now. Output ONLY the JSON object.",
                 },
             ],
-        } as any);
+        });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
@@ -873,17 +875,18 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         const openrouter = getOpenRouterClient();
 
         const completion = await openrouter.chat.completions.create({
-            model: SEQUENCE_MODEL,
+            model: GENERATION_MODEL,
             temperature: 0.4,
             max_tokens: 6000,
+            response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
                 {
                     role: "user",
-                    content: "Generate the additional steps now. Start your response with { and end with }. No explanation, no markdown.",
+                    content: "Generate the additional steps now. Output ONLY the JSON object.",
                 },
             ],
-        } as any);
+        });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
