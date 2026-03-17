@@ -268,7 +268,6 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
     try {
         const channel = formData.get("channel") as string;
         const delay_minutes = parseInt(formData.get("delay_minutes") as string) || 0;
-        const delay_seconds = delay_minutes * 60;
         const delay_type = formData.get("delay_type") as string;
         const content_template = formData.get("content_template") as string;
         const skip_conditions = formData.get("skip_conditions") as string;
@@ -337,7 +336,7 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
                 sequence_id: sequenceId,
                 step_order: nextOrder,
                 channel,
-                delay_seconds,
+                delay_minutes,
                 delay_type: delay_type || "after_previous",
                 content: parsedTemplate,
                 skip_conditions: parsedSkip,
@@ -386,7 +385,7 @@ export async function updateSequenceStep(stepId: string, formData: FormData) {
 
         const updates: Record<string, any> = {};
         if (channel) updates.channel = channel;
-        if (delay_minutes_raw !== null) updates.delay_seconds = (parseInt(delay_minutes_raw) || 0) * 60;
+        if (delay_minutes_raw !== null) updates.delay_minutes = parseInt(delay_minutes_raw) || 0;
         if (delay_type) updates.delay_type = delay_type;
 
         if (content_template) {

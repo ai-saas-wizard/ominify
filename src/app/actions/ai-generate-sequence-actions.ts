@@ -25,86 +25,409 @@ const DEFAULT_PROFILE = {
     job_types: null,
 };
 
+// ─── DB Schema Constants ─────────────────────────────────────────────────────
+// These mirror the exact Supabase table definitions.
+
+const VALID_CHANNELS = ["sms", "email", "voice", "wait", "condition", "webhook", "notify_team"] as const;
+const AI_CHANNELS = ["sms", "email", "voice"] as const; // subset AI can generate
+const VALID_DELAY_TYPES = ["immediate", "fixed_delay", "business_hours_only", "specific_time", "after_previous"] as const;
+const VALID_SKIP_IF = ["contact_replied", "contact_answered_call", "appointment_booked"] as const;
+const VALID_SUCCESS_ACTIONS = ["continue", "jump_to_step", "end_sequence"] as const;
+const VALID_FAILURE_ACTIONS = ["retry_after_seconds", "skip", "end_sequence"] as const;
+
 // ─── JSON Extraction Helper ──────────────────────────────────────────────────
-// GLM-5 is a reasoning model that may wrap output in <think> tags, markdown
-// code blocks, or add explanatory text around JSON. This handles all cases.
 
 function extractJSON(raw: string): any {
-    // Step 0: Strip reasoning/thinking tags that reasoning models add
     let cleaned = raw
         .replace(/<think>[\s\S]*?<\/think>/gi, "")
         .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
         .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
         .trim();
 
-    // Try 1: Direct parse (model returned pure JSON)
-    try {
-        return JSON.parse(cleaned);
-    } catch {
-        // continue
-    }
+    try { return JSON.parse(cleaned); } catch { /* continue */ }
 
-    // Try 2: Extract from ```json ... ``` block (greedy to get the largest block)
     const jsonBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
     if (jsonBlockMatch) {
-        try {
-            return JSON.parse(jsonBlockMatch[1].trim());
-        } catch {
-            // Try fixing common issues: trailing commas
-            const fixed = jsonBlockMatch[1].trim()
-                .replace(/,\s*}/g, "}")
-                .replace(/,\s*]/g, "]");
-            try {
-                return JSON.parse(fixed);
-            } catch {
-                // continue
-            }
+        try { return JSON.parse(jsonBlockMatch[1].trim()); } catch {
+            const fixed = jsonBlockMatch[1].trim().replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+            try { return JSON.parse(fixed); } catch { /* continue */ }
         }
     }
 
-    // Try 3: Find the outermost { ... } in the response
-    let depth = 0;
-    let start = -1;
-    let end = -1;
+    let depth = 0, start = -1;
     for (let i = 0; i < cleaned.length; i++) {
-        if (cleaned[i] === "{") {
-            if (depth === 0) start = i;
-            depth++;
-        } else if (cleaned[i] === "}") {
+        if (cleaned[i] === "{") { if (depth === 0) start = i; depth++; }
+        else if (cleaned[i] === "}") {
             depth--;
             if (depth === 0 && start !== -1) {
-                end = i;
-                // Don't break — we want the LAST complete top-level object
-                // Actually, try to parse the FIRST complete one
-                try {
-                    return JSON.parse(cleaned.slice(start, end + 1));
-                } catch {
-                    // Reset and keep looking
-                    start = -1;
-                }
+                try { return JSON.parse(cleaned.slice(start, i + 1)); } catch { start = -1; }
             }
         }
     }
 
-    // Try 4: Last resort — find first { and last } (less precise)
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-        const candidate = cleaned.slice(firstBrace, lastBrace + 1);
-        // Fix common JSON issues before parsing
-        const fixed = candidate
-            .replace(/,\s*}/g, "}")
-            .replace(/,\s*]/g, "]")
-            .replace(/\/\/[^\n]*/g, ""); // Strip single-line comments
-        try {
-            return JSON.parse(fixed);
-        } catch {
-            // continue
-        }
+    const f = cleaned.indexOf("{"), l = cleaned.lastIndexOf("}");
+    if (f !== -1 && l > f) {
+        const fixed = cleaned.slice(f, l + 1).replace(/,\s*}/g, "}").replace(/,\s*]/g, "]").replace(/\/\/[^\n]*/g, "");
+        try { return JSON.parse(fixed); } catch { /* continue */ }
     }
 
     throw new Error("Could not extract valid JSON from model response");
 }
+
+// ─── Schema Validation & Transformation ──────────────────────────────────────
+// Validates AI-generated JSON against the actual Supabase sequence_steps schema.
+// Auto-fixes what it can (delay_seconds→delay_minutes, missing content fields).
+// Returns { valid, data, errors } so callers can decide to repair or fail.
+
+interface ValidatedStep {
+    step_order: number;
+    channel: string;
+    delay_minutes: number;
+    delay_type: string;
+    content: Record<string, any>;
+    skip_conditions: Record<string, any> | null;
+    on_success: Record<string, any>;
+    on_failure: Record<string, any>;
+    enable_ai_mutation: boolean;
+    mutation_instructions: string | null;
+}
+
+interface ValidationResult {
+    valid: boolean;
+    name?: string;
+    description?: string;
+    steps?: ValidatedStep[];
+    errors: string[];
+    warnings: string[];
+}
+
+function validateAndTransformSequence(raw: any): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Top-level fields
+    if (!raw || typeof raw !== "object") {
+        return { valid: false, errors: ["Output is not a JSON object"], warnings };
+    }
+    if (!raw.name || typeof raw.name !== "string") {
+        errors.push("Missing or invalid 'name' field (expected string)");
+    }
+    if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
+        errors.push("Missing or empty 'steps' array");
+        return { valid: false, errors, warnings };
+    }
+
+    const validatedSteps: ValidatedStep[] = [];
+
+    for (let i = 0; i < raw.steps.length; i++) {
+        const step = raw.steps[i];
+        const stepLabel = `Step ${i + 1}`;
+
+        if (!step || typeof step !== "object") {
+            errors.push(`${stepLabel}: not a valid object`);
+            continue;
+        }
+
+        // ── Channel validation
+        const channel = (step.channel || "").toLowerCase().trim();
+        if (!AI_CHANNELS.includes(channel as any)) {
+            errors.push(`${stepLabel}: invalid channel "${step.channel}" (must be sms, email, or voice)`);
+            continue;
+        }
+
+        // ── Delay: convert delay_seconds to delay_minutes if needed
+        let delayMinutes = 0;
+        if (step.delay_minutes !== undefined && step.delay_minutes !== null) {
+            delayMinutes = Math.max(0, Math.round(Number(step.delay_minutes) || 0));
+        } else if (step.delay_seconds !== undefined && step.delay_seconds !== null) {
+            // AI generated delay_seconds — convert to minutes
+            const seconds = Number(step.delay_seconds) || 0;
+            delayMinutes = Math.max(0, Math.round(seconds / 60));
+            warnings.push(`${stepLabel}: converted delay_seconds (${seconds}) to delay_minutes (${delayMinutes})`);
+        } else if (step.delay !== undefined) {
+            delayMinutes = Math.max(0, Math.round(Number(step.delay) || 0));
+            warnings.push(`${stepLabel}: converted 'delay' to delay_minutes`);
+        }
+
+        // ── Delay type validation
+        let delayType = (step.delay_type || "fixed_delay").toLowerCase().trim();
+        // Map common AI variations
+        if (delayType === "after_enrollment") delayType = "immediate";
+        if (delayType === "after_previous_step") delayType = "after_previous";
+        if (!VALID_DELAY_TYPES.includes(delayType as any)) {
+            warnings.push(`${stepLabel}: invalid delay_type "${step.delay_type}", defaulting to "fixed_delay"`);
+            delayType = "fixed_delay";
+        }
+
+        // ── Content validation per channel
+        let content = step.content;
+        if (!content || typeof content !== "object") {
+            errors.push(`${stepLabel}: missing or invalid 'content' object`);
+            continue;
+        }
+
+        if (channel === "sms") {
+            if (!content.body || typeof content.body !== "string") {
+                if (content.message) {
+                    content = { body: content.message };
+                    warnings.push(`${stepLabel}: renamed content.message → content.body`);
+                } else if (content.text) {
+                    content = { body: content.text };
+                    warnings.push(`${stepLabel}: renamed content.text → content.body`);
+                } else {
+                    errors.push(`${stepLabel}: SMS content missing 'body' field`);
+                    continue;
+                }
+            }
+        } else if (channel === "email") {
+            if (!content.subject) {
+                content.subject = "Following up on your inquiry";
+                warnings.push(`${stepLabel}: email missing subject, added default`);
+            }
+            if (!content.body_html) {
+                if (content.html) {
+                    content.body_html = content.html;
+                    delete content.html;
+                    warnings.push(`${stepLabel}: renamed content.html → content.body_html`);
+                } else if (content.body_text || content.body) {
+                    content.body_html = `<p>${content.body_text || content.body}</p>`;
+                    warnings.push(`${stepLabel}: generated body_html from text`);
+                } else {
+                    errors.push(`${stepLabel}: email content missing body (no body_html, body_text, or body)`);
+                    continue;
+                }
+            }
+            if (!content.body_text) {
+                content.body_text = (content.body_html || "").replace(/<[^>]+>/g, "").trim() || "Hi, we wanted to follow up.";
+            }
+        } else if (channel === "voice") {
+            if (!content.first_message) {
+                if (content.greeting || content.opening) {
+                    content.first_message = content.greeting || content.opening;
+                    warnings.push(`${stepLabel}: renamed content.greeting/opening → content.first_message`);
+                } else {
+                    errors.push(`${stepLabel}: voice content missing 'first_message'`);
+                    continue;
+                }
+            }
+            if (!content.system_prompt) {
+                if (content.instructions || content.prompt) {
+                    content.system_prompt = content.instructions || content.prompt;
+                    warnings.push(`${stepLabel}: renamed content.instructions/prompt → content.system_prompt`);
+                } else {
+                    content.system_prompt = `You are a follow-up specialist for {{business_name}}. Be friendly and professional. Help the contact with their inquiry and try to book an appointment.`;
+                    warnings.push(`${stepLabel}: voice missing system_prompt, added default`);
+                }
+            }
+        }
+
+        // ── skip_conditions
+        let skipConditions = step.skip_conditions || null;
+        if (skipConditions && typeof skipConditions === "object") {
+            if (Array.isArray(skipConditions.skip_if)) {
+                skipConditions.skip_if = skipConditions.skip_if.filter(
+                    (v: string) => VALID_SKIP_IF.includes(v as any)
+                );
+                if (skipConditions.skip_if.length === 0) delete skipConditions.skip_if;
+            }
+        }
+
+        // ── on_success
+        let onSuccess = step.on_success || { action: "continue" };
+        if (typeof onSuccess === "string") onSuccess = { action: onSuccess };
+        if (!VALID_SUCCESS_ACTIONS.includes(onSuccess.action as any)) {
+            onSuccess = { action: "continue" };
+        }
+
+        // ── on_failure
+        let onFailure = step.on_failure || { action: "skip" };
+        if (typeof onFailure === "string") onFailure = { action: onFailure };
+        if (!VALID_FAILURE_ACTIONS.includes(onFailure.action as any)) {
+            onFailure = { action: "skip" };
+        }
+
+        validatedSteps.push({
+            step_order: Number(step.step_order) || (i + 1),
+            channel,
+            delay_minutes: delayMinutes,
+            delay_type: delayType,
+            content,
+            skip_conditions: skipConditions,
+            on_success: onSuccess,
+            on_failure: onFailure,
+            enable_ai_mutation: true,
+            mutation_instructions: step.mutation_instructions || null,
+        });
+    }
+
+    if (validatedSteps.length === 0 && errors.length > 0) {
+        return { valid: false, errors, warnings };
+    }
+
+    if (warnings.length > 0) {
+        console.log("[validateAndTransform] Warnings:", warnings.join("; "));
+    }
+
+    return {
+        valid: errors.length === 0 || validatedSteps.length > 0,
+        name: raw.name || "Generated Sequence",
+        description: raw.description || null,
+        steps: validatedSteps,
+        errors,
+        warnings,
+    };
+}
+
+// ─── AI Repair: send invalid JSON back for correction ────────────────────────
+
+async function repairWithAI(invalidJSON: any, validationErrors: string[]): Promise<any> {
+    const openrouter = getOpenRouterClient();
+
+    const repairPrompt = `The following JSON was generated for a sequence automation system but failed schema validation.
+
+VALIDATION ERRORS:
+${validationErrors.map((e) => `- ${e}`).join("\n")}
+
+ORIGINAL (INVALID) JSON:
+${JSON.stringify(invalidJSON, null, 2).substring(0, 4000)}
+
+CORRECT SCHEMA FOR sequence_steps:
+- step_order: INT (1, 2, 3...)
+- channel: TEXT ("sms", "email", or "voice")
+- delay_minutes: INT (delay in MINUTES, not seconds. e.g. 60 = 1 hour, 1440 = 1 day)
+- delay_type: TEXT ("immediate", "fixed_delay", "business_hours_only", "after_previous")
+- content: JSONB — depends on channel:
+    SMS:   {"body": "message text"}
+    Email: {"subject": "...", "body_html": "<p>...</p>", "body_text": "plain text version"}
+    Voice: {"first_message": "opening greeting", "system_prompt": "full agent instructions"}
+- skip_conditions: JSONB ({"skip_if": ["contact_replied", "appointment_booked"]})
+- on_success: JSONB ({"action": "continue"} or {"action": "jump_to_step", "target_step": 3} or {"action": "end_sequence"})
+- on_failure: JSONB ({"action": "skip"} or {"action": "retry_after_seconds", "retry_delay": 3600} or {"action": "end_sequence"})
+- mutation_instructions: TEXT (optional)
+
+IMPORTANT:
+- Use delay_minutes (NOT delay_seconds)
+- Use the exact content field names per channel shown above
+- Fix ALL validation errors listed above
+
+Output the corrected JSON object with the same structure: {"name": "...", "description": "...", "steps": [...]}`;
+
+    const completion = await openrouter.chat.completions.create({
+        model: GENERATION_MODEL,
+        temperature: 0.2,
+        max_tokens: 6000,
+        response_format: { type: "json_object" },
+        messages: [
+            { role: "system", content: repairPrompt },
+            { role: "user", content: "Fix the JSON and return the corrected version. Output ONLY the JSON object." },
+        ],
+    });
+
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error("Repair model returned empty response");
+    return extractJSON(raw);
+}
+
+// ─── Shared DB Insert Helpers ────────────────────────────────────────────────
+
+async function insertSequence(clientId: string, name: string, description: string | null, triggerType: string, urgencyTier: string) {
+    return supabase
+        .from("sequences")
+        .insert({
+            client_id: clientId,
+            name,
+            description,
+            trigger_type: triggerType || "manual",
+            urgency_tier: urgencyTier || "medium",
+            ai_generated: true,
+            is_active: false,
+            enable_adaptive_mutation: true,
+            mutation_aggressiveness: "moderate",
+        })
+        .select("id")
+        .single();
+}
+
+async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
+    let insertedCount = 0;
+    const stepErrors: string[] = [];
+
+    for (const step of steps) {
+        const { error: stepError } = await supabase
+            .from("sequence_steps")
+            .insert({
+                sequence_id: sequenceId,
+                step_order: step.step_order,
+                channel: step.channel,
+                delay_minutes: step.delay_minutes,
+                delay_type: step.delay_type,
+                content: step.content,
+                skip_conditions: step.skip_conditions,
+                on_success: step.on_success,
+                on_failure: step.on_failure,
+                enable_ai_mutation: step.enable_ai_mutation,
+                mutation_instructions: step.mutation_instructions,
+            });
+
+        if (stepError) {
+            console.error(`Error inserting step ${step.step_order}:`, stepError);
+            stepErrors.push(`Step ${step.step_order}: ${stepError.message}`);
+        } else {
+            insertedCount++;
+        }
+    }
+
+    return { insertedCount, stepErrors };
+}
+
+// ─── Generation Prompt (shared between confirmAndGenerate and generateAISequence)
+
+const STEP_SCHEMA_INSTRUCTIONS = `
+EXACT DB SCHEMA FOR EACH STEP:
+- step_order: integer (1, 2, 3...)
+- channel: "sms", "email", or "voice"
+- delay_minutes: integer — delay in MINUTES (not seconds!). Examples: 0 = immediate, 30 = 30 min, 120 = 2 hours, 1440 = 1 day
+- delay_type: "immediate", "fixed_delay", "business_hours_only", or "after_previous"
+- content: JSON object — format depends on channel:
+    SMS:   {"body": "Hi {{first_name}}, this is {{business_name}}..."}
+    Email: {"subject": "Subject line", "body_html": "<p>HTML content</p>", "body_text": "Plain text version"}
+    Voice: {"first_message": "Opening greeting for the call", "system_prompt": "Full instructions for the AI voice agent"}
+- skip_conditions: {"skip_if": ["contact_replied", "appointment_booked"]} (optional)
+- on_success: {"action": "continue"} or {"action": "jump_to_step", "target_step": 3} or {"action": "end_sequence"}
+- on_failure: {"action": "skip"} or {"action": "retry_after_seconds", "retry_delay": 60} or {"action": "end_sequence"}
+- mutation_instructions: string with optimization hints (optional)
+
+CRITICAL: Use "delay_minutes" (NOT "delay_seconds"). Values are in MINUTES.
+
+EXAMPLE OUTPUT (2-step sequence):
+{
+  "name": "New Lead Follow-up",
+  "description": "Automated follow-up for new leads with SMS and voice",
+  "steps": [
+    {
+      "step_order": 1,
+      "channel": "sms",
+      "delay_minutes": 0,
+      "delay_type": "immediate",
+      "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}! We received your inquiry and will be in touch shortly. Reply STOP to opt out."},
+      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
+      "on_success": {"action": "continue"},
+      "on_failure": {"action": "skip"},
+      "mutation_instructions": "Optimize message length and tone. Test emoji usage. Vary CTA phrasing."
+    },
+    {
+      "step_order": 2,
+      "channel": "voice",
+      "delay_minutes": 120,
+      "delay_type": "after_previous",
+      "content": {"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} following up on your recent inquiry.", "system_prompt": "You are a follow-up specialist for {{business_name}}. The contact recently submitted an inquiry. Your goal is to understand their needs and book an appointment. Be friendly and professional."},
+      "skip_conditions": {"skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"]},
+      "on_success": {"action": "end_sequence"},
+      "on_failure": {"action": "retry_after_seconds", "retry_delay": 60},
+      "mutation_instructions": "Adjust opening energy and pacing."
+    }
+  ]
+}`;
 
 // ═══════════════════════════════════════════════════════════
 // Conversational AI Sequence Generation
@@ -337,7 +660,6 @@ export async function confirmAndGenerate(
             .map((m) => `- ${m.content}`)
             .join("\n");
 
-        // Build a concrete example that matches the exact sequencer schema
         const generationPrompt = `You are an expert marketing automation engineer. Generate a complete multi-channel follow-up sequence as a JSON object.
 
 BUSINESS PROFILE:
@@ -364,59 +686,16 @@ RULES:
 2. Use ONLY these channels: ${plan.channels.join(", ")}
 3. TCPA compliance: no calls/texts before 8am or after 9pm
 4. Match the "${p.brand_voice || "professional"}" brand voice
-5. Template variables you can use: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
-6. Channel timing:
-   - SMS: immediate to 30min for urgent, hours for medium
-   - Voice: 1-4 hour delay minimum (let SMS land first)
-   - Email: 4-24 hour gaps
-7. skip_conditions.skip_if values: "contact_replied", "contact_answered_call", "appointment_booked"
-8. on_success action values: "continue", "jump_to_step", "end_sequence"
-9. on_failure action values: "retry_after_seconds", "skip", "end_sequence"
-10. For voice retry: use retry_delay of 3600-7200 (seconds)
-11. Last step should have on_success: {"action": "end_sequence"}
+5. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
+6. Channel timing (in delay_minutes):
+   - SMS: 0-30 min for urgent, 60-240 for medium
+   - Voice: 60-240 min delay minimum (let SMS land first)
+   - Email: 240-1440 min gaps (4-24 hours)
+7. Last step should have on_success: {"action": "end_sequence"}
 
-EXACT CONTENT FORMAT PER CHANNEL:
+${STEP_SCHEMA_INSTRUCTIONS}
 
-For SMS steps, content must be:
-{"body": "Hi {{first_name}}, this is {{business_name}}. We got your inquiry..."}
-
-For email steps, content must be:
-{"subject": "Following up on your inquiry", "body_html": "<p>Hi {{first_name}},</p><p>Thank you for reaching out...</p>", "body_text": "Hi {{first_name}}, Thank you for reaching out..."}
-
-For voice steps, content must be:
-{"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} calling about your recent inquiry.", "system_prompt": "You are a friendly follow-up specialist for {{business_name}}. Your goal is to help the caller with their inquiry and book an appointment if possible. Be conversational, not pushy. If they're not interested, thank them and end the call gracefully."}
-
-EXAMPLE OUTPUT (2-step sequence):
-{
-  "name": "New Lead Follow-up",
-  "description": "Automated follow-up for new leads with SMS and voice",
-  "steps": [
-    {
-      "step_order": 1,
-      "channel": "sms",
-      "delay_seconds": 0,
-      "delay_type": "after_enrollment",
-      "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}! We received your inquiry and will be in touch shortly. Reply STOP to opt out."},
-      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
-      "on_success": {"action": "continue"},
-      "on_failure": {"action": "skip"},
-      "mutation_instructions": "Optimize message length and tone. Test emoji usage. Vary CTA phrasing."
-    },
-    {
-      "step_order": 2,
-      "channel": "voice",
-      "delay_seconds": 7200,
-      "delay_type": "after_previous",
-      "content": {"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} following up on your recent inquiry. Do you have a quick moment?", "system_prompt": "You are a follow-up specialist for {{business_name}}. The contact recently submitted an inquiry. Your goal is to understand their needs and book an appointment. Be friendly and professional. If they are busy, offer to call back at a better time. Use the check_availability tool to find open slots and book_appointment to confirm."},
-      "skip_conditions": {"skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"]},
-      "on_success": {"action": "end_sequence"},
-      "on_failure": {"action": "retry_after_seconds", "retry_delay": 3600},
-      "mutation_instructions": "Adjust opening energy and pacing. Vary first message length. Test different objection handling approaches."
-    }
-  ]
-}
-
-NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanation, no markdown formatting, no code blocks. Start with { and end with }.`;
+Generate the full sequence. Respond with ONLY the JSON object.`;
 
         const openrouter = getOpenRouterClient();
 
@@ -434,145 +713,73 @@ NOW GENERATE THE FULL SEQUENCE. Respond with ONLY the JSON object, no explanatio
             ],
         });
 
-        // Handle reasoning models: content may be in different fields
-        const choice = completion.choices[0];
-        const raw = choice?.message?.content;
+        const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            console.error("Empty model response. Full choice:", JSON.stringify(choice));
+            console.error("Empty model response. Full choice:", JSON.stringify(completion.choices[0]));
             return { success: false, error: "Model returned an empty response. Please try again." };
         }
 
-        console.log("[confirmAndGenerate] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
+        console.log("[confirmAndGenerate] Raw response length:", raw.length);
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch (parseErr) {
-            console.error("Failed to parse AI JSON. Raw response:", raw.substring(0, 1000));
-            return {
-                success: false,
-                error: `AI response could not be parsed as JSON. Response preview: "${raw.substring(0, 100)}...". Please try again.`,
-            };
+            console.error("Failed to parse AI JSON. Raw:", raw.substring(0, 500));
+            return { success: false, error: "AI response could not be parsed as JSON. Please try again." };
         }
 
-        // Validate output
-        if (!generated.name || typeof generated.name !== "string") {
-            return { success: false, error: "AI output missing sequence name. Please try again." };
-        }
-        if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
-            return { success: false, error: "AI output missing steps. Please try again." };
-        }
+        // ── Validate against DB schema
+        let validation = validateAndTransformSequence(generated);
 
-        // Validate and fix each step
-        for (const step of generated.steps) {
-            if (!step.step_order || !step.channel || !step.content) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields. Please try again.`,
-                };
-            }
-            if (!["sms", "email", "voice"].includes(step.channel)) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order} has invalid channel "${step.channel}". Please try again.`,
-                };
-            }
-
-            // Ensure content has required fields per channel
-            if (step.channel === "sms" && !step.content.body) {
-                step.content.body = "Hi {{first_name}}, this is {{business_name}} following up.";
-            }
-            if (step.channel === "email") {
-                if (!step.content.subject) step.content.subject = "Following up on your inquiry";
-                if (!step.content.body_html) step.content.body_html = `<p>${step.content.body_text || "Hi {{first_name}}, we wanted to follow up."}</p>`;
-                if (!step.content.body_text) step.content.body_text = step.content.body_html?.replace(/<[^>]+>/g, "") || "Hi, we wanted to follow up.";
-            }
-            if (step.channel === "voice") {
-                if (!step.content.first_message) step.content.first_message = "Hi, is this {{first_name}}? This is the team at {{business_name}} calling.";
-                if (!step.content.system_prompt) step.content.system_prompt = `You are a follow-up specialist for {{business_name}}. Be friendly and professional. Help the contact with their inquiry and try to book an appointment.`;
+        // If validation failed, attempt one AI repair
+        if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+            console.log("[confirmAndGenerate] Validation failed, attempting repair:", validation.errors);
+            try {
+                const repaired = await repairWithAI(generated, validation.errors);
+                validation = validateAndTransformSequence(repaired);
+                if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+                    return { success: false, error: `Sequence failed schema validation after repair: ${validation.errors.join(", ")}` };
+                }
+                console.log("[confirmAndGenerate] Repair successful");
+            } catch (repairErr) {
+                console.error("Repair failed:", repairErr);
+                return { success: false, error: `Sequence failed schema validation: ${validation.errors.join(", ")}` };
             }
         }
 
-        // Insert sequence — match columns from sequencer/src/lib/ai-sequence-generator.ts
-        const { data: sequence, error: seqError } = await supabase
-            .from("sequences")
-            .insert({
-                client_id: clientId,
-                name: generated.name,
-                description: generated.description || null,
-                trigger_type: plan.trigger_type || "manual",
-                urgency_tier: plan.urgency_tier || "medium",
-                ai_generated: true,
-                is_active: false,
-                enable_adaptive_mutation: true,
-                mutation_aggressiveness: "moderate",
-            })
-            .select("id")
-            .single();
+        // ── Insert sequence
+        const { data: sequence, error: seqError } = await insertSequence(
+            clientId,
+            validation.name!,
+            validation.description || null,
+            plan.trigger_type,
+            plan.urgency_tier
+        );
 
         if (seqError || !sequence) {
-            return {
-                success: false,
-                error: `Failed to create sequence: ${seqError?.message || "Unknown error"}`,
-            };
+            return { success: false, error: `Failed to create sequence: ${seqError?.message || "Unknown error"}` };
         }
 
-        // Insert steps — match columns from sequencer/src/lib/ai-sequence-generator.ts
-        let insertedCount = 0;
-        const stepErrors: string[] = [];
+        // ── Insert steps
+        const { insertedCount, stepErrors } = await insertSteps(sequence.id, validation.steps!);
 
-        for (const step of generated.steps) {
-            // Coerce numeric fields — AI may return strings like "1" instead of 1
-            const stepOrder = Number(step.step_order) || (insertedCount + 1);
-            const delaySeconds = Number(step.delay_seconds) || 0;
-
-            const { error: stepError } = await supabase
-                .from("sequence_steps")
-                .insert({
-                    sequence_id: sequence.id,
-                    step_order: stepOrder,
-                    channel: step.channel,
-                    delay_seconds: delaySeconds,
-                    delay_type: step.delay_type || "after_previous",
-                    content: step.content,
-                    skip_conditions: step.skip_conditions || null,
-                    on_success: step.on_success || { action: "continue" },
-                    on_failure: step.on_failure || { action: "skip" },
-                    enable_ai_mutation: true,
-                    mutation_instructions: step.mutation_instructions || null,
-                });
-
-            if (stepError) {
-                console.error(`Error inserting step ${stepOrder}:`, stepError);
-                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
-            } else {
-                insertedCount++;
-            }
-        }
-
-        // If NO steps were inserted, rollback the sequence and return error
         if (insertedCount === 0) {
             console.error("All step inserts failed:", stepErrors);
             await supabase.from("sequences").delete().eq("id", sequence.id);
-            return {
-                success: false,
-                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
-            };
+            return { success: false, error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.` };
         }
 
         revalidatePath(`/client/${clientId}/sequences`);
         return { success: true, sequenceId: sequence.id };
     } catch (err) {
         console.error("confirmAndGenerate error:", err);
-        return {
-            success: false,
-            error: err instanceof Error ? err.message : "An unexpected error occurred",
-        };
+        return { success: false, error: err instanceof Error ? err.message : "An unexpected error occurred" };
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-// Legacy Functions (updated to use OpenRouter + mutation flags)
+// Legacy Functions (updated to use OpenRouter + validation)
 // ═══════════════════════════════════════════════════════════
 
 export async function generateAISequence(
@@ -615,35 +822,7 @@ RULES:
 4. Match the brand voice
 5. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
 
-CONTENT FORMAT PER CHANNEL:
-- SMS: {"body": "message text here"}
-- Email: {"subject": "subject", "body_html": "<p>HTML</p>", "body_text": "plain text"}
-- Voice: {"first_message": "opening greeting", "system_prompt": "full agent instructions"}
-
-skip_conditions.skip_if values: "contact_replied", "contact_answered_call", "appointment_booked"
-on_success.action values: "continue", "jump_to_step", "end_sequence"
-on_failure.action values: "retry_after_seconds", "skip", "end_sequence"
-
-Respond with ONLY a JSON object in this format (no markdown, no explanation):
-{
-  "name": "Sequence Name",
-  "description": "What this sequence does",
-  "trigger_type": "new_lead",
-  "urgency_tier": "high",
-  "steps": [
-    {
-      "step_order": 1,
-      "channel": "sms",
-      "delay_seconds": 0,
-      "delay_type": "after_enrollment",
-      "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}!"},
-      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
-      "on_success": {"action": "continue"},
-      "on_failure": {"action": "skip"},
-      "mutation_instructions": "Optimize tone and CTA."
-    }
-  ]
-}`;
+${STEP_SCHEMA_INSTRUCTIONS}`;
 
         if (options?.triggerType) {
             systemPrompt += `\n\nTrigger type should be: ${options.triggerType}`;
@@ -661,123 +840,60 @@ Respond with ONLY a JSON object in this format (no markdown, no explanation):
             response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
-                {
-                    role: "user",
-                    content: "Generate the sequence now. Output ONLY the JSON object.",
-                },
+                { role: "user", content: "Generate the sequence now. Output ONLY the JSON object." },
             ],
         });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            console.error("Empty model response:", JSON.stringify(completion.choices[0]));
             return { success: false, error: "Model returned an empty response. Please try again." };
         }
-
-        console.log("[generateAISequence] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch {
-            console.error("Failed to parse AI output:", raw.substring(0, 1000));
-            return {
-                success: false,
-                error: `AI response could not be parsed. Preview: "${raw.substring(0, 80)}...". Please try again.`,
-            };
+            return { success: false, error: "AI response could not be parsed. Please try again." };
         }
 
-        if (!generated.name || typeof generated.name !== "string") {
-            return { success: false, error: "AI output missing valid sequence name" };
-        }
-        if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
-            return { success: false, error: "AI output missing valid steps array" };
-        }
-        for (const step of generated.steps) {
-            if (!step.step_order || !step.channel || !step.content) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields`,
-                };
-            }
-            if (!["sms", "email", "voice"].includes(step.channel)) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order} has invalid channel: ${step.channel}`,
-                };
+        // ── Validate against DB schema
+        let validation = validateAndTransformSequence(generated);
+
+        if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+            try {
+                const repaired = await repairWithAI(generated, validation.errors);
+                validation = validateAndTransformSequence(repaired);
+                if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+                    return { success: false, error: `Schema validation failed: ${validation.errors.join(", ")}` };
+                }
+            } catch {
+                return { success: false, error: `Schema validation failed: ${validation.errors.join(", ")}` };
             }
         }
 
-        const { data: sequence, error: seqError } = await supabase
-            .from("sequences")
-            .insert({
-                client_id: clientId,
-                name: generated.name,
-                description: generated.description || null,
-                trigger_type: options?.triggerType || generated.trigger_type || "manual",
-                urgency_tier: options?.urgencyTier || generated.urgency_tier || "medium",
-                ai_generated: true,
-                is_active: false,
-                enable_adaptive_mutation: true,
-                mutation_aggressiveness: "moderate",
-            })
-            .select("id")
-            .single();
+        const triggerType = options?.triggerType || generated.trigger_type || "manual";
+        const urgencyTier = options?.urgencyTier || generated.urgency_tier || "medium";
+
+        const { data: sequence, error: seqError } = await insertSequence(
+            clientId, validation.name!, validation.description || null, triggerType, urgencyTier
+        );
 
         if (seqError || !sequence) {
-            return {
-                success: false,
-                error: `Failed to create sequence: ${seqError?.message || "Unknown error"}`,
-            };
+            return { success: false, error: `Failed to create sequence: ${seqError?.message || "Unknown error"}` };
         }
 
-        let insertedCount = 0;
-        const stepErrors: string[] = [];
-
-        for (const step of generated.steps) {
-            const stepOrder = Number(step.step_order) || (insertedCount + 1);
-            const delaySeconds = Number(step.delay_seconds) || 0;
-
-            const { error: stepError } = await supabase
-                .from("sequence_steps")
-                .insert({
-                    sequence_id: sequence.id,
-                    step_order: stepOrder,
-                    channel: step.channel,
-                    delay_seconds: delaySeconds,
-                    delay_type: step.delay_type || "after_previous",
-                    content: step.content,
-                    skip_conditions: step.skip_conditions || null,
-                    on_success: step.on_success || { action: "continue" },
-                    on_failure: step.on_failure || { action: "skip" },
-                    enable_ai_mutation: true,
-                    mutation_instructions: step.mutation_instructions || null,
-                });
-
-            if (stepError) {
-                console.error(`Error inserting step ${stepOrder}:`, stepError);
-                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
-            } else {
-                insertedCount++;
-            }
-        }
+        const { insertedCount, stepErrors } = await insertSteps(sequence.id, validation.steps!);
 
         if (insertedCount === 0) {
             await supabase.from("sequences").delete().eq("id", sequence.id);
-            return {
-                success: false,
-                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
-            };
+            return { success: false, error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.` };
         }
 
         revalidatePath(`/client/${clientId}/sequences`);
         return { success: true, sequenceId: sequence.id };
     } catch (err) {
         console.error("generateAISequence error:", err);
-        return {
-            success: false,
-            error: err instanceof Error ? err.message : "An unexpected error occurred",
-        };
+        return { success: false, error: err instanceof Error ? err.message : "An unexpected error occurred" };
     }
 }
 
@@ -795,10 +911,7 @@ export async function generateAIStepsForSequence(
             .single();
 
         if (seqFetchError || !existingSequence) {
-            return {
-                success: false,
-                error: `Sequence not found: ${seqFetchError?.message || "Unknown error"}`,
-            };
+            return { success: false, error: `Sequence not found: ${seqFetchError?.message || "Unknown error"}` };
         }
 
         const { data: existingStepsAll } = await supabase
@@ -814,10 +927,9 @@ export async function generateAIStepsForSequence(
             .order("step_order", { ascending: false })
             .limit(1);
 
-        const startOrder =
-            existingSteps && existingSteps.length > 0
-                ? existingSteps[0].step_order + 1
-                : 1;
+        const startOrder = existingSteps && existingSteps.length > 0
+            ? existingSteps[0].step_order + 1
+            : 1;
 
         const { data: profile } = await supabase
             .from("tenant_profiles")
@@ -850,27 +962,7 @@ RULES:
 2. Step ordering starts at ${startOrder}
 3. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{callback_number}}
 
-CONTENT FORMAT PER CHANNEL:
-- SMS: {"body": "message text here"}
-- Email: {"subject": "subject", "body_html": "<p>HTML</p>", "body_text": "plain text"}
-- Voice: {"first_message": "opening greeting", "system_prompt": "full agent instructions"}
-
-Respond with ONLY a JSON object (no markdown, no explanation):
-{
-  "steps": [
-    {
-      "step_order": ${startOrder},
-      "channel": "sms",
-      "delay_seconds": 3600,
-      "delay_type": "after_previous",
-      "content": {"body": "Hi {{first_name}}, just following up from {{business_name}}."},
-      "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
-      "on_success": {"action": "continue"},
-      "on_failure": {"action": "skip"},
-      "mutation_instructions": "Optimize tone and CTA."
-    }
-  ]
-}`;
+${STEP_SCHEMA_INSTRUCTIONS}`;
 
         const openrouter = getOpenRouterClient();
 
@@ -881,95 +973,53 @@ Respond with ONLY a JSON object (no markdown, no explanation):
             response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
-                {
-                    role: "user",
-                    content: "Generate the additional steps now. Output ONLY the JSON object.",
-                },
+                { role: "user", content: "Generate the additional steps now. Output ONLY the JSON object." },
             ],
         });
 
         const raw = completion.choices[0]?.message?.content;
         if (!raw) {
-            console.error("Empty model response:", JSON.stringify(completion.choices[0]));
             return { success: false, error: "Model returned an empty response. Please try again." };
         }
-
-        console.log("[generateAISteps] Raw response length:", raw.length, "Preview:", raw.substring(0, 200));
 
         let generated: any;
         try {
             generated = extractJSON(raw);
         } catch {
-            console.error("Failed to parse AI output:", raw.substring(0, 1000));
-            return {
-                success: false,
-                error: `AI response could not be parsed. Preview: "${raw.substring(0, 80)}...". Please try again.`,
-            };
+            return { success: false, error: "AI response could not be parsed. Please try again." };
         }
 
-        if (!Array.isArray(generated.steps) || generated.steps.length < 1) {
-            return { success: false, error: "AI output missing valid steps array" };
-        }
-        for (const step of generated.steps) {
-            if (!step.step_order || !step.channel || !step.content) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order || "?"} missing required fields`,
-                };
-            }
-            if (!["sms", "email", "voice"].includes(step.channel)) {
-                return {
-                    success: false,
-                    error: `Step ${step.step_order} has invalid channel: ${step.channel}`,
-                };
+        // Wrap in sequence-like structure for validation
+        const wrapped = { name: existingSequence.name, steps: generated.steps || [] };
+        let validation = validateAndTransformSequence(wrapped);
+
+        if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+            try {
+                const repaired = await repairWithAI(wrapped, validation.errors);
+                validation = validateAndTransformSequence(repaired);
+                if (!validation.valid || !validation.steps || validation.steps.length === 0) {
+                    return { success: false, error: `Schema validation failed: ${validation.errors.join(", ")}` };
+                }
+            } catch {
+                return { success: false, error: `Schema validation failed: ${validation.errors.join(", ")}` };
             }
         }
 
-        let insertedCount = 0;
-        const stepErrors: string[] = [];
+        // Re-number steps starting at startOrder
+        validation.steps!.forEach((step, i) => {
+            step.step_order = startOrder + i;
+        });
 
-        for (const step of generated.steps) {
-            const stepOrder = Number(step.step_order) || (insertedCount + startOrder);
-            const delaySeconds = Number(step.delay_seconds) || 0;
-
-            const { error: stepError } = await supabase
-                .from("sequence_steps")
-                .insert({
-                    sequence_id: sequenceId,
-                    step_order: stepOrder,
-                    channel: step.channel,
-                    delay_seconds: delaySeconds,
-                    delay_type: step.delay_type || "after_previous",
-                    content: step.content,
-                    skip_conditions: step.skip_conditions || null,
-                    on_success: step.on_success || { action: "continue" },
-                    on_failure: step.on_failure || { action: "skip" },
-                    enable_ai_mutation: true,
-                    mutation_instructions: step.mutation_instructions || null,
-                });
-
-            if (stepError) {
-                console.error(`Error inserting step ${stepOrder}:`, stepError);
-                stepErrors.push(`Step ${stepOrder}: ${stepError.message}`);
-            } else {
-                insertedCount++;
-            }
-        }
+        const { insertedCount, stepErrors } = await insertSteps(sequenceId, validation.steps!);
 
         if (insertedCount === 0) {
-            return {
-                success: false,
-                error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.`,
-            };
+            return { success: false, error: `Failed to create steps: ${stepErrors[0] || "Unknown error"}. Please try again.` };
         }
 
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
         return { success: true, stepCount: insertedCount };
     } catch (err) {
         console.error("generateAIStepsForSequence error:", err);
-        return {
-            success: false,
-            error: err instanceof Error ? err.message : "An unexpected error occurred",
-        };
+        return { success: false, error: err instanceof Error ? err.message : "An unexpected error occurred" };
     }
 }
