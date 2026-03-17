@@ -164,18 +164,28 @@ Return a JSON object with a "sequences" array. Each sequence must have:
 
             // Create steps
             for (const step of seq.steps) {
+                const mutationInstructions = step.channel === 'sms'
+                    ? 'Keep under 160 chars. Reference prior conversation naturally. Match brand voice.'
+                    : step.channel === 'email'
+                    ? 'Reference prior interactions in the opening. Address known objections. Keep professional tone.'
+                    : step.channel === 'voice'
+                    ? 'Adjust opening based on prior calls. Reference any objections or topics discussed.'
+                    : null;
+
                 const { error: stepError } = await supabase
                     .from('sequence_steps')
                     .insert({
                         sequence_id: sequenceId,
                         step_order: step.step_order,
                         channel: step.channel,
-                        delay_seconds: step.delay_seconds,
+                        delay_minutes: Math.max(0, Math.round((step.delay_seconds || 0) / 60)),
                         delay_type: step.delay_type,
                         content: step.content,
                         skip_conditions: step.skip_conditions,
                         on_success: step.on_success,
                         on_failure: step.on_failure,
+                        enable_ai_mutation: true,
+                        mutation_instructions: mutationInstructions,
                     });
 
                 if (stepError) {
