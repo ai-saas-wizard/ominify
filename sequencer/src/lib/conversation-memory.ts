@@ -52,6 +52,8 @@ export interface RecordInteractionParams {
     objectionsRaised?: string[];
     keyTopics?: string[];
     providerId?: string;
+    // Phase 7: SMS Chatbot metadata
+    metadata?: Record<string, any>;
 }
 
 /**
@@ -80,6 +82,7 @@ export async function recordInteraction(params: RecordInteractionParams): Promis
                 objections_raised: params.objectionsRaised || null,
                 key_topics: params.keyTopics || null,
                 provider_id: params.providerId || null,
+                metadata: params.metadata || null,
             })
             .select('id')
             .single();
