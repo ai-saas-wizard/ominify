@@ -1221,3 +1221,124 @@ export async function getInteractionTimeline(contactId: string, limit: number = 
         return { success: false, error: "Internal error", data: [] };
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Channel Pre-flight Check
+// ═══════════════════════════════════════════════════════════════════
+
+export type ChannelReadiness = {
+    sms: { ready: boolean; reason?: string };
+    email: { ready: boolean; reason?: string };
+    voice: { ready: boolean; reason?: string };
+};
+
+// ─── Check which channels are ready for a tenant ─────────────────────────────
+
+export async function getChannelReadiness(clientId: string): Promise<ChannelReadiness> {
+    try {
+        // Run all channel checks in parallel
+        const [smsResult, emailResult, voiceResult] = await Promise.all([
+            checkSmsReadiness(clientId),
+            checkEmailReadiness(clientId),
+            checkVoiceReadiness(clientId),
+        ]);
+
+        return {
+            sms: smsResult,
+            email: emailResult,
+            voice: voiceResult,
+        };
+    } catch (error) {
+        console.error("getChannelReadiness error:", error);
+        return {
+            sms: { ready: false, reason: "Failed to check SMS readiness" },
+            email: { ready: false, reason: "Failed to check email readiness" },
+            voice: { ready: false, reason: "Failed to check voice readiness" },
+        };
+    }
+}
+
+async function checkSmsReadiness(
+    clientId: string
+): Promise<{ ready: boolean; reason?: string }> {
+    // 1. Check for Twilio subaccount
+    const { data: twilioAccount, error: twilioError } = await supabase
+        .from("tenant_twilio_accounts")
+        .select("id")
+        .eq("client_id", clientId)
+        .single();
+
+    if (twilioError || !twilioAccount) {
+        return { ready: false, reason: "No Twilio subaccount provisioned" };
+    }
+
+    // 2. Check for at least one phone number
+    const { data: phoneNumbers, error: phoneError } = await supabase
+        .from("tenant_phone_numbers")
+        .select("id")
+        .eq("client_id", clientId)
+        .limit(1);
+
+    if (phoneError || !phoneNumbers || phoneNumbers.length === 0) {
+        return { ready: false, reason: "No phone number purchased" };
+    }
+
+    // 3. Check for approved A2P campaign
+    const { data: a2pRegistration, error: a2pError } = await supabase
+        .from("tenant_a2p_registrations")
+        .select("campaign_status")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+    if (a2pError || !a2pRegistration) {
+        return { ready: false, reason: "A2P registration not started" };
+    }
+
+    if (a2pRegistration.campaign_status !== "approved") {
+        return {
+            ready: false,
+            reason: `A2P campaign status: ${a2pRegistration.campaign_status}`,
+        };
+    }
+
+    return { ready: true };
+}
+
+async function checkEmailReadiness(
+    clientId: string
+): Promise<{ ready: boolean; reason?: string }> {
+    const { data: emailAccount, error } = await supabase
+        .from("tenant_email_accounts")
+        .select("is_verified")
+        .eq("client_id", clientId)
+        .single();
+
+    if (error || !emailAccount) {
+        return { ready: false, reason: "No email account configured" };
+    }
+
+    if (!emailAccount.is_verified) {
+        return { ready: false, reason: "Email account not verified" };
+    }
+
+    return { ready: true };
+}
+
+async function checkVoiceReadiness(
+    clientId: string
+): Promise<{ ready: boolean; reason?: string }> {
+    const { data: agents, error } = await supabase
+        .from("agents")
+        .select("id, vapi_id")
+        .eq("client_id", clientId)
+        .not("vapi_id", "is", null)
+        .limit(1);
+
+    if (error || !agents || agents.length === 0) {
+        return { ready: false, reason: "No VAPI assistant configured" };
+    }
+
+    return { ready: true };
+}
