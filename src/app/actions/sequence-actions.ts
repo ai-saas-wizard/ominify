@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { currentUser } from "@clerk/nextjs/server";
 
 // ─── List all sequences for a client ───────────────────────────────────────────
 
@@ -12,7 +13,7 @@ export async function getSequences(clientId: string) {
             .select(`
                 *,
                 sequence_steps(id),
-                sequence_enrollments(id, status)
+                sequence_enrollments(id, status, is_test)
             `)
             .eq("client_id", clientId)
             .order("created_at", { ascending: false });
@@ -22,19 +23,25 @@ export async function getSequences(clientId: string) {
             return { success: false, error: error.message, data: [] };
         }
 
-        const sequences = (data || []).map((seq: any) => ({
-            ...seq,
-            step_count: seq.sequence_steps?.length || 0,
-            enrolled_count: seq.sequence_enrollments?.filter(
-                (e: any) => e.status === "active" || e.status === "paused"
-            ).length || 0,
-            completed_count: seq.sequence_enrollments?.filter(
-                (e: any) => e.status === "completed" || e.status === "booked"
-            ).length || 0,
-            total_enrolled: seq.sequence_enrollments?.length || 0,
-            sequence_steps: undefined,
-            sequence_enrollments: undefined,
-        }));
+        const sequences = (data || []).map((seq: any) => {
+            // Exclude test enrollments from analytics counts
+            const realEnrollments = (seq.sequence_enrollments || []).filter(
+                (e: any) => !e.is_test
+            );
+            return {
+                ...seq,
+                step_count: seq.sequence_steps?.length || 0,
+                enrolled_count: realEnrollments.filter(
+                    (e: any) => e.status === "active" || e.status === "paused"
+                ).length || 0,
+                completed_count: realEnrollments.filter(
+                    (e: any) => e.status === "completed" || e.status === "booked"
+                ).length || 0,
+                total_enrolled: realEnrollments.length || 0,
+                sequence_steps: undefined,
+                sequence_enrollments: undefined,
+            };
+        });
 
         return { success: true, data: sequences };
     } catch (error) {
@@ -52,7 +59,7 @@ export async function getSequenceDetail(sequenceId: string) {
             .select(`
                 *,
                 sequence_steps(*),
-                sequence_enrollments(id, status, current_step_order, enrolled_at, contact_id, contacts(id, name, phone, email))
+                sequence_enrollments(id, status, current_step_order, enrolled_at, contact_id, is_test, contacts(id, name, phone, email))
             `)
             .eq("id", sequenceId)
             .single();
@@ -69,8 +76,9 @@ export async function getSequenceDetail(sequenceId: string) {
             );
         }
 
-        // Compute enrollment stats
-        const enrollments = sequence?.sequence_enrollments || [];
+        // Compute enrollment stats (exclude test enrollments)
+        const allEnrollments = sequence?.sequence_enrollments || [];
+        const enrollments = allEnrollments.filter((e: any) => !e.is_test);
         const stats = {
             active: enrollments.filter((e: any) => e.status === "active").length,
             paused: enrollments.filter((e: any) => e.status === "paused").length,
@@ -1172,7 +1180,8 @@ export async function getConversionFunnel(sequenceId: string) {
         const { data: enrollments, error } = await supabase
             .from("sequence_enrollments")
             .select("id, status, contact_replied, contact_answered_call, appointment_booked, current_step_order")
-            .eq("sequence_id", sequenceId);
+            .eq("sequence_id", sequenceId)
+            .eq("is_test", false);
 
         if (error) {
             return { success: false, error: error.message, data: null };
@@ -1341,4 +1350,145 @@ async function checkVoiceReadiness(
     }
 
     return { ready: true };
+}
+// ═══════════════════════════════════════════════════════════════════
+// Phase 4: Test Mode — "Test on Myself"
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Create a test enrollment for the logged-in user ─────────────────────────────
+
+export async function createTestEnrollment(
+    sequenceId: string,
+    clientId: string,
+    sampleVariables?: Record<string, any>
+) {
+    try {
+        // 1. Get the logged-in user's phone + email from Clerk
+        const user = await currentUser();
+        if (!user) {
+            return { success: false, error: "Not authenticated" };
+        }
+
+        const userEmail = user.emailAddresses[0]?.emailAddress || null;
+        const userPhone = user.phoneNumbers[0]?.phoneNumber || null;
+        const userName = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Test User";
+
+        if (!userPhone && !userEmail) {
+            return { success: false, error: "Your Clerk account has no phone or email. Add one in your profile to test." };
+        }
+
+        // 2. Create or find a contact for the logged-in user
+        let contactId: string;
+
+        // Try to find existing contact by phone first, then email
+        let existing = null;
+        if (userPhone) {
+            const { data } = await supabase
+                .from("contacts")
+                .select("id")
+                .eq("client_id", clientId)
+                .eq("phone", userPhone)
+                .single();
+            existing = data;
+        }
+
+        if (!existing && userEmail) {
+            const { data } = await supabase
+                .from("contacts")
+                .select("id")
+                .eq("client_id", clientId)
+                .eq("email", userEmail)
+                .single();
+            existing = data;
+        }
+
+        if (existing) {
+            contactId = existing.id;
+        } else {
+            // Create a new contact for the test user
+            const { data: newContact, error: contactError } = await supabase
+                .from("contacts")
+                .insert({
+                    client_id: clientId,
+                    phone: userPhone || `test-${user.id}`,
+                    name: userName,
+                    email: userEmail,
+                    custom_fields: { is_test_contact: true },
+                    total_calls: 0,
+                })
+                .select("id")
+                .single();
+
+            if (contactError) {
+                console.error("createTestEnrollment contact error:", contactError);
+                return { success: false, error: contactError.message };
+            }
+
+            contactId = newContact.id;
+        }
+
+        // 3. Check if already enrolled and active in this sequence as a test
+        const { data: existingEnrollment } = await supabase
+            .from("sequence_enrollments")
+            .select("id, status")
+            .eq("sequence_id", sequenceId)
+            .eq("contact_id", contactId)
+            .eq("is_test", true)
+            .in("status", ["active", "paused"])
+            .limit(1);
+
+        if (existingEnrollment && existingEnrollment.length > 0) {
+            return { success: false, error: "You already have an active test enrollment in this sequence" };
+        }
+
+        // 4. Build custom_variables with sample data or sensible defaults
+        const customVariables = sampleVariables || {
+            name: userName,
+            first_name: user.firstName || "Test",
+            last_name: user.lastName || "User",
+            email: userEmail || "",
+            phone: userPhone || "",
+            company: "Test Co",
+        };
+
+        // 5. Enroll with is_test: true
+        const { data: enrollment, error: enrollError } = await supabase
+            .from("sequence_enrollments")
+            .insert({
+                sequence_id: sequenceId,
+                contact_id: contactId,
+                tenant_id: clientId,
+                status: "active",
+                current_step_order: 1,
+                enrollment_source: "test_mode",
+                enrolled_at: new Date().toISOString(),
+                next_step_at: new Date().toISOString(),
+                sentiment_trend: "stable",
+                last_emotion: null,
+                recommended_tone: null,
+                is_hot_lead: false,
+                is_at_risk: false,
+                engagement_score: 50,
+                needs_human_intervention: false,
+                custom_variables: customVariables,
+                contact_replied: false,
+                contact_answered_call: false,
+                appointment_booked: false,
+                channel_overrides: {},
+                is_test: true,
+            })
+            .select("id")
+            .single();
+
+        if (enrollError) {
+            console.error("createTestEnrollment enroll error:", enrollError);
+            return { success: false, error: enrollError.message };
+        }
+
+        revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
+        return { success: true, enrollmentId: enrollment?.id };
+    } catch (error) {
+        console.error("createTestEnrollment error:", error);
+        return { success: false, error: "Internal error" };
+    }
 }
