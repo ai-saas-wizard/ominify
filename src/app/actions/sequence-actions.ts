@@ -117,6 +117,17 @@ export async function createSequence(clientId: string, formData: FormData, agent
             }
         }
 
+        const generation_mode = (formData.get("generation_mode") as string) || "static";
+        const max_touchpoints = parseInt(formData.get("max_touchpoints") as string) || 8;
+
+        // Build sequence_strategy if dynamic mode
+        const sequence_strategy = generation_mode === "dynamic" ? {
+            goal: description || "Follow up with lead",
+            max_steps: max_touchpoints,
+            available_channels: ["sms", "email", "voice"],
+            agent_context: name,
+        } : null;
+
         const { data, error } = await supabase
             .from("sequences")
             .insert({
@@ -128,6 +139,8 @@ export async function createSequence(clientId: string, formData: FormData, agent
                 trigger_conditions: parsedConditions,
                 is_active: false,
                 agent_id: agentId || null,
+                generation_mode,
+                sequence_strategy,
             })
             .select("id")
             .single();
@@ -326,6 +339,13 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
             ? existingSteps[0].step_order + 1
             : 1;
 
+        // Parse optional mutation settings from form
+        const enable_ai_mutation_raw = formData.get("enable_ai_mutation") as string;
+        const mutation_instructions = formData.get("mutation_instructions") as string;
+        const enableMutation = enable_ai_mutation_raw !== null
+            ? enable_ai_mutation_raw === "true"
+            : true; // Default to enabled
+
         const { data, error } = await supabase
             .from("sequence_steps")
             .insert({
@@ -338,6 +358,16 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
                 skip_conditions: parsedSkip,
                 on_success: parsedOnSuccess,
                 on_failure: parsedOnFailure,
+                enable_ai_mutation: enableMutation,
+                mutation_instructions: mutation_instructions || (
+                    channel === "sms"
+                        ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                        : channel === "email"
+                        ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                        : channel === "voice"
+                        ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                        : null
+                ),
             })
             .select("id")
             .single();

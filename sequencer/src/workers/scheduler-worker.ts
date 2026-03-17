@@ -41,6 +41,19 @@ import {
     selectVariant,
     recordVariantSent,
 } from '../lib/outcome-learning.js';
+import {
+    generateNextStep,
+    getExecutedSteps,
+    getOutcomeTimeout,
+    claimEnrollmentForGeneration,
+    insertGeneratedStep,
+    getSequenceVapiAssistantId,
+    endDynamicSequence,
+    activateEnrollmentForNextStep,
+} from '../lib/dynamic-step-generator.js';
+import {
+    getConversationContext as getDynamicConversationContext,
+} from '../lib/conversation-memory.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -56,6 +69,7 @@ import type {
     PrimaryEmotion,
     RecommendedTone,
     ChannelType,
+    OutcomeContext,
 } from '../lib/types.js';
 import { format, addSeconds, isWithinInterval, setHours, setMinutes } from 'date-fns';
 import { utcToZonedTime } from 'date-fns-tz';
@@ -305,7 +319,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     // 1. Check skip conditions
     if (shouldSkipStep(enrollment, step.skip_conditions)) {
         console.log(`[SCHEDULER] Skipping step ${step.step_order} - conditions met`);
-        await advanceToNextStep(enrollment, sequence.id);
+        await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
         return;
     }
 
@@ -453,7 +467,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 reason: validity.reason,
             });
         } else {
-            await advanceToNextStep(enrollment, sequence.id);
+            await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
         }
         return;
     }
@@ -474,7 +488,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         case 'email':
             if (!contact.email) {
                 console.log(`[SCHEDULER] No email for contact, skipping step`);
-                await advanceToNextStep(enrollment, sequence.id);
+                await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
                 return;
             }
             const emailContent = renderedContent as EmailContent;
@@ -564,12 +578,13 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         isHotLead: enrollmentEI.is_hot_lead || false,
         isAtRisk: enrollmentEI.is_at_risk || false,
         lastEmotion: enrollmentEI.last_emotion || null,
-    });
+    }, sequence, step);
 }
 
 /**
  * Advance enrollment to next step
  * Now supports emotion-based delay adjustment from EI layer
+ * and dynamic (JIT) sequence generation.
  */
 async function advanceToNextStep(
     enrollment: SequenceEnrollment,
@@ -579,8 +594,33 @@ async function advanceToNextStep(
         isHotLead: boolean;
         isAtRisk: boolean;
         lastEmotion: PrimaryEmotion | null;
-    }
+    },
+    sequence?: Sequence,
+    step?: SequenceStep
 ): Promise<void> {
+    // ── Dynamic mode: enter awaiting_outcome instead of advancing
+    if (sequence?.generation_mode === 'dynamic') {
+        const lastChannel = step?.channel || 'sms';
+        const timeoutHours = getOutcomeTimeout(lastChannel as ChannelType);
+        const timeoutAt = new Date(Date.now() + timeoutHours * 60 * 60 * 1000).toISOString();
+
+        await supabase
+            .from('sequence_enrollments')
+            .update({
+                status: 'awaiting_outcome',
+                current_step_order: enrollment.current_step_order + 1,
+                total_attempts: enrollment.total_attempts + 1,
+                outcome_timeout_at: timeoutAt,
+                next_step_at: null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', enrollment.id);
+
+        console.log(`[SCHEDULER] Dynamic enrollment ${enrollment.id} now awaiting outcome (timeout: ${timeoutHours}h)`);
+        return;
+    }
+
+    // ── Static mode: existing behavior
     // Get next step
     const { data: nextStep } = await supabase
         .from('sequence_steps')
@@ -650,6 +690,101 @@ async function rescheduleStep(enrollmentId: string, nextTime: Date): Promise<voi
 }
 
 /**
+ * Handle a timed-out dynamic enrollment — generate the next step based on no-response.
+ */
+async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
+    sequences: Sequence;
+    contacts: Contact;
+    tenant_profiles?: TenantProfile;
+}): Promise<void> {
+    const sequence = enrollment.sequences;
+    const contact = enrollment.contacts;
+
+    if (!sequence || sequence.generation_mode !== 'dynamic') return;
+
+    // Atomic claim
+    const claimed = await claimEnrollmentForGeneration(enrollment.id);
+    if (!claimed) {
+        console.log(`[SCHEDULER] Dynamic timeout for ${enrollment.id} already claimed — skipping`);
+        return;
+    }
+
+    try {
+        // Load tenant profile if not joined
+        let tenantProfile = enrollment.tenant_profiles || null;
+        if (!tenantProfile) {
+            const { data: tp } = await supabase
+                .from('tenant_profiles')
+                .select('*')
+                .eq('tenant_id', enrollment.tenant_id)
+                .single();
+            tenantProfile = tp as TenantProfile | null;
+        }
+
+        if (!tenantProfile) {
+            console.error(`[SCHEDULER] No tenant profile for ${enrollment.tenant_id}`);
+            await endDynamicSequence(enrollment.id, 'no_profile', 'Tenant profile not found');
+            return;
+        }
+
+        // Determine last channel from previous steps
+        const executedSteps = await getExecutedSteps(sequence.id, enrollment.id);
+        const lastStep = executedSteps[executedSteps.length - 1];
+        const lastChannel: ChannelType = lastStep?.channel || 'sms';
+
+        // Load conversation context
+        let conversationCtx: ConversationContext | null = null;
+        try {
+            conversationCtx = await getDynamicConversationContext(contact.id, enrollment.id);
+        } catch { /* proceed without */ }
+
+        const outcomeCtx: OutcomeContext = {
+            type: 'timeout_no_response',
+            details: `No response after ${lastChannel} step within timeout window`,
+            channel: lastChannel,
+        };
+
+        const result = await generateNextStep({
+            enrollment,
+            sequence,
+            contact,
+            tenantProfile,
+            conversationContext: conversationCtx,
+            lastOutcome: outcomeCtx,
+            previousSteps: executedSteps,
+        });
+
+        if (result.should_continue && result.step) {
+            const newStepOrder = (enrollment.current_step_order || 0) + 1;
+            const vapiId = await getSequenceVapiAssistantId(sequence.id);
+
+            await insertGeneratedStep({
+                sequenceId: sequence.id,
+                enrollmentId: enrollment.id,
+                stepOrder: newStepOrder,
+                result,
+                vapiAssistantId: vapiId,
+            });
+
+            await activateEnrollmentForNextStep(
+                enrollment.id,
+                result.step.delay_seconds || 0,
+                enrollment.current_step_order // current_step_order stays — scheduler will pick up newStepOrder
+            );
+        } else {
+            await endDynamicSequence(enrollment.id, result.end_reason || 'ai_decided', result.reasoning);
+        }
+    } catch (error) {
+        console.error(`[SCHEDULER] Dynamic timeout handling failed for ${enrollment.id}:`, error);
+        // Revert to awaiting_outcome so it can retry
+        await supabase
+            .from('sequence_enrollments')
+            .update({ status: 'awaiting_outcome', updated_at: new Date().toISOString() })
+            .eq('id', enrollment.id);
+    }
+}
+
+/**
  * Main scheduler tick
  */
 async function tick(): Promise<void> {
@@ -658,22 +793,43 @@ async function tick(): Promise<void> {
     try {
         const dueEnrollments = await fetchDueEnrollments();
 
-        if (dueEnrollments.length === 0) {
-            return;
-        }
+        if (dueEnrollments.length > 0) {
+            console.log(`[SCHEDULER] Processing ${dueEnrollments.length} due enrollments`);
 
-        console.log(`[SCHEDULER] Processing ${dueEnrollments.length} due enrollments`);
-
-        for (const ctx of dueEnrollments) {
-            try {
-                await processStep(ctx);
-            } catch (error) {
-                console.error(`[SCHEDULER] Error processing enrollment ${ctx.enrollment.id}:`, error);
+            for (const ctx of dueEnrollments) {
+                try {
+                    await processStep(ctx);
+                } catch (error) {
+                    console.error(`[SCHEDULER] Error processing enrollment ${ctx.enrollment.id}:`, error);
+                }
             }
         }
 
-        const duration = Date.now() - startTime;
-        console.log(`[SCHEDULER] Tick completed in ${duration}ms, processed ${dueEnrollments.length} enrollments`);
+        // ── Dynamic sequence timeout polling
+        const { data: timedOutEnrollments } = await supabase
+            .from('sequence_enrollments')
+            .select('*, sequences(*), contacts(*), tenant_profiles!sequence_enrollments_tenant_id_fkey(*)')
+            .eq('status', 'awaiting_outcome')
+            .lte('outcome_timeout_at', new Date().toISOString())
+            .limit(BATCH_SIZE);
+
+        if (timedOutEnrollments && timedOutEnrollments.length > 0) {
+            console.log(`[SCHEDULER] Processing ${timedOutEnrollments.length} timed-out dynamic enrollments`);
+
+            for (const enrollment of timedOutEnrollments) {
+                try {
+                    await handleDynamicTimeout(enrollment as any);
+                } catch (error) {
+                    console.error(`[SCHEDULER] Error handling dynamic timeout for ${enrollment.id}:`, error);
+                }
+            }
+        }
+
+        const processed = (dueEnrollments.length) + (timedOutEnrollments?.length || 0);
+        if (processed > 0) {
+            const duration = Date.now() - startTime;
+            console.log(`[SCHEDULER] Tick completed in ${duration}ms, processed ${processed} enrollments`);
+        }
     } catch (error) {
         console.error('[SCHEDULER] Tick error:', error);
     }

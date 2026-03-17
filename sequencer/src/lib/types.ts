@@ -108,9 +108,20 @@ export interface TenantTwilioAccount {
 
 export type UrgencyTier = 'critical' | 'high' | 'medium' | 'low';
 export type ChannelType = 'sms' | 'email' | 'voice';
-export type EnrollmentStatus = 'active' | 'paused' | 'completed' | 'replied' | 'booked' | 'failed' | 'manual_stop';
+export type EnrollmentStatus = 'active' | 'paused' | 'completed' | 'replied' | 'booked' | 'failed' | 'manual_stop' | 'awaiting_outcome' | 'generating_next_step';
 
 export type MutationAggressiveness = 'conservative' | 'moderate' | 'aggressive';
+
+export type GenerationMode = 'static' | 'dynamic';
+
+export interface SequenceStrategy {
+    goal: string;                    // "book_appointment", "qualify_lead", etc.
+    max_steps: number;               // user-configured max touchpoints
+    available_channels: ChannelType[];
+    agent_context: string;           // what the outbound agent does (from onboarding)
+    escalation_rules?: string;
+    planned_steps?: any[];           // informational: full plan generated at creation
+}
 
 export interface Sequence {
     id: string;
@@ -133,6 +144,9 @@ export interface Sequence {
     // Phase 3: Adaptive Mutation
     enable_adaptive_mutation: boolean;
     mutation_aggressiveness: MutationAggressiveness;
+    // Phase 6: Dynamic (JIT) Step Generation
+    generation_mode: GenerationMode;
+    sequence_strategy: SequenceStrategy | null;
     created_at: string;
     updated_at: string;
 }
@@ -156,6 +170,8 @@ export interface SequenceStep {
     // Phase 3: Adaptive Mutation
     enable_ai_mutation: boolean;
     mutation_instructions: string | null;
+    // Phase 6: Dynamic (JIT) Step Generation
+    generated_dynamically: boolean;
     created_at: string;
 }
 
@@ -196,6 +212,8 @@ export interface SequenceEnrollment {
     appointment_booked: boolean;
     enrollment_source: string | null;
     custom_variables: Record<string, any>;
+    // Phase 6: Dynamic (JIT) Step Generation
+    outcome_timeout_at: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -713,4 +731,35 @@ export interface TimingRecommendation {
     recommendedDay: number;
     expectedImprovement: number;
     sampleSize: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Dynamic (JIT) Step Generation Types (Phase 6)
+// ═══════════════════════════════════════════════════════════════════
+
+export type OutcomeType =
+    | 'call_answered' | 'call_voicemail' | 'call_no_answer' | 'call_busy' | 'call_failed'
+    | 'sms_reply' | 'sms_delivered' | 'sms_failed'
+    | 'email_delivered' | 'email_opened' | 'email_clicked' | 'email_bounced'
+    | 'timeout_no_response';
+
+export interface OutcomeContext {
+    type: OutcomeType;
+    details: string;
+    channel: ChannelType;
+    eiAnalysis?: EmotionalAnalysis;
+}
+
+export interface GeneratedStepResult {
+    should_continue: boolean;
+    end_reason?: string;  // "goal_achieved" | "lead_lost" | "max_steps_reached" | "opted_out"
+    step?: {
+        channel: ChannelType;
+        delay_seconds: number;
+        content: SmsContent | EmailContent | VoiceContent;
+        skip_conditions: any;
+        on_success: any;
+        on_failure: any;
+    };
+    reasoning: string;  // AI's explanation for audit/UI
 }

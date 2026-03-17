@@ -32,7 +32,33 @@ import {
 } from '../lib/emotional-intelligence.js';
 import { handleFailure } from '../lib/self-healer.js';
 import { computeStepAttribution } from '../lib/outcome-learning.js';
-import type { EventJobPayload, EnrollmentStatus, EmotionalAnalysis, ContactInteraction, FailureType, ConversionType } from '../lib/types.js';
+import {
+    generateNextStep,
+    getExecutedSteps,
+    claimEnrollmentForGeneration,
+    insertGeneratedStep,
+    getSequenceVapiAssistantId,
+    endDynamicSequence,
+    activateEnrollmentForNextStep,
+} from '../lib/dynamic-step-generator.js';
+import {
+    getConversationContext as getConvCtx,
+} from '../lib/conversation-memory.js';
+import type {
+    EventJobPayload,
+    EnrollmentStatus,
+    EmotionalAnalysis,
+    ContactInteraction,
+    FailureType,
+    ConversionType,
+    Sequence,
+    SequenceEnrollment,
+    Contact,
+    TenantProfile,
+    OutcomeContext,
+    ChannelType,
+    ConversationContext,
+} from '../lib/types.js';
 
 /**
  * Fetch recent interactions for a contact (for EI scoring and trend analysis)
@@ -84,6 +110,108 @@ async function updateEnrollmentStatus(
             updated_at: new Date().toISOString(),
         })
         .eq('id', enrollmentId);
+}
+
+/**
+ * Maybe trigger dynamic (JIT) step generation after an outcome event.
+ * Only fires for dynamic sequences where enrollment is awaiting_outcome.
+ */
+async function maybeTriggerDynamicGeneration(
+    enrollmentId: string,
+    outcomeCtx: OutcomeContext
+): Promise<void> {
+    // 1. Fetch enrollment with sequence join
+    const { data: enrollment } = await supabase
+        .from('sequence_enrollments')
+        .select('*, sequences(*), contacts(*)')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (!enrollment) return;
+
+    const sequence = (enrollment as any).sequences as Sequence;
+    const contact = (enrollment as any).contacts as Contact;
+
+    // 2. Guard: not a dynamic sequence
+    if (sequence?.generation_mode !== 'dynamic') return;
+
+    // 3. Guard: not awaiting outcome (already handled, terminal, or claimed)
+    if (enrollment.status !== 'awaiting_outcome') return;
+
+    // 4. Guard: needs_human_intervention — don't auto-generate
+    if ((enrollment as any).needs_human_intervention) {
+        console.log(`[EVENT] Dynamic gen skipped for ${enrollmentId} — needs human intervention`);
+        return;
+    }
+
+    // 5. Atomic claim
+    const claimed = await claimEnrollmentForGeneration(enrollmentId);
+    if (!claimed) {
+        console.log(`[EVENT] Dynamic gen for ${enrollmentId} already claimed — skipping`);
+        return;
+    }
+
+    try {
+        // 6. Load tenant profile
+        const { data: tenantProfile } = await supabase
+            .from('tenant_profiles')
+            .select('*')
+            .eq('tenant_id', enrollment.tenant_id)
+            .single();
+
+        if (!tenantProfile) {
+            await endDynamicSequence(enrollmentId, 'no_profile', 'Tenant profile not found');
+            return;
+        }
+
+        // 7. Load conversation context + executed steps
+        let conversationCtx: ConversationContext | null = null;
+        try {
+            conversationCtx = await getConvCtx(contact.id, enrollmentId);
+        } catch { /* proceed without */ }
+
+        const executedSteps = await getExecutedSteps(sequence.id, enrollmentId);
+
+        // 8. Generate next step
+        const result = await generateNextStep({
+            enrollment: enrollment as SequenceEnrollment,
+            sequence,
+            contact,
+            tenantProfile: tenantProfile as TenantProfile,
+            conversationContext: conversationCtx,
+            lastOutcome: outcomeCtx,
+            previousSteps: executedSteps,
+        });
+
+        // 9. Insert step or end sequence
+        if (result.should_continue && result.step) {
+            const newStepOrder = (enrollment.current_step_order || 0) + 1;
+            const vapiId = await getSequenceVapiAssistantId(sequence.id);
+
+            await insertGeneratedStep({
+                sequenceId: sequence.id,
+                enrollmentId,
+                stepOrder: newStepOrder,
+                result,
+                vapiAssistantId: vapiId,
+            });
+
+            await activateEnrollmentForNextStep(
+                enrollmentId,
+                result.step.delay_seconds || 0,
+                enrollment.current_step_order
+            );
+        } else {
+            await endDynamicSequence(enrollmentId, result.end_reason || 'ai_decided', result.reasoning);
+        }
+    } catch (error) {
+        console.error(`[EVENT] Dynamic generation failed for ${enrollmentId}:`, error);
+        // Revert to awaiting_outcome so timeout can retry
+        await supabase
+            .from('sequence_enrollments')
+            .update({ status: 'awaiting_outcome', updated_at: new Date().toISOString() })
+            .eq('id', enrollmentId);
+    }
 }
 
 /**
@@ -257,6 +385,21 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
                 }
             }
         }
+    }
+
+    // 8. Dynamic (JIT) step generation — trigger on call outcome (call is over)
+    if (enrollmentId) {
+        const outcomeCtx: OutcomeContext = {
+            type: wasAnswered ? 'call_answered'
+                : disposition === 'voicemail' ? 'call_voicemail'
+                : disposition === 'busy' ? 'call_busy'
+                : disposition === 'failed' || disposition === 'error' ? 'call_failed'
+                : 'call_no_answer',
+            details: `disposition: ${disposition}, duration: ${duration}s, booked: ${appointmentBooked}`,
+            channel: 'voice',
+            eiAnalysis: eiAnalysis || undefined,
+        };
+        await maybeTriggerDynamicGeneration(enrollmentId, outcomeCtx);
     }
 }
 
@@ -453,6 +596,15 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
                 break;
         }
     }
+
+    // 7. Dynamic (JIT) step generation — trigger on SMS reply (lead responded)
+    const smsOutcomeCtx: OutcomeContext = {
+        type: 'sms_reply',
+        details: `Reply: "${(messageBody || '').substring(0, 100)}"`,
+        channel: 'sms',
+        eiAnalysis: eiAnalysis || undefined,
+    };
+    await maybeTriggerDynamicGeneration(enrollmentId, smsOutcomeCtx);
 }
 
 /**
@@ -601,6 +753,15 @@ async function handleEmailBounced(event: EventJobPayload): Promise<void> {
         await handleFailure(enrollmentId, stepId, 'email_bounced', {
             bounceType,
             tenantId,
+        });
+    }
+
+    // Dynamic (JIT) — bounce means failed delivery, need to try another channel
+    if (enrollmentId) {
+        await maybeTriggerDynamicGeneration(enrollmentId, {
+            type: 'email_bounced',
+            details: `${bounceType} bounce`,
+            channel: 'email',
         });
     }
 }

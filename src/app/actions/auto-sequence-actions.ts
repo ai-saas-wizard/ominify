@@ -68,7 +68,8 @@ Industry: ${profile.industry}
 Brand Voice: ${profile.brand_voice}
 Step Purpose: ${stepTemplate.content_purpose}
 
-Rules: Under 160 characters, use {{customer_name}} for personalization, clear CTA, match brand voice, sound human.`,
+Rules: Under 160 characters, use {{customer_name}} for personalization, clear CTA, match brand voice, sound human.
+For follow-up steps, you may reference: {{last_call_summary}}, {{last_sms_reply}}, {{objections_raised}}, {{overall_sentiment}}.`,
                 },
                 { role: "user", content: "Generate the SMS body." },
             ],
@@ -94,7 +95,8 @@ Industry: ${profile.industry}
 Brand Voice: ${profile.brand_voice}
 Step Purpose: ${stepTemplate.content_purpose}
 
-Rules: Subject under 60 chars, simple HTML with <p> tags, use {{customer_name}}, include business name, 3-4 short paragraphs max.`,
+Rules: Subject under 60 chars, simple HTML with <p> tags, use {{customer_name}}, include business name, 3-4 short paragraphs max.
+For follow-up emails, you may reference: {{last_call_summary}}, {{objections_raised}}, {{overall_sentiment}}, {{key_topics}}.`,
                 },
                 { role: "user", content: "Generate the email content." },
             ],
@@ -158,7 +160,14 @@ export async function createAgentSequence(
     const template = agentDef.sequence_template;
     const sequenceName = template.name_template.replace("{{business_name}}", businessName);
 
-    // 1. Create the sequence
+    // 1. Create the sequence (dynamic mode by default for auto-created)
+    const sequenceStrategy = {
+        goal: template.description_template || "Follow up with lead",
+        max_steps: template.steps.length,
+        available_channels: [...new Set(template.steps.map(s => s.channel))] as ("sms" | "email" | "voice")[],
+        agent_context: `${agentTypeId} agent for ${businessName}`,
+    };
+
     const { data: sequence, error: seqError } = await supabase
         .from("sequences")
         .insert({
@@ -172,6 +181,10 @@ export async function createAgentSequence(
             ai_generated: true,
             auto_created: true,
             is_active: true,
+            enable_adaptive_mutation: true,
+            mutation_aggressiveness: "moderate",
+            generation_mode: "dynamic",
+            sequence_strategy: sequenceStrategy,
         })
         .select("id")
         .single();
@@ -181,8 +194,9 @@ export async function createAgentSequence(
         return { success: false, error: seqError?.message || "Failed to create sequence" };
     }
 
-    // 2. Generate content and create steps in parallel
-    const stepPromises = template.steps.map(async (stepTemplate) => {
+    // 2. Generate content and create steps — only step 1 for dynamic mode
+    const stepsToCreate = template.steps.slice(0, 1);
+    const stepPromises = stepsToCreate.map(async (stepTemplate) => {
         try {
             const contentTemplate = await generateStepContent(
                 businessName,
@@ -202,6 +216,14 @@ export async function createAgentSequence(
                 on_success: stepTemplate.on_success,
                 on_failure: stepTemplate.on_failure,
                 is_active: true,
+                enable_ai_mutation: true,
+                mutation_instructions: stepTemplate.channel === "sms"
+                    ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                    : stepTemplate.channel === "email"
+                    ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                    : stepTemplate.channel === "voice"
+                    ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                    : null,
             });
         } catch (err) {
             console.error(`[AUTO-SEQUENCE] Error creating step ${stepTemplate.step_order}:`, err);
@@ -212,7 +234,7 @@ export async function createAgentSequence(
     await Promise.allSettled(stepPromises);
 
     console.log(
-        `[AUTO-SEQUENCE] Created "${sequenceName}" with ${template.steps.length} steps for ${agentTypeId}`
+        `[AUTO-SEQUENCE] Created dynamic "${sequenceName}" with step 1 of ${template.steps.length} for ${agentTypeId}`
     );
 
     return { success: true, sequenceId: sequence.id };
@@ -243,7 +265,14 @@ export async function createAgentSequenceFromDynamic(
         return { success: true };
     }
 
-    // 1. Create the sequence
+    // 1. Create the sequence (dynamic mode by default)
+    const v2Strategy = {
+        goal: "Follow up with lead and book appointment",
+        max_steps: sequenceStructure.steps.length,
+        available_channels: [...new Set(sequenceStructure.steps.map(s => s.channel))] as ("sms" | "email" | "voice")[],
+        agent_context: `Outbound agent for ${businessName}`,
+    };
+
     const { data: sequence, error: seqError } = await supabase
         .from("sequences")
         .insert({
@@ -257,6 +286,10 @@ export async function createAgentSequenceFromDynamic(
             ai_generated: true,
             auto_created: true,
             is_active: true,
+            enable_adaptive_mutation: true,
+            mutation_aggressiveness: "moderate",
+            generation_mode: "dynamic",
+            sequence_strategy: v2Strategy,
         })
         .select("id")
         .single();
@@ -266,8 +299,9 @@ export async function createAgentSequenceFromDynamic(
         return { success: false, error: seqError?.message || "Failed to create sequence" };
     }
 
-    // 2. Generate content and create steps
-    const stepPromises = sequenceStructure.steps.map(async (step) => {
+    // 2. Generate content and create steps — only step 1 for dynamic mode
+    const stepsToCreate = sequenceStructure.steps.slice(0, 1);
+    const stepPromises = stepsToCreate.map(async (step) => {
         try {
             const stepTemplate: SequenceStepTemplate = {
                 step_order: step.step_order,
@@ -299,6 +333,14 @@ export async function createAgentSequenceFromDynamic(
                 on_success: { action: "continue" },
                 on_failure: { action: "skip" },
                 is_active: true,
+                enable_ai_mutation: true,
+                mutation_instructions: step.channel === "sms"
+                    ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+                    : step.channel === "email"
+                    ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+                    : step.channel === "voice"
+                    ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+                    : null,
             });
         } catch (err) {
             console.error(`[AUTO-SEQUENCE V2] Error creating step ${step.step_order}:`, err);
@@ -309,7 +351,7 @@ export async function createAgentSequenceFromDynamic(
     await Promise.allSettled(stepPromises);
 
     console.log(
-        `[AUTO-SEQUENCE V2] Created dynamic sequence with ${sequenceStructure.steps.length} steps`
+        `[AUTO-SEQUENCE V2] Created dynamic sequence with step 1 of ${sequenceStructure.steps.length}`
     );
 
     return { success: true, sequenceId: sequence.id };

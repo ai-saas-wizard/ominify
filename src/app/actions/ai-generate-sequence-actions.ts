@@ -79,9 +79,7 @@ function extractJSON(raw: string): any {
 // Auto-fixes what it can (delay_seconds→delay_minutes, missing content fields).
 // Returns { valid, data, errors } so callers can decide to repair or fail.
 
-// ── PICKLIST: Only these columns exist in the live Supabase sequence_steps table.
-// The adaptive-mutation columns (enable_ai_mutation, mutation_instructions) are
-// defined in migration SQL but NOT applied to the live DB. Never insert them.
+// ── Validated step shape used for schema validation before DB insert.
 interface ValidatedStep {
     step_order: number;
     channel: string;
@@ -327,11 +325,52 @@ Output the corrected JSON object with the same structure: {"name": "...", "descr
     return extractJSON(raw);
 }
 
+// ─── VAPI Agent Lookup ───────────────────────────────────────────────────────
+// Look up the client's outbound VAPI agent so voice steps can reference it
+// instead of generating redundant system prompts.
+
+async function getOutboundVapiId(clientId: string): Promise<string | null> {
+    const { data } = await supabase
+        .from("agents")
+        .select("vapi_id")
+        .eq("client_id", clientId)
+        .eq("agent_type", "outbound")
+        .limit(1)
+        .single();
+    return data?.vapi_id || null;
+}
+
+// Inject vapi_assistant_id into voice step content when an outbound agent exists.
+// This tells the sequencer to use the existing VAPI assistant instead of creating
+// an inline one from the system_prompt.
+function injectVapiAssistantId(steps: ValidatedStep[], vapiId: string): ValidatedStep[] {
+    return steps.map(step => {
+        if (step.channel === "voice") {
+            return {
+                ...step,
+                content: {
+                    ...step.content,
+                    vapi_assistant_id: vapiId,
+                },
+            };
+        }
+        return step;
+    });
+}
+
 // ─── Shared DB Insert Helpers ────────────────────────────────────────────────
 
-// ── PICKLIST: Only columns confirmed in the live sequences table.
-// enable_adaptive_mutation & mutation_aggressiveness are in migration SQL but NOT applied.
-async function insertSequence(clientId: string, name: string, description: string | null, triggerType: string, urgencyTier: string) {
+async function insertSequence(
+    clientId: string,
+    name: string,
+    description: string | null,
+    triggerType: string,
+    urgencyTier: string,
+    options?: {
+        generation_mode?: "static" | "dynamic";
+        sequence_strategy?: Record<string, any> | null;
+    }
+) {
     return supabase
         .from("sequences")
         .insert({
@@ -342,18 +381,29 @@ async function insertSequence(clientId: string, name: string, description: strin
             urgency_tier: urgencyTier || "medium",
             ai_generated: true,
             is_active: false,
+            enable_adaptive_mutation: true,
+            mutation_aggressiveness: "moderate",
+            generation_mode: options?.generation_mode || "static",
+            sequence_strategy: options?.sequence_strategy || null,
         })
         .select("id")
         .single();
 }
 
-// ── PICKLIST INSERT: Only the columns that exist in the live DB.
-// Each insert row is built from the ValidatedStep — no extra fields leak through.
 async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
     let insertedCount = 0;
     const stepErrors: string[] = [];
 
     for (const step of steps) {
+        // Channel-specific mutation instructions guide the AI rewriter
+        const mutationInstructions = step.channel === "sms"
+            ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
+            : step.channel === "email"
+            ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
+            : step.channel === "voice"
+            ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
+            : null;
+
         const { error: stepError } = await supabase
             .from("sequence_steps")
             .insert({
@@ -366,6 +416,8 @@ async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
                 skip_conditions: step.skip_conditions,
                 on_success: step.on_success,
                 on_failure: step.on_failure,
+                enable_ai_mutation: true,
+                mutation_instructions: mutationInstructions,
             });
 
         if (stepError) {
@@ -398,6 +450,30 @@ EXACT DB SCHEMA FOR EACH STEP:
 CRITICAL: Use "delay_minutes" (NOT "delay_seconds"). Values are in MINUTES.
 CRITICAL: Only use the fields listed above. Do NOT add any extra fields.
 
+DYNAMIC TEMPLATE VARIABLES:
+These placeholders are resolved per-lead at execution time. Use them in step content to make messages personalized:
+
+Contact variables: {{first_name}}, {{last_name}}, {{customer_name}}, {{phone}}, {{email}}, {{company}}
+Business variables: {{business_name}}, {{callback_number}}, {{property_address}}
+Conversation context (resolved from prior interactions — empty string if no history):
+  {{last_call_summary}} — summary of the most recent phone call
+  {{last_call_objections}} — objections raised on the last call
+  {{last_sms_reply}} — the lead's most recent SMS reply text
+  {{last_sms_reply_intent}} — detected intent of last SMS (e.g. "interested", "not_interested")
+  {{overall_sentiment}} — lead's overall sentiment across all channels (positive/neutral/negative)
+  {{objections_raised}} — all known objections accumulated across interactions
+  {{key_topics}} — topics discussed across all interactions
+  {{interaction_count}} — human-readable count like "2 calls, 3 SMS, 1 emails"
+  {{days_since_first_contact}} — days since the first interaction
+
+PERSONALIZATION RULES:
+- Step 1 (first contact): Use basic contact variables ({{first_name}}, {{business_name}})
+- Steps 2+: USE conversation context variables. For example:
+  - SMS: "Hi {{first_name}}, following up on our conversation{{last_call_summary}}. {{business_name}} is here to help."
+  - Email: Reference {{objections_raised}} to proactively address concerns
+  - Voice first_message: "Hi {{first_name}}, I'm calling from {{business_name}} to follow up on {{key_topics}}."
+- If referencing conversation history, wrap it naturally — these vars may be empty on first contact
+
 EXAMPLE OUTPUT (2-step sequence):
 {
   "name": "New Lead Follow-up",
@@ -418,7 +494,7 @@ EXAMPLE OUTPUT (2-step sequence):
       "channel": "voice",
       "delay_minutes": 120,
       "delay_type": "after_previous",
-      "content": {"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} following up on your recent inquiry.", "system_prompt": "You are a follow-up specialist for {{business_name}}. The contact recently submitted an inquiry. Your goal is to understand their needs and book an appointment. Be friendly and professional."},
+      "content": {"first_message": "Hi {{first_name}}, this is the team at {{business_name}} following up on your recent inquiry.", "system_prompt": "You are a follow-up specialist for {{business_name}}. Your goal is to understand their needs and book an appointment. Be friendly and professional."},
       "skip_conditions": {"skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"]},
       "on_success": {"action": "end_sequence"},
       "on_failure": {"action": "retry_after_seconds", "retry_delay": 60}
@@ -641,7 +717,8 @@ export async function confirmAndGenerate(
     clientId: string,
     plan: ConversationPlan,
     messages: ConversationMessage[],
-    systemPromptContext: string
+    systemPromptContext: string,
+    generationMode: "static" | "dynamic" = "static"
 ): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
     try {
         const { data: profile } = await supabase
@@ -683,7 +760,7 @@ RULES:
 2. Use ONLY these channels: ${plan.channels.join(", ")}
 3. TCPA compliance: no calls/texts before 8am or after 9pm
 4. Match the "${p.brand_voice || "professional"}" brand voice
-5. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
+5. Use dynamic template variables for personalization (see DYNAMIC TEMPLATE VARIABLES in schema below). For steps after the first, use conversation context variables like {{last_call_summary}}, {{objections_raised}}, {{overall_sentiment}} to reference prior interactions.
 6. Channel timing (in delay_minutes):
    - SMS: 0-30 min for urgent, 60-240 for medium
    - Voice: 60-240 min delay minimum (let SMS land first)
@@ -745,21 +822,44 @@ Generate the full sequence. Respond with ONLY the JSON object.`;
             }
         }
 
+        // ── Inject VAPI assistant ID into voice steps
+        const hasVoiceSteps = validation.steps!.some(s => s.channel === "voice");
+        if (hasVoiceSteps) {
+            const vapiId = await getOutboundVapiId(clientId);
+            if (vapiId) {
+                validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
+            }
+        }
+
+        // ── Build sequence strategy for dynamic mode
+        const sequenceStrategy = generationMode === "dynamic" ? {
+            goal: plan.goal,
+            max_steps: plan.step_count,
+            available_channels: plan.channels as ("sms" | "email" | "voice")[],
+            agent_context: plan.summary,
+            planned_steps: validation.steps, // informational: full plan
+        } : null;
+
         // ── Insert sequence
         const { data: sequence, error: seqError } = await insertSequence(
             clientId,
             validation.name!,
             validation.description || null,
             plan.trigger_type,
-            plan.urgency_tier
+            plan.urgency_tier,
+            { generation_mode: generationMode, sequence_strategy: sequenceStrategy }
         );
 
         if (seqError || !sequence) {
             return { success: false, error: `Failed to create sequence: ${seqError?.message || "Unknown error"}` };
         }
 
-        // ── Insert steps
-        const { insertedCount, stepErrors } = await insertSteps(sequence.id, validation.steps!);
+        // ── Insert steps: for dynamic mode, only insert step 1
+        const stepsToInsert = generationMode === "dynamic"
+            ? validation.steps!.slice(0, 1)
+            : validation.steps!;
+
+        const { insertedCount, stepErrors } = await insertSteps(sequence.id, stepsToInsert);
 
         if (insertedCount === 0) {
             console.error("All step inserts failed:", stepErrors);
@@ -782,7 +882,7 @@ Generate the full sequence. Respond with ONLY the JSON object.`;
 export async function generateAISequence(
     clientId: string,
     userPrompt: string,
-    options?: { triggerType?: string; urgencyTier?: string }
+    options?: { triggerType?: string; urgencyTier?: string; generationMode?: "static" | "dynamic"; maxSteps?: number }
 ): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
     try {
         const { data: profile, error: profileError } = await supabase
@@ -817,7 +917,7 @@ RULES:
 2. Mix channels (sms, email, voice) based on urgency
 3. TCPA compliance: no calls/texts before 8am or after 9pm
 4. Match the brand voice
-5. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{property_address}}, {{callback_number}}
+5. Use dynamic template variables for personalization (see DYNAMIC TEMPLATE VARIABLES in schema below). For steps after the first, use conversation context variables like {{last_call_summary}}, {{objections_raised}}, {{overall_sentiment}} to reference prior interactions.
 
 ${STEP_SCHEMA_INSTRUCTIONS}`;
 
@@ -870,16 +970,41 @@ ${STEP_SCHEMA_INSTRUCTIONS}`;
 
         const triggerType = options?.triggerType || generated.trigger_type || "manual";
         const urgencyTier = options?.urgencyTier || generated.urgency_tier || "medium";
+        const generationMode = options?.generationMode || "static";
+
+        // ── Inject VAPI assistant ID into voice steps
+        const hasVoiceSteps = validation.steps!.some(s => s.channel === "voice");
+        if (hasVoiceSteps) {
+            const vapiId = await getOutboundVapiId(clientId);
+            if (vapiId) {
+                validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
+            }
+        }
+
+        // ── Build sequence strategy for dynamic mode
+        const sequenceStrategy = generationMode === "dynamic" ? {
+            goal: generated.description || "Follow up with lead",
+            max_steps: options?.maxSteps || validation.steps!.length,
+            available_channels: [...new Set(validation.steps!.map(s => s.channel))] as ("sms" | "email" | "voice")[],
+            agent_context: userPrompt,
+            planned_steps: validation.steps,
+        } : null;
 
         const { data: sequence, error: seqError } = await insertSequence(
-            clientId, validation.name!, validation.description || null, triggerType, urgencyTier
+            clientId, validation.name!, validation.description || null, triggerType, urgencyTier,
+            { generation_mode: generationMode, sequence_strategy: sequenceStrategy }
         );
 
         if (seqError || !sequence) {
             return { success: false, error: `Failed to create sequence: ${seqError?.message || "Unknown error"}` };
         }
 
-        const { insertedCount, stepErrors } = await insertSteps(sequence.id, validation.steps!);
+        // For dynamic mode, only insert step 1
+        const stepsToInsert = generationMode === "dynamic"
+            ? validation.steps!.slice(0, 1)
+            : validation.steps!;
+
+        const { insertedCount, stepErrors } = await insertSteps(sequence.id, stepsToInsert);
 
         if (insertedCount === 0) {
             await supabase.from("sequences").delete().eq("id", sequence.id);
@@ -957,7 +1082,7 @@ ${userPrompt}
 RULES:
 1. Generate NEW steps that complement existing ones — don't duplicate
 2. Step ordering starts at ${startOrder}
-3. Template variables: {{customer_name}}, {{first_name}}, {{last_name}}, {{phone}}, {{email}}, {{business_name}}, {{callback_number}}
+3. Use dynamic template variables for personalization (see DYNAMIC TEMPLATE VARIABLES in schema below). Since these are follow-up steps, USE conversation context variables like {{last_call_summary}}, {{objections_raised}}, {{last_sms_reply}} to make messages reference prior interactions.
 
 ${STEP_SCHEMA_INSTRUCTIONS}`;
 
@@ -1006,6 +1131,15 @@ ${STEP_SCHEMA_INSTRUCTIONS}`;
         validation.steps!.forEach((step, i) => {
             step.step_order = startOrder + i;
         });
+
+        // ── Inject VAPI assistant ID into voice steps
+        const hasVoiceSteps = validation.steps!.some(s => s.channel === "voice");
+        if (hasVoiceSteps) {
+            const vapiId = await getOutboundVapiId(clientId);
+            if (vapiId) {
+                validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
+            }
+        }
 
         const { insertedCount, stepErrors } = await insertSteps(sequenceId, validation.steps!);
 
