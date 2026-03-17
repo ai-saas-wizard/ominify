@@ -3,6 +3,9 @@
 
 ALTER TABLE sequence_enrollments ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT false;
 
+-- Backfill existing rows so .eq('is_test', false) queries work correctly
+UPDATE sequence_enrollments SET is_test = false WHERE is_test IS NULL;
+
 -- Index for analytics exclusion queries
 CREATE INDEX IF NOT EXISTS idx_sequence_enrollments_is_test
     ON sequence_enrollments(is_test) WHERE is_test = true;

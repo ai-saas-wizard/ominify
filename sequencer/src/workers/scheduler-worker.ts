@@ -18,6 +18,7 @@ import { supabase } from '../lib/db.js';
 import { smsQueue, emailQueue, vapiQueue } from '../lib/redis.js';
 import {
     getConversationContext,
+    getConversationContext as getDynamicConversationContext,
     buildTemplateVariables,
     buildVoiceAgentContext,
 } from '../lib/conversation-memory.js';
@@ -51,9 +52,6 @@ import {
     endDynamicSequence,
     activateEnrollmentForNextStep,
 } from '../lib/dynamic-step-generator.js';
-import {
-    getConversationContext as getDynamicConversationContext,
-} from '../lib/conversation-memory.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -602,7 +600,7 @@ async function advanceToNextStep(
     // ── Dynamic mode: enter awaiting_outcome instead of advancing
     if (sequence?.generation_mode === 'dynamic') {
         const lastChannel = step?.channel || 'sms';
-        const isTestEnrollment = (enrollment as any).is_test === true;
+        const isTestEnrollment = enrollment.is_test === true;
         // Test mode: use 30-second timeout instead of hours-long outcome window
         const timeoutMs = isTestEnrollment
             ? TEST_MODE_DELAY_SECONDS * 1000
@@ -653,7 +651,7 @@ async function advanceToNextStep(
     let adjustedDelaySeconds = nextStep.delay_seconds;
 
     // Test mode: compress all delays to 30 seconds
-    const isTestEnrollment = (enrollment as any).is_test === true;
+    const isTestEnrollment = enrollment.is_test === true;
     if (isTestEnrollment) {
         const originalDelay = nextStep.delay_seconds;
         adjustedDelaySeconds = TEST_MODE_DELAY_SECONDS;

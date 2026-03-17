@@ -80,7 +80,7 @@ async function findEnrollmentByPhone(tenantId: string, contactPhone: string): Pr
         .select('id')
         .eq('tenant_id', tenantId)
         .eq('contact_id', contact.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'awaiting_outcome', 'generating_next_step'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();

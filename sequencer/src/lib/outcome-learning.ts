@@ -283,7 +283,31 @@ export async function computeStepAnalytics(
         hourlyExecs[hour] = (hourlyExecs[hour] || 0) + 1;
     }
 
-    // Find optimal send hour (hour with highest execution density for now)
+    // Populate hourlyReplies from replied enrollments grouped by execution hour
+    if (enrollmentIds.length > 0) {
+        const { data: repliedEnrollmentIds } = await supabase
+            .from('sequence_enrollments')
+            .select('id')
+            .in('id', enrollmentIds)
+            .eq('contact_replied', true)
+            .eq('is_test', false);
+
+        const repliedIdSet = new Set((repliedEnrollmentIds || []).map(e => e.id));
+
+        for (const log of logs) {
+            if (repliedIdSet.has(log.enrollment_id)) {
+                const hour = new Date(log.executed_at).getHours().toString();
+                hourlyReplies[hour] = (hourlyReplies[hour] || 0) + 1;
+            }
+        }
+    }
+
+    // Compute hourly reply rates
+    for (const hour of Object.keys(hourlyExecs)) {
+        hourlyRates[hour] = (hourlyReplies[hour] || 0) / hourlyExecs[hour];
+    }
+
+    // Find optimal send hour (hour with highest reply rate)
     let optimalHour: number | null = null;
     let maxRate = 0;
     for (const [hour, rate] of Object.entries(hourlyRates)) {

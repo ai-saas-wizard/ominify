@@ -214,6 +214,8 @@ export interface SequenceEnrollment {
     appointment_booked: boolean;
     enrollment_source: string | null;
     custom_variables: Record<string, any>;
+    is_test: boolean;
+    channel_overrides: Record<string, any>;
     // Phase 6: Dynamic (JIT) Step Generation
     outcome_timeout_at: string | null;
     created_at: string;

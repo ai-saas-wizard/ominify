@@ -149,9 +149,9 @@ export async function handleInboundSMS(params: {
  * for this enrollment. This limits runaway chatbot conversations.
  */
 async function getChatbotTurnCount(enrollmentId: string): Promise<number> {
-    const { data, error } = await supabase
+    const { count, error } = await supabase
         .from('contact_interactions')
-        .select('id', { count: 'exact' })
+        .select('id', { count: 'exact', head: true })
         .eq('enrollment_id', enrollmentId)
         .eq('channel', 'sms')
         .eq('direction', 'outbound')
@@ -160,17 +160,17 @@ async function getChatbotTurnCount(enrollmentId: string): Promise<number> {
     if (error) {
         console.error('[SMS-RESPONDER] Error counting chatbot turns:', error.message);
         // Fallback: use a broader count to be safe
-        const { count } = await supabase
+        const { count: fallbackCount } = await supabase
             .from('contact_interactions')
             .select('id', { count: 'exact', head: true })
             .eq('enrollment_id', enrollmentId)
             .eq('channel', 'sms')
             .eq('direction', 'outbound');
 
-        return count || 0;
+        return fallbackCount || 0;
     }
 
-    return data?.length || 0;
+    return count || 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════

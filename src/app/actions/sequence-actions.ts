@@ -1181,7 +1181,7 @@ export async function getConversionFunnel(sequenceId: string) {
             .from("sequence_enrollments")
             .select("id, status, contact_replied, contact_answered_call, appointment_booked, current_step_order")
             .eq("sequence_id", sequenceId)
-            .eq("is_test", false);
+            .or('is_test.is.null,is_test.eq.false');
 
         if (error) {
             return { success: false, error: error.message, data: null };
@@ -1575,7 +1575,7 @@ export async function bulkEnrollFromCSV(
                     let contactId: string;
                     const { data: existingContact } = await supabase
                         .from("contacts")
-                        .select("id")
+                        .select("id, custom_fields")
                         .eq("client_id", clientId)
                         .eq("phone", phone)
                         .single();
@@ -1587,7 +1587,7 @@ export async function bulkEnrollFromCSV(
                         if (name) updateData.name = name;
                         if (email) updateData.email = email;
                         if (Object.keys(customFields).length > 0) {
-                            updateData.custom_fields = customFields;
+                            updateData.custom_fields = { ...(existingContact.custom_fields || {}), ...customFields };
                         }
                         if (Object.keys(updateData).length > 0) {
                             await supabase

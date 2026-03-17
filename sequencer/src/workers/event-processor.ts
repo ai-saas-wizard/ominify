@@ -22,6 +22,7 @@ import {
     updateInteraction,
     findInteractionByProviderId,
     updateContactConversationSummary,
+    getConversationContext as getConvCtx,
 } from '../lib/conversation-memory.js';
 import {
     analyzeMessage,
@@ -41,9 +42,6 @@ import {
     endDynamicSequence,
     activateEnrollmentForNextStep,
 } from '../lib/dynamic-step-generator.js';
-import {
-    getConversationContext as getConvCtx,
-} from '../lib/conversation-memory.js';
 import { handleInboundSMS } from '../lib/sms-responder.js';
 import { smsQueue } from '../lib/redis.js';
 import type {

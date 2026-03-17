@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import * as Papa from "papaparse";
 import {
     Loader2,
     X,
@@ -65,7 +66,9 @@ export function TaskDialog({
     const [csvFile, setCsvFile] = useState<File | null>(null);
     const [csvColumns, setCsvColumns] = useState<string[]>([]);
     const [csvRowCount, setCsvRowCount] = useState(0);
-    const [loading, setLoading] = useState(false);
+    const [csvSampleData, setCsvSampleData] = useState<Record<string, string>[]>([]);
+    const [csvParsedData, setCsvParsedData] = useState<Record<string, string>[]>([]);
+    const [loadingAction, setLoadingAction] = useState<"launch" | "test" | null>(null);
     const [error, setError] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -80,41 +83,35 @@ export function TaskDialog({
         setCsvFile(file);
         setError("");
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const text = e.target?.result as string;
-            if (!text) {
-                setError("Could not read file.");
-                return;
-            }
+        // Full parse with PapaParse for accurate header detection and data extraction
+        Papa.parse<Record<string, string>>(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const headers = results.meta.fields || [];
 
-            const lines = text.split("\n").filter((line) => line.trim().length > 0);
-            if (lines.length === 0) {
-                setError("CSV file appears to be empty.");
+                if (headers.length === 0) {
+                    setError("No columns detected in CSV.");
+                    setCsvFile(null);
+                    return;
+                }
+
+                if (results.data.length === 0) {
+                    setError("CSV file appears to be empty.");
+                    setCsvFile(null);
+                    return;
+                }
+
+                setCsvColumns(headers);
+                setCsvRowCount(results.data.length);
+                setCsvSampleData(results.data.slice(0, 3));
+                setCsvParsedData(results.data);
+            },
+            error: () => {
+                setError("Failed to read file.");
                 setCsvFile(null);
-                return;
-            }
-
-            // Parse headers from first line
-            const headers = lines[0]
-                .split(",")
-                .map((h) => h.trim().replace(/^["']|["']$/g, ""))
-                .filter((h) => h.length > 0);
-
-            if (headers.length === 0) {
-                setError("No columns detected in CSV.");
-                setCsvFile(null);
-                return;
-            }
-
-            setCsvColumns(headers);
-            setCsvRowCount(Math.max(0, lines.length - 1));
-        };
-        reader.onerror = () => {
-            setError("Failed to read file.");
-            setCsvFile(null);
-        };
-        reader.readAsText(file);
+            },
+        });
     }, []);
 
     const handleDrop = useCallback(
@@ -144,6 +141,8 @@ export function TaskDialog({
         setCsvFile(null);
         setCsvColumns([]);
         setCsvRowCount(0);
+        setCsvSampleData([]);
+        setCsvParsedData([]);
         if (fileInputRef.current) {
             fileInputRef.current.value = "";
         }
@@ -158,7 +157,7 @@ export function TaskDialog({
                 return;
             }
 
-            setLoading(true);
+            setLoadingAction(mode);
             setError("");
 
             try {
@@ -171,7 +170,7 @@ export function TaskDialog({
 
                 if (!result.success || !result.sequenceId) {
                     setError(result.error || "Failed to create task. Please try again.");
-                    setLoading(false);
+                    setLoadingAction(null);
                     return;
                 }
 
@@ -182,23 +181,28 @@ export function TaskDialog({
                     onLaunch(result.sequenceId);
                 }
 
+                // Close dialog on success
+                onOpenChange(false);
+
                 // Reset state
                 setInstruction("");
                 setCsvFile(null);
                 setCsvColumns([]);
                 setCsvRowCount(0);
+                setCsvSampleData([]);
+                setCsvParsedData([]);
                 setError("");
             } catch (err) {
                 setError(err instanceof Error ? err.message : "An unexpected error occurred.");
             } finally {
-                setLoading(false);
+                setLoadingAction(null);
             }
         },
-        [instruction, csvColumns, clientId, channelReadiness, onLaunch, onTestMode]
+        [instruction, csvColumns, clientId, channelReadiness, onLaunch, onTestMode, onOpenChange]
     );
 
     const handleClose = useCallback(() => {
-        if (loading) return;
+        if (loadingAction !== null) return;
         onOpenChange(false);
         // Reset after animation
         setTimeout(() => {
@@ -206,9 +210,11 @@ export function TaskDialog({
             setCsvFile(null);
             setCsvColumns([]);
             setCsvRowCount(0);
+            setCsvSampleData([]);
+            setCsvParsedData([]);
             setError("");
         }, 200);
-    }, [loading, onOpenChange]);
+    }, [loadingAction, onOpenChange]);
 
     // ── Derived state ───────────────────────────────────────────────────────
 
@@ -217,7 +223,7 @@ export function TaskDialog({
         channelReadiness.email.ready ||
         channelReadiness.voice.ready;
 
-    const canSubmit = instruction.trim().length > 0 && anyChannelReady && !loading;
+    const canSubmit = instruction.trim().length > 0 && anyChannelReady && loadingAction === null;
 
     // ── Render ──────────────────────────────────────────────────────────────
 
@@ -244,7 +250,7 @@ export function TaskDialog({
                             </div>
                             <button
                                 onClick={handleClose}
-                                disabled={loading}
+                                disabled={loadingAction !== null}
                                 className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
                             >
                                 <X className="w-5 h-5" />
@@ -263,7 +269,7 @@ export function TaskDialog({
                                     onChange={(e) => setInstruction(e.target.value)}
                                     placeholder={'e.g. "Send an SMS to all leads who missed a call this week, then follow up with an email the next day if they don\'t reply"'}
                                     rows={4}
-                                    disabled={loading}
+                                    disabled={loadingAction !== null}
                                     className="min-h-[100px]"
                                 />
                             </div>
@@ -323,7 +329,7 @@ export function TaskDialog({
                                             </div>
                                             <button
                                                 onClick={removeFile}
-                                                disabled={loading}
+                                                disabled={loadingAction !== null}
                                                 className="text-gray-400 hover:text-red-500 transition-colors p-1"
                                             >
                                                 <X className="w-4 h-4" />
@@ -429,7 +435,7 @@ export function TaskDialog({
                                 disabled={!canSubmit}
                                 className="flex-1"
                             >
-                                {loading ? (
+                                {loadingAction === "test" ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
                                     <FlaskConical className="w-4 h-4" />
@@ -441,7 +447,7 @@ export function TaskDialog({
                                 disabled={!canSubmit}
                                 className="flex-1"
                             >
-                                {loading ? (
+                                {loadingAction === "launch" ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
                                     <Rocket className="w-4 h-4" />

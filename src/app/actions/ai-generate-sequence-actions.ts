@@ -1365,6 +1365,7 @@ Output ONLY the JSON object.`;
                 generation_mode: "dynamic",
                 sequence_strategy: sequenceStrategy,
                 metadata: { is_task: true, source_instruction: instruction },
+                enable_chatbot_mode: true,
             })
             .select("id")
             .single();
