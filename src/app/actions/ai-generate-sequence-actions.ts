@@ -79,6 +79,9 @@ function extractJSON(raw: string): any {
 // Auto-fixes what it can (delay_seconds→delay_minutes, missing content fields).
 // Returns { valid, data, errors } so callers can decide to repair or fail.
 
+// ── PICKLIST: Only these columns exist in the live Supabase sequence_steps table.
+// The adaptive-mutation columns (enable_ai_mutation, mutation_instructions) are
+// defined in migration SQL but NOT applied to the live DB. Never insert them.
 interface ValidatedStep {
     step_order: number;
     channel: string;
@@ -88,8 +91,6 @@ interface ValidatedStep {
     skip_conditions: Record<string, any> | null;
     on_success: Record<string, any>;
     on_failure: Record<string, any>;
-    enable_ai_mutation: boolean;
-    mutation_instructions: string | null;
 }
 
 interface ValidationResult {
@@ -255,8 +256,6 @@ function validateAndTransformSequence(raw: any): ValidationResult {
             skip_conditions: skipConditions,
             on_success: onSuccess,
             on_failure: onFailure,
-            enable_ai_mutation: true,
-            mutation_instructions: step.mutation_instructions || null,
         });
     }
 
@@ -303,11 +302,11 @@ CORRECT SCHEMA FOR sequence_steps:
 - skip_conditions: JSONB ({"skip_if": ["contact_replied", "appointment_booked"]})
 - on_success: JSONB ({"action": "continue"} or {"action": "jump_to_step", "target_step": 3} or {"action": "end_sequence"})
 - on_failure: JSONB ({"action": "skip"} or {"action": "retry_after_seconds", "retry_delay": 3600} or {"action": "end_sequence"})
-- mutation_instructions: TEXT (optional)
 
 IMPORTANT:
 - Use delay_minutes (NOT delay_seconds)
 - Use the exact content field names per channel shown above
+- Do NOT add any extra fields beyond the ones listed above
 - Fix ALL validation errors listed above
 
 Output the corrected JSON object with the same structure: {"name": "...", "description": "...", "steps": [...]}`;
@@ -330,6 +329,8 @@ Output the corrected JSON object with the same structure: {"name": "...", "descr
 
 // ─── Shared DB Insert Helpers ────────────────────────────────────────────────
 
+// ── PICKLIST: Only columns confirmed in the live sequences table.
+// enable_adaptive_mutation & mutation_aggressiveness are in migration SQL but NOT applied.
 async function insertSequence(clientId: string, name: string, description: string | null, triggerType: string, urgencyTier: string) {
     return supabase
         .from("sequences")
@@ -341,13 +342,13 @@ async function insertSequence(clientId: string, name: string, description: strin
             urgency_tier: urgencyTier || "medium",
             ai_generated: true,
             is_active: false,
-            enable_adaptive_mutation: true,
-            mutation_aggressiveness: "moderate",
         })
         .select("id")
         .single();
 }
 
+// ── PICKLIST INSERT: Only the columns that exist in the live DB.
+// Each insert row is built from the ValidatedStep — no extra fields leak through.
 async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
     let insertedCount = 0;
     const stepErrors: string[] = [];
@@ -365,8 +366,6 @@ async function insertSteps(sequenceId: string, steps: ValidatedStep[]) {
                 skip_conditions: step.skip_conditions,
                 on_success: step.on_success,
                 on_failure: step.on_failure,
-                enable_ai_mutation: step.enable_ai_mutation,
-                mutation_instructions: step.mutation_instructions,
             });
 
         if (stepError) {
@@ -395,9 +394,9 @@ EXACT DB SCHEMA FOR EACH STEP:
 - skip_conditions: {"skip_if": ["contact_replied", "appointment_booked"]} (optional)
 - on_success: {"action": "continue"} or {"action": "jump_to_step", "target_step": 3} or {"action": "end_sequence"}
 - on_failure: {"action": "skip"} or {"action": "retry_after_seconds", "retry_delay": 60} or {"action": "end_sequence"}
-- mutation_instructions: string with optimization hints (optional)
 
 CRITICAL: Use "delay_minutes" (NOT "delay_seconds"). Values are in MINUTES.
+CRITICAL: Only use the fields listed above. Do NOT add any extra fields.
 
 EXAMPLE OUTPUT (2-step sequence):
 {
@@ -412,8 +411,7 @@ EXAMPLE OUTPUT (2-step sequence):
       "content": {"body": "Hi {{first_name}}, thanks for reaching out to {{business_name}}! We received your inquiry and will be in touch shortly. Reply STOP to opt out."},
       "skip_conditions": {"skip_if": ["contact_replied", "appointment_booked"]},
       "on_success": {"action": "continue"},
-      "on_failure": {"action": "skip"},
-      "mutation_instructions": "Optimize message length and tone. Test emoji usage. Vary CTA phrasing."
+      "on_failure": {"action": "skip"}
     },
     {
       "step_order": 2,
@@ -423,8 +421,7 @@ EXAMPLE OUTPUT (2-step sequence):
       "content": {"first_message": "Hi, is this {{first_name}}? This is the team at {{business_name}} following up on your recent inquiry.", "system_prompt": "You are a follow-up specialist for {{business_name}}. The contact recently submitted an inquiry. Your goal is to understand their needs and book an appointment. Be friendly and professional."},
       "skip_conditions": {"skip_if": ["contact_replied", "contact_answered_call", "appointment_booked"]},
       "on_success": {"action": "end_sequence"},
-      "on_failure": {"action": "retry_after_seconds", "retry_delay": 60},
-      "mutation_instructions": "Adjust opening energy and pacing."
+      "on_failure": {"action": "retry_after_seconds", "retry_delay": 60}
     }
   ]
 }`;

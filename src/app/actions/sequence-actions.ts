@@ -326,10 +326,6 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
             ? existingSteps[0].step_order + 1
             : 1;
 
-        // Phase 3: Mutation settings
-        const enable_ai_mutation = formData.get("enable_ai_mutation") === "true";
-        const mutation_instructions = formData.get("mutation_instructions") as string;
-
         const { data, error } = await supabase
             .from("sequence_steps")
             .insert({
@@ -342,8 +338,6 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
                 skip_conditions: parsedSkip,
                 on_success: parsedOnSuccess,
                 on_failure: parsedOnFailure,
-                enable_ai_mutation,
-                mutation_instructions: mutation_instructions || null,
             })
             .select("id")
             .single();
