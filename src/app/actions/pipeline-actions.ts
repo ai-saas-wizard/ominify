@@ -66,13 +66,11 @@ export async function getPipelineData(clientId: string) {
             return { success: false, error: stagesError.message, stages: [], contacts: [] };
         }
 
-        // Fetch contacts with enrollment info
+        // Fetch contacts with enrollment info — use * to avoid column mismatch
         const { data: contacts, error: contactsError } = await supabase
             .from("contacts")
             .select(`
-                id, name, phone, email, pipeline_stage_id, pipeline_stage_moved_by,
-                engagement_score, sentiment_trend, conversation_summary,
-                last_call_at, total_calls, custom_fields, created_at,
+                *,
                 sequence_enrollments(id, status, enrollment_source, sequences(name))
             `)
             .eq("client_id", clientId)
@@ -92,14 +90,14 @@ export async function getPipelineData(clientId: string) {
                 name: c.name,
                 phone: c.phone,
                 email: c.email,
-                pipeline_stage_id: c.pipeline_stage_id,
-                pipeline_stage_moved_by: c.pipeline_stage_moved_by,
-                engagement_score: c.engagement_score,
-                sentiment_trend: c.sentiment_trend,
-                conversation_summary: c.conversation_summary,
-                last_call_at: c.last_call_at,
-                total_calls: c.total_calls,
-                custom_fields: c.custom_fields,
+                pipeline_stage_id: c.pipeline_stage_id || null,
+                pipeline_stage_moved_by: c.pipeline_stage_moved_by || null,
+                engagement_score: c.engagement_score ?? null,
+                sentiment_trend: c.sentiment_trend ?? null,
+                conversation_summary: c.conversation_summary || null,
+                last_call_at: c.last_call_at || null,
+                total_calls: c.total_calls || 0,
+                custom_fields: c.custom_fields || {},
                 created_at: c.created_at,
                 enrollment: activeEnrollment
                     ? {
