@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@clerk/nextjs/server";
+import { autoAdvanceContactStage } from "@/app/actions/pipeline-actions";
 
 // ─── List all sequences for a client ───────────────────────────────────────────
 
@@ -620,6 +621,9 @@ export async function enrollContact(
             console.error("enrollContact error:", error);
             return { success: false, error: error.message };
         }
+
+        // Auto-advance pipeline: enrolled → Contacted
+        await autoAdvanceContactStage(contactId, clientId, "Contacted").catch(() => {});
 
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
         return { success: true, enrollmentId: data?.id };
@@ -1485,6 +1489,10 @@ export async function createTestEnrollment(
             return { success: false, error: enrollError.message };
         }
 
+        // Auto-advance pipeline: new contact → New Lead, enrolled → Contacted
+        await autoAdvanceContactStage(contactId, clientId, "New Lead").catch(() => {});
+        await autoAdvanceContactStage(contactId, clientId, "Contacted").catch(() => {});
+
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
         return { success: true, enrollmentId: enrollment?.id };
     } catch (error) {
@@ -1669,6 +1677,10 @@ export async function bulkEnrollFromCSV(
                         errors.push(`Row ${rowIndex}: Enrollment failed — ${enrollErr.message}`);
                         continue;
                     }
+
+                    // Auto-advance pipeline: new contact → New Lead, enrolled → Contacted
+                    await autoAdvanceContactStage(contactId, clientId, "New Lead").catch(() => {});
+                    await autoAdvanceContactStage(contactId, clientId, "Contacted").catch(() => {});
 
                     enrolled++;
                 } catch (rowError: any) {

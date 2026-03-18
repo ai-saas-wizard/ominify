@@ -20,7 +20,8 @@ import {
     FileText,
     Building2,
     ChevronDown,
-    BarChart3
+    BarChart3,
+    KanbanSquare
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { MinuteBalanceDisplay } from "./minute-balance-display";
@@ -37,6 +38,11 @@ const baseRoutes = [
         label: "Contacts",
         icon: Users,
         href: "/contacts",
+    },
+    {
+        label: "Pipeline",
+        icon: KanbanSquare,
+        href: "/pipeline",
     },
     {
         label: "Analytics",

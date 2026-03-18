@@ -43,6 +43,7 @@ import {
     activateEnrollmentForNextStep,
 } from '../lib/dynamic-step-generator.js';
 import { handleInboundSMS } from '../lib/sms-responder.js';
+import { autoAdvancePipelineStage } from '../lib/pipeline-advance.js';
 import { smsQueue } from '../lib/redis.js';
 import type {
     EventJobPayload,
@@ -387,7 +388,28 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
         }
     }
 
-    // 8. Dynamic (JIT) step generation — trigger on call outcome (call is over)
+    // 8. Pipeline auto-advance based on call outcome
+    if (enrollmentId) {
+        const { data: enrollForPipeline } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id, is_hot_lead')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enrollForPipeline?.contact_id && enrollForPipeline?.tenant_id) {
+            if (wasAnswered) {
+                await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Engaged');
+            }
+            if (appointmentBooked) {
+                await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Booked');
+            }
+            if (eiAnalysis?.is_hot_lead || enrollForPipeline.is_hot_lead) {
+                await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Qualified');
+            }
+        }
+    }
+
+    // 9. Dynamic (JIT) step generation — trigger on call outcome (call is over)
     if (enrollmentId) {
         const outcomeCtx: OutcomeContext = {
             type: wasAnswered ? 'call_answered'
@@ -597,10 +619,29 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
         }
     }
 
-    // 7. SMS Chatbot Mode — if enrollment's sequence has chatbot enabled, generate AI reply
+    // 7. Pipeline auto-advance on SMS reply
+    {
+        const { data: enrollForPipeline } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id, is_hot_lead')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enrollForPipeline?.contact_id && enrollForPipeline?.tenant_id) {
+            // Any reply = Engaged
+            await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Engaged');
+
+            // Hot lead = Qualified
+            if (eiAnalysis?.is_hot_lead || enrollForPipeline.is_hot_lead) {
+                await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Qualified');
+            }
+        }
+    }
+
+    // 8. SMS Chatbot Mode — if enrollment's sequence has chatbot enabled, generate AI reply
     const chatbotHandled = await maybeTriggerChatbotReply(event, enrollmentId, eiAnalysis);
 
-    // 8. Dynamic (JIT) step generation — trigger on SMS reply (lead responded)
+    // 9. Dynamic (JIT) step generation — trigger on SMS reply (lead responded)
     // Skip JIT generation if chatbot already handled the reply
     if (!chatbotHandled) {
         const smsOutcomeCtx: OutcomeContext = {
