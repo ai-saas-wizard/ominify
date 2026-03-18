@@ -66,13 +66,10 @@ export async function getPipelineData(clientId: string) {
             return { success: false, error: stagesError.message, stages: [], contacts: [] };
         }
 
-        // Fetch contacts with enrollment info — use * to avoid column mismatch
+        // Fetch contacts — simple query, no joins that could fail
         const { data: contacts, error: contactsError } = await supabase
             .from("contacts")
-            .select(`
-                *,
-                sequence_enrollments(id, status, enrollment_source, sequences(name))
-            `)
+            .select("*")
             .eq("client_id", clientId)
             .order("created_at", { ascending: false });
 
@@ -81,10 +78,30 @@ export async function getPipelineData(clientId: string) {
             return { success: false, error: contactsError.message, stages: stages || [], contacts: [] };
         }
 
-        // Transform: pick most recent active enrollment per contact
+        console.log(`[PIPELINE] Found ${(contacts || []).length} contacts for client ${clientId}`);
+
+        // Fetch enrollments separately to avoid join failures
+        const contactIds = (contacts || []).map((c: any) => c.id);
+        let enrollmentMap: Record<string, any> = {};
+
+        if (contactIds.length > 0) {
+            const { data: enrollments } = await supabase
+                .from("sequence_enrollments")
+                .select("id, contact_id, status, enrollment_source, sequences(name)")
+                .in("contact_id", contactIds)
+                .order("enrolled_at", { ascending: false });
+
+            // Build map: contact_id → most recent enrollment
+            for (const e of enrollments || []) {
+                if (!enrollmentMap[e.contact_id]) {
+                    enrollmentMap[e.contact_id] = e;
+                }
+            }
+        }
+
+        // Transform
         const transformedContacts = (contacts || []).map((c: any) => {
-            const enrollments = c.sequence_enrollments || [];
-            const activeEnrollment = enrollments.find((e: any) => e.status === "active") || enrollments[0] || null;
+            const enrollment = enrollmentMap[c.id] || null;
             return {
                 id: c.id,
                 name: c.name,
@@ -99,12 +116,12 @@ export async function getPipelineData(clientId: string) {
                 total_calls: c.total_calls || 0,
                 custom_fields: c.custom_fields || {},
                 created_at: c.created_at,
-                enrollment: activeEnrollment
+                enrollment: enrollment
                     ? {
-                        id: activeEnrollment.id,
-                        status: activeEnrollment.status,
-                        source: activeEnrollment.enrollment_source,
-                        sequence_name: activeEnrollment.sequences?.name || null,
+                        id: enrollment.id,
+                        status: enrollment.status,
+                        source: enrollment.enrollment_source,
+                        sequence_name: enrollment.sequences?.name || null,
                     }
                     : null,
             };
