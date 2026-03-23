@@ -177,7 +177,7 @@ export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: Prompt
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50/80">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-violet-600" />
-            <span className="text-sm font-semibold text-gray-900">AI Prompt Editor</span>
+            <span className="text-sm font-semibold text-gray-900">Edit with AI</span>
             {showSaved && (
               <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full animate-in fade-in duration-200">
                 Saved
