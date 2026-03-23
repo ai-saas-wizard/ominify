@@ -240,7 +240,10 @@ export async function endCall(callId: string, apiKey?: string): Promise<boolean>
 
 export async function updateAgent(id: string, data: Partial<VapiAgent>, apiKey?: string): Promise<VapiAgent | null> {
     const token = apiKey || DEFAULT_KEY;
-    if (!token) return null;
+    if (!token) {
+        console.error("updateAgent: No VAPI API key available");
+        return null;
+    }
 
     try {
         const res = await fetch(`${VAPI_BASE_URL}/assistant/${id}`, {
@@ -253,7 +256,8 @@ export async function updateAgent(id: string, data: Partial<VapiAgent>, apiKey?:
         });
 
         if (!res.ok) {
-            console.error("Failed to update agent", await res.text());
+            const errorText = await res.text();
+            console.error(`Failed to update agent (${res.status}):`, errorText);
             return null;
         }
         return await res.json();

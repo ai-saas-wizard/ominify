@@ -133,7 +133,7 @@ export default async function AgentEditorPage(props: {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Editor (main) */}
                         <div className="lg:col-span-2">
-                            <AgentEditor agent={agent} voices={voices} />
+                            <AgentEditor agent={agent} voices={voices} clientId={params.clientId} />
                         </div>
 
                         {/* Sidebar */}

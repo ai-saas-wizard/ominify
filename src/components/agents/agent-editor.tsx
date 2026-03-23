@@ -53,6 +53,7 @@ function SubmitButton() {
 interface AgentEditorProps {
   agent: VapiAgent;
   voices: VapiVoice[];
+  clientId: string;
 }
 
 const LANGUAGES = [
@@ -99,7 +100,7 @@ const tabVariants = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
+export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
   const [activeTab, setActiveTab] = useState<string>("profile");
   const [showCopilot, setShowCopilot] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -163,7 +164,7 @@ export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
         {/* ── Form ────────────────────────────────────────────────────── */}
         <form
           action={async (formData) => {
-            const result = await updateAgentAction(agent.id, formData);
+            const result = await updateAgentAction(agent.id, clientId, formData);
             if (result.success) {
               setSaved(true);
               setTimeout(() => setSaved(false), 2500);
@@ -416,7 +417,7 @@ export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
               }
               const formData = new FormData();
               formData.set("systemPrompt", newPrompt);
-              const result = await updateAgentAction(agent.id, formData);
+              const result = await updateAgentAction(agent.id, clientId, formData);
               if (!result.success) throw new Error(result.error);
             }}
             onClose={() => setShowCopilot(false)}
