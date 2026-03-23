@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { Save, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { fadeIn } from "@/lib/settings-animations";
 
 interface UpdateProfileFormProps {
     currentName: string;
@@ -38,51 +43,47 @@ export function UpdateProfileForm({ currentName, currentEmail, currentBusinessNa
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Label htmlFor="profile-business-name" className="mb-1.5 block">
                     Business Name
-                </label>
-                <input
+                </Label>
+                <Input
+                    id="profile-business-name"
                     type="text"
                     value={businessName}
                     onChange={(e) => setBusinessName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                     placeholder="e.g. Acme Corp"
                 />
                 <p className="mt-1 text-xs text-gray-500">This name is displayed in the sidebar and used across your dashboard.</p>
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Label htmlFor="profile-name" className="mb-1.5 block">
                     Display Name
-                </label>
-                <input
+                </Label>
+                <Input
+                    id="profile-name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                     placeholder="Your name"
                 />
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Label htmlFor="profile-email" className="mb-1.5 block">
                     Email Address
-                </label>
-                <input
+                </Label>
+                <Input
+                    id="profile-email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                     placeholder="your@email.com"
                 />
             </div>
 
             <div className="flex items-center gap-3">
-                <button
-                    type="submit"
-                    disabled={!hasChanges || isSaving}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <Button type="submit" disabled={!hasChanges || isSaving}>
                     {isSaving ? (
                         <>
                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -94,10 +95,20 @@ export function UpdateProfileForm({ currentName, currentEmail, currentBusinessNa
                             Save Changes
                         </>
                     )}
-                </button>
-                {saved && (
-                    <span className="text-sm text-green-600">✓ Saved successfully</span>
-                )}
+                </Button>
+                <AnimatePresence>
+                    {saved && (
+                        <motion.span
+                            variants={fadeIn}
+                            initial="hidden"
+                            animate="show"
+                            exit="exit"
+                            className="text-sm text-green-600"
+                        >
+                            Saved successfully
+                        </motion.span>
+                    )}
+                </AnimatePresence>
             </div>
         </form>
     );

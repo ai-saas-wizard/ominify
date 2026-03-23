@@ -1,8 +1,34 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Webhook, MoreVertical, Trash2, Power, ExternalLink } from "lucide-react";
+import { Plus, Webhook, MoreVertical, Trash2, ExternalLink } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { AddWebhookModal } from "./add-webhook-modal";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+    Table,
+    TableHeader,
+    TableBody,
+    TableHead,
+    TableRow,
+    TableCell,
+} from "@/components/ui/table";
+import {
+    AlertDialog,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import { staggerContainer, staggerItem } from "@/lib/settings-animations";
 
 interface Agent {
     id: string;
@@ -24,7 +50,6 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
     const [webhooks, setWebhooks] = useState<WebhookData[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
-    const [actionMenuId, setActionMenuId] = useState<string | null>(null);
 
     const fetchWebhooks = async () => {
         try {
@@ -55,12 +80,9 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
         } catch (error) {
             console.error('Error toggling webhook:', error);
         }
-        setActionMenuId(null);
     };
 
     const handleDelete = async (webhookId: string) => {
-        if (!confirm('Are you sure you want to delete this webhook?')) return;
-
         try {
             await fetch(`/api/client/${clientId}/webhooks/${webhookId}`, {
                 method: 'DELETE'
@@ -69,7 +91,6 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
         } catch (error) {
             console.error('Error deleting webhook:', error);
         }
-        setActionMenuId(null);
     };
 
     const formatDate = (dateStr: string) => {
@@ -84,18 +105,18 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
 
     if (loading) {
         return (
-            <div className="bg-white rounded-xl border border-gray-200 p-8">
-                <div className="animate-pulse space-y-4">
-                    <div className="h-6 bg-gray-200 rounded w-1/4"></div>
-                    <div className="h-20 bg-gray-100 rounded"></div>
+            <Card className="p-8">
+                <div className="space-y-4">
+                    <Skeleton className="h-6 w-1/4" />
+                    <Skeleton className="h-20 w-full" />
                 </div>
-            </div>
+            </Card>
         );
     }
 
     return (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <Card className="overflow-hidden">
+            <CardHeader className="border-b border-gray-100 flex-row items-center justify-between space-y-0 px-6 py-4">
                 <div>
                     <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                         <Webhook className="w-5 h-5 text-indigo-600" />
@@ -105,14 +126,15 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
                         Set up and manage webhook endpoints to receive real-time event notifications
                     </p>
                 </div>
-                <button
+                <Button
                     onClick={() => setShowAddModal(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+                    variant="secondary"
+                    className="bg-gray-900 text-white hover:bg-gray-800"
                 >
                     <Plus className="w-4 h-4" />
                     Add Webhook
-                </button>
-            </div>
+                </Button>
+            </CardHeader>
 
             {webhooks.length === 0 ? (
                 <div className="p-12 text-center">
@@ -121,108 +143,125 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
                     <p className="text-gray-500 text-sm mb-4">
                         Create a webhook to receive real-time call notifications
                     </p>
-                    <button
+                    <Button
                         onClick={() => setShowAddModal(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                        className="bg-indigo-600 hover:bg-indigo-700"
                     >
                         <Plus className="w-4 h-4" />
                         Create your first webhook
-                    </button>
+                    </Button>
                 </div>
             ) : (
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
-                                <th className="px-6 py-3 text-left font-medium">Name</th>
-                                <th className="px-6 py-3 text-left font-medium">URL</th>
-                                <th className="px-6 py-3 text-left font-medium">Agents</th>
-                                <th className="px-6 py-3 text-left font-medium">Created At</th>
-                                <th className="px-6 py-3 text-center font-medium">Status</th>
-                                <th className="px-6 py-3 text-right font-medium"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {webhooks.map((webhook) => (
-                                <tr key={webhook.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <span className="font-medium text-gray-900">{webhook.name}</span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-1.5 text-sm text-gray-600 max-w-[200px] truncate">
-                                            <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
-                                            <span className="truncate">{webhook.url}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-1">
-                                            {webhook.agents.length === 0 ? (
-                                                <span className="text-xs text-gray-400">All agents</span>
-                                            ) : webhook.agents.length <= 2 ? (
-                                                webhook.agents.map(agent => (
-                                                    <span key={agent.id} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
-                                                        {agent.name}
-                                                    </span>
-                                                ))
-                                            ) : (
-                                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                                                    {webhook.agents.length} agents
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-sm text-gray-500">
-                                        {formatDate(webhook.created_at)}
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <button
-                                            onClick={() => handleToggleActive(webhook.id, webhook.is_active)}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${webhook.is_active ? 'bg-indigo-600' : 'bg-gray-200'
-                                                }`}
-                                        >
-                                            <span
-                                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${webhook.is_active ? 'translate-x-6' : 'translate-x-1'
-                                                    }`}
-                                            />
-                                        </button>
-                                    </td>
-                                    <td className="px-6 py-4 text-right relative">
-                                        <button
-                                            onClick={() => setActionMenuId(actionMenuId === webhook.id ? null : webhook.id)}
-                                            className="p-1 hover:bg-gray-100 rounded"
-                                        >
-                                            <MoreVertical className="w-4 h-4 text-gray-400" />
-                                        </button>
-                                        {actionMenuId === webhook.id && (
-                                            <div className="absolute right-6 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                                                <button
-                                                    onClick={() => handleDelete(webhook.id)}
-                                                    className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                    Delete
-                                                </button>
+                <CardContent className="p-0">
+                    <Table>
+                        <TableHeader>
+                            <TableRow className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
+                                <TableHead className="px-6 py-3 font-medium">Name</TableHead>
+                                <TableHead className="px-6 py-3 font-medium">URL</TableHead>
+                                <TableHead className="px-6 py-3 font-medium">Agents</TableHead>
+                                <TableHead className="px-6 py-3 font-medium">Created At</TableHead>
+                                <TableHead className="px-6 py-3 font-medium text-center">Status</TableHead>
+                                <TableHead className="px-6 py-3 font-medium text-right"></TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            <AnimatePresence>
+                                {webhooks.map((webhook, index) => (
+                                    <motion.tr
+                                        key={webhook.id}
+                                        initial={{ opacity: 0, y: 12 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{
+                                            delay: index * 0.05,
+                                            type: "spring",
+                                            stiffness: 280,
+                                            damping: 22,
+                                        }}
+                                        className="border-b transition-colors hover:bg-gray-50/50"
+                                    >
+                                        <TableCell className="px-6 py-4">
+                                            <span className="font-medium text-gray-900">{webhook.name}</span>
+                                        </TableCell>
+                                        <TableCell className="px-6 py-4">
+                                            <div className="flex items-center gap-1.5 text-sm text-gray-600 max-w-[200px] truncate">
+                                                <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
+                                                <span className="truncate">{webhook.url}</span>
                                             </div>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                        </TableCell>
+                                        <TableCell className="px-6 py-4">
+                                            <div className="flex items-center gap-1">
+                                                {webhook.agents.length === 0 ? (
+                                                    <span className="text-xs text-gray-400">All agents</span>
+                                                ) : webhook.agents.length <= 2 ? (
+                                                    webhook.agents.map(agent => (
+                                                        <Badge key={agent.id} className="bg-indigo-50 text-indigo-700 border-indigo-200">
+                                                            {agent.name}
+                                                        </Badge>
+                                                    ))
+                                                ) : (
+                                                    <Badge variant="secondary">
+                                                        {webhook.agents.length} agents
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="px-6 py-4 text-sm text-gray-500">
+                                            {formatDate(webhook.created_at)}
+                                        </TableCell>
+                                        <TableCell className="px-6 py-4 text-center">
+                                            <Switch
+                                                checked={webhook.is_active}
+                                                onCheckedChange={() => handleToggleActive(webhook.id, webhook.is_active)}
+                                                className="data-[state=checked]:bg-indigo-600"
+                                            />
+                                        </TableCell>
+                                        <TableCell className="px-6 py-4 text-right">
+                                            <AlertDialog>
+                                                <AlertDialogTrigger asChild>
+                                                    <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </AlertDialogTrigger>
+                                                <AlertDialogContent>
+                                                    <AlertDialogHeader>
+                                                        <AlertDialogTitle>Delete webhook</AlertDialogTitle>
+                                                        <AlertDialogDescription>
+                                                            Are you sure you want to delete &quot;{webhook.name}&quot;? This action cannot be undone.
+                                                        </AlertDialogDescription>
+                                                    </AlertDialogHeader>
+                                                    <AlertDialogFooter>
+                                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                        <AlertDialogAction
+                                                            onClick={() => handleDelete(webhook.id)}
+                                                            className="bg-red-600 hover:bg-red-700"
+                                                        >
+                                                            Delete
+                                                        </AlertDialogAction>
+                                                    </AlertDialogFooter>
+                                                </AlertDialogContent>
+                                            </AlertDialog>
+                                        </TableCell>
+                                    </motion.tr>
+                                ))}
+                            </AnimatePresence>
+                        </TableBody>
+                    </Table>
+                </CardContent>
             )}
 
-            {showAddModal && (
-                <AddWebhookModal
-                    clientId={clientId}
-                    agents={agents}
-                    onClose={() => setShowAddModal(false)}
-                    onSuccess={() => {
-                        setShowAddModal(false);
-                        fetchWebhooks();
-                    }}
-                />
-            )}
-        </div>
+            <AnimatePresence>
+                {showAddModal && (
+                    <AddWebhookModal
+                        clientId={clientId}
+                        agents={agents}
+                        onClose={() => setShowAddModal(false)}
+                        onSuccess={() => {
+                            setShowAddModal(false);
+                            fetchWebhooks();
+                        }}
+                    />
+                )}
+            </AnimatePresence>
+        </Card>
     );
 }

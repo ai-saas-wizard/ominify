@@ -3,6 +3,7 @@ import { listAgents } from "@/lib/vapi";
 import { WebhookManager } from "@/components/webhooks/webhook-manager";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { PageTransition } from "@/components/ui/page-transition";
 
 async function getClient(clientId: string) {
     const { data } = await supabase
@@ -44,25 +45,27 @@ export default async function WebhooksSettingsPage({
     const agents = await getAgentsFromVapi(client.vapi_key);
 
     return (
-        <div className="p-4 lg:p-8 space-y-6">
-            {/* Header */}
-            <div className="flex items-center gap-4">
-                <Link
-                    href={`/client/${clientId}/settings`}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                    <ArrowLeft className="w-5 h-5 text-gray-600" />
-                </Link>
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Webhooks</h1>
-                    <p className="text-gray-500 text-sm">
-                        Manage webhook endpoints for real-time call notifications
-                    </p>
+        <PageTransition>
+            <div className="p-4 lg:p-8 space-y-6">
+                {/* Header */}
+                <div className="flex items-center gap-4">
+                    <Link
+                        href={`/client/${clientId}/settings`}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                        <ArrowLeft className="w-5 h-5 text-gray-600" />
+                    </Link>
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Webhooks</h1>
+                        <p className="text-gray-500 text-sm">
+                            Manage webhook endpoints for real-time call notifications
+                        </p>
+                    </div>
                 </div>
-            </div>
 
-            {/* Webhook Manager */}
-            <WebhookManager clientId={clientId} agents={agents} />
-        </div>
+                {/* Webhook Manager */}
+                <WebhookManager clientId={clientId} agents={agents} />
+            </div>
+        </PageTransition>
     );
 }

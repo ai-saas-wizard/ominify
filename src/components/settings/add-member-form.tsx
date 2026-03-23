@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { UserPlus, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { fadeIn } from "@/lib/settings-animations";
 
 interface AddMemberFormProps {
     addMember: (formData: FormData) => Promise<void>;
@@ -46,42 +52,41 @@ export function AddMemberForm({ addMember }: AddMemberFormProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="member-email" className="mb-1.5 block">
                         Email Address *
-                    </label>
-                    <input
+                    </Label>
+                    <Input
+                        id="member-email"
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                         placeholder="team@example.com"
                         required
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="member-name" className="mb-1.5 block">
                         Name (optional)
-                    </label>
-                    <input
+                    </Label>
+                    <Input
+                        id="member-name"
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                         placeholder="John Doe"
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Role
-                    </label>
-                    <select
-                        value={role}
-                        onChange={(e) => setRole(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
-                    >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                    </select>
+                    <Label className="mb-1.5 block">Role</Label>
+                    <Select value={role} onValueChange={setRole}>
+                        <SelectTrigger>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="member">Member</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 
@@ -89,23 +94,35 @@ export function AddMemberForm({ addMember }: AddMemberFormProps) {
                 The invited user will be able to access this account after signing in with this email.
             </p>
 
-            {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                    {error}
-                </div>
-            )}
+            <AnimatePresence>
+                {error && (
+                    <motion.div
+                        variants={fadeIn}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                        className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600"
+                    >
+                        {error}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-            {success && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-600">
-                    ✓ Team member invited successfully
-                </div>
-            )}
+            <AnimatePresence>
+                {success && (
+                    <motion.div
+                        variants={fadeIn}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                        className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-600"
+                    >
+                        Team member invited successfully
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-            <button
-                type="submit"
-                disabled={!email || isSaving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <Button type="submit" disabled={!email || isSaving}>
                 {isSaving ? (
                     <>
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -117,7 +134,7 @@ export function AddMemberForm({ addMember }: AddMemberFormProps) {
                         Invite Member
                     </>
                 )}
-            </button>
+            </Button>
         </form>
     );
 }

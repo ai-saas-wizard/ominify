@@ -13,6 +13,23 @@ import {
     AlertTriangle,
     Info,
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import {
+    AlertDialog,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import { fadeIn, expandCollapse } from "@/lib/settings-animations";
 import type { EmailAccountConfig } from "@/app/actions/email-config-actions";
 
 interface EmailConfigFormProps {
@@ -58,7 +75,6 @@ export function EmailConfigForm({
     const [showPassword, setShowPassword] = useState(false);
     const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const [testMessage, setTestMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [isPending, startTransition] = useTransition();
     const [isTesting, setIsTesting] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -134,7 +150,6 @@ export function EmailConfigForm({
                 setSmtpSecure(false);
                 setReplyToEmail("");
                 setDailySendLimit(500);
-                setShowDeleteConfirm(false);
                 setSaveMessage({ type: "success", text: "Email configuration removed" });
             } else {
                 setSaveMessage({ type: "error", text: result.error || "Failed to delete" });
@@ -148,9 +163,9 @@ export function EmailConfigForm({
         <form onSubmit={handleSave} className="space-y-8">
             {/* Provider Selection */}
             <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <Label className="block text-sm font-semibold text-gray-900 mb-2">
                     Email Provider
-                </label>
+                </Label>
                 <div className="flex gap-3">
                     <button
                         type="button"
@@ -180,9 +195,9 @@ export function EmailConfigForm({
 
             {/* Quick Preset Selector */}
             <div>
-                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                <Label className="block text-sm font-semibold text-gray-900 mb-2">
                     Quick Setup
-                </label>
+                </Label>
                 <div className="flex flex-wrap gap-2">
                     {Object.keys(SMTP_PRESETS).map((key) => (
                         <button
@@ -204,31 +219,31 @@ export function EmailConfigForm({
             {/* From Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="from-email" className="mb-1.5 block">
                         From Email <span className="text-red-500">*</span>
-                    </label>
-                    <input
+                    </Label>
+                    <Input
+                        id="from-email"
                         type="email"
                         value={fromEmail}
                         onChange={(e) => setFromEmail(e.target.value)}
                         required
                         placeholder="info@yourbusiness.com"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                     />
                     <p className="text-xs text-gray-500 mt-1">
                         The email address your sequences will send from
                     </p>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="from-name" className="mb-1.5 block">
                         From Name
-                    </label>
-                    <input
+                    </Label>
+                    <Input
+                        id="from-name"
                         type="text"
                         value={fromName}
                         onChange={(e) => setFromName(e.target.value)}
                         placeholder="Your Business Name"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                     />
                     <p className="text-xs text-gray-500 mt-1">
                         Display name shown to recipients
@@ -245,56 +260,59 @@ export function EmailConfigForm({
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="smtp-host" className="mb-1.5 block">
                             SMTP Host
-                        </label>
-                        <input
+                        </Label>
+                        <Input
+                            id="smtp-host"
                             type="text"
                             value={smtpHost}
                             onChange={(e) => setSmtpHost(e.target.value)}
                             placeholder="smtp.gmail.com"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                            className="font-mono"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="smtp-port" className="mb-1.5 block">
                             Port
-                        </label>
-                        <input
+                        </Label>
+                        <Input
+                            id="smtp-port"
                             type="number"
                             value={smtpPort}
                             onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
                             min={1}
                             max={65535}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                            className="font-mono"
                         />
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="smtp-user" className="mb-1.5 block">
                             Username
-                        </label>
-                        <input
+                        </Label>
+                        <Input
+                            id="smtp-user"
                             type="text"
                             value={smtpUser}
                             onChange={(e) => setSmtpUser(e.target.value)}
                             placeholder="your-email@gmail.com"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="smtp-pass" className="mb-1.5 block">
                             Password / App Password
-                        </label>
+                        </Label>
                         <div className="relative">
-                            <input
+                            <Input
+                                id="smtp-pass"
                                 type={showPassword ? "text" : "password"}
                                 value={smtpPass}
                                 onChange={(e) => setSmtpPass(e.target.value)}
                                 placeholder={config?.has_smtp_password ? "Leave blank to keep current" : "Enter password"}
-                                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                                className="pr-10"
                             />
                             <button
                                 type="button"
@@ -313,22 +331,18 @@ export function EmailConfigForm({
                     </div>
                 </div>
 
-                {/* SSL / Security */}
+                {/* SSL / Security — ShadCN Switch */}
                 <div className="flex items-center gap-3">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={smtpSecure}
-                            onChange={(e) => {
-                                setSmtpSecure(e.target.checked);
-                                // Auto-adjust port
-                                if (e.target.checked && smtpPort === 587) setSmtpPort(465);
-                                if (!e.target.checked && smtpPort === 465) setSmtpPort(587);
-                            }}
-                            className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
-                    </label>
+                    <Switch
+                        checked={smtpSecure}
+                        onCheckedChange={(checked) => {
+                            setSmtpSecure(checked);
+                            // Auto-adjust port
+                            if (checked && smtpPort === 587) setSmtpPort(465);
+                            if (!checked && smtpPort === 465) setSmtpPort(587);
+                        }}
+                        className="data-[state=checked]:bg-violet-600"
+                    />
                     <div>
                         <span className="text-sm font-medium text-gray-700">Use SSL/TLS</span>
                         <p className="text-xs text-gray-500">
@@ -344,31 +358,31 @@ export function EmailConfigForm({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="reply-to" className="mb-1.5 block">
                             Reply-To Email
-                        </label>
-                        <input
+                        </Label>
+                        <Input
+                            id="reply-to"
                             type="email"
                             value={replyToEmail}
                             onChange={(e) => setReplyToEmail(e.target.value)}
                             placeholder="Same as From Email"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                         />
                         <p className="text-xs text-gray-500 mt-1">
                             Where replies go (defaults to From Email)
                         </p>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label htmlFor="send-limit" className="mb-1.5 block">
                             Daily Send Limit
-                        </label>
-                        <input
+                        </Label>
+                        <Input
+                            id="send-limit"
                             type="number"
                             value={dailySendLimit}
                             onChange={(e) => setDailySendLimit(parseInt(e.target.value) || 500)}
                             min={1}
                             max={10000}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                         />
                         <p className="text-xs text-gray-500 mt-1">
                             Max emails per day (prevent spam flags)
@@ -378,63 +392,83 @@ export function EmailConfigForm({
             </div>
 
             {/* Gmail App Password Info */}
-            {smtpHost === "smtp.gmail.com" && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
-                    <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div className="text-sm text-blue-800">
-                        <p className="font-medium mb-1">Using Gmail SMTP?</p>
-                        <p>
-                            You need to use an{" "}
-                            <strong>App Password</strong> instead of your regular Gmail password.
-                            Go to{" "}
-                            <a
-                                href="https://myaccount.google.com/apppasswords"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline font-medium"
-                            >
-                                Google Account &rarr; App Passwords
-                            </a>{" "}
-                            to generate one. 2FA must be enabled.
-                        </p>
-                    </div>
-                </div>
-            )}
+            <AnimatePresence>
+                {smtpHost === "smtp.gmail.com" && (
+                    <motion.div
+                        variants={expandCollapse}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                        className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3"
+                    >
+                        <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-blue-800">
+                            <p className="font-medium mb-1">Using Gmail SMTP?</p>
+                            <p>
+                                You need to use an{" "}
+                                <strong>App Password</strong> instead of your regular Gmail password.
+                                Go to{" "}
+                                <a
+                                    href="https://myaccount.google.com/apppasswords"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="underline font-medium"
+                                >
+                                    Google Account &rarr; App Passwords
+                                </a>{" "}
+                                to generate one. 2FA must be enabled.
+                            </p>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Status Messages */}
-            {saveMessage && (
-                <div
-                    className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
-                        saveMessage.type === "success"
-                            ? "bg-green-50 border border-green-200 text-green-800"
-                            : "bg-red-50 border border-red-200 text-red-800"
-                    }`}
-                >
-                    {saveMessage.type === "success" ? (
-                        <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                    ) : (
-                        <XCircle className="w-4 h-4 flex-shrink-0" />
-                    )}
-                    {saveMessage.text}
-                </div>
-            )}
+            <AnimatePresence>
+                {saveMessage && (
+                    <motion.div
+                        variants={fadeIn}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                        className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
+                            saveMessage.type === "success"
+                                ? "bg-green-50 border border-green-200 text-green-800"
+                                : "bg-red-50 border border-red-200 text-red-800"
+                        }`}
+                    >
+                        {saveMessage.type === "success" ? (
+                            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                        ) : (
+                            <XCircle className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        {saveMessage.text}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-            {testMessage && (
-                <div
-                    className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
-                        testMessage.type === "success"
-                            ? "bg-green-50 border border-green-200 text-green-800"
-                            : "bg-red-50 border border-red-200 text-red-800"
-                    }`}
-                >
-                    {testMessage.type === "success" ? (
-                        <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                    ) : (
-                        <XCircle className="w-4 h-4 flex-shrink-0" />
-                    )}
-                    {testMessage.text}
-                </div>
-            )}
+            <AnimatePresence>
+                {testMessage && (
+                    <motion.div
+                        variants={fadeIn}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                        className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
+                            testMessage.type === "success"
+                                ? "bg-green-50 border border-green-200 text-green-800"
+                                : "bg-red-50 border border-red-200 text-red-800"
+                        }`}
+                    >
+                        {testMessage.type === "success" ? (
+                            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                        ) : (
+                            <XCircle className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        {testMessage.text}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Verification Status */}
             {config && (
@@ -468,11 +502,7 @@ export function EmailConfigForm({
             <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <div className="flex items-center gap-3">
                     {/* Save Button */}
-                    <button
-                        type="submit"
-                        disabled={isPending || !fromEmail}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                    >
+                    <Button type="submit" disabled={isPending || !fromEmail}>
                         {isPending ? (
                             <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -484,15 +514,15 @@ export function EmailConfigForm({
                                 Save Configuration
                             </>
                         )}
-                    </button>
+                    </Button>
 
                     {/* Test Connection Button */}
                     {config && (
-                        <button
+                        <Button
                             type="button"
+                            variant="outline"
                             onClick={handleTest}
                             disabled={isTesting}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {isTesting ? (
                                 <>
@@ -505,43 +535,46 @@ export function EmailConfigForm({
                                     Test Connection
                                 </>
                             )}
-                        </button>
+                        </Button>
                     )}
                 </div>
 
                 {/* Delete Button */}
                 {config && (
-                    <div>
-                        {showDeleteConfirm ? (
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-500">Are you sure?</span>
-                                <button
-                                    type="button"
-                                    onClick={handleDelete}
-                                    disabled={isDeleting}
-                                    className="text-sm text-red-600 hover:text-red-800 font-medium"
-                                >
-                                    {isDeleting ? "Removing..." : "Yes, remove"}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowDeleteConfirm(false)}
-                                    className="text-sm text-gray-500 hover:text-gray-700"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={() => setShowDeleteConfirm(true)}
-                                className="inline-flex items-center gap-1.5 text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
-                            >
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button type="button" variant="link" className="text-red-600 hover:text-red-800">
                                 <Trash2 className="w-4 h-4" />
                                 Remove Configuration
-                            </button>
-                        )}
-                    </div>
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Remove email configuration</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will delete your SMTP settings. Email steps in your sequences
+                                    will stop working until you reconfigure.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                    onClick={handleDelete}
+                                    disabled={isDeleting}
+                                    className="bg-red-600 hover:bg-red-700"
+                                >
+                                    {isDeleting ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                            Removing...
+                                        </>
+                                    ) : (
+                                        "Yes, remove"
+                                    )}
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                 )}
             </div>
         </form>

@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { Save, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { fadeIn } from "@/lib/settings-animations";
 
 interface UpdateVapiKeyFormProps {
     currentKey: string;
@@ -31,22 +36,19 @@ export function UpdateVapiKeyForm({ currentKey, updateVapiKey }: UpdateVapiKeyFo
         setTimeout(() => setSaved(false), 3000);
     };
 
-    const maskedKey = vapiKey
-        ? `${vapiKey.slice(0, 8)}${'•'.repeat(20)}${vapiKey.slice(-4)}`
-        : '';
-
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Label htmlFor="vapi-key" className="mb-1.5 block">
                     API Key
-                </label>
+                </Label>
                 <div className="relative">
-                    <input
+                    <Input
+                        id="vapi-key"
                         type={showKey ? "text" : "password"}
                         value={vapiKey}
                         onChange={(e) => setVapiKey(e.target.value)}
-                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 font-mono text-sm"
+                        className="pr-10 font-mono"
                         placeholder="Enter your Vapi API key"
                     />
                     <button
@@ -66,17 +68,13 @@ export function UpdateVapiKeyForm({ currentKey, updateVapiKey }: UpdateVapiKeyFo
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                     <p className="text-sm text-amber-800">
-                        No API key configured. Your agents will use the platform's default key.
+                        No API key configured. Your agents will use the platform&apos;s default key.
                     </p>
                 </div>
             )}
 
             <div className="flex items-center gap-3">
-                <button
-                    type="submit"
-                    disabled={!hasChanges || isSaving}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <Button type="submit" disabled={!hasChanges || isSaving}>
                     {isSaving ? (
                         <>
                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -88,10 +86,20 @@ export function UpdateVapiKeyForm({ currentKey, updateVapiKey }: UpdateVapiKeyFo
                             Save API Key
                         </>
                     )}
-                </button>
-                {saved && (
-                    <span className="text-sm text-green-600">✓ Saved successfully</span>
-                )}
+                </Button>
+                <AnimatePresence>
+                    {saved && (
+                        <motion.span
+                            variants={fadeIn}
+                            initial="hidden"
+                            animate="show"
+                            exit="exit"
+                            className="text-sm text-green-600"
+                        >
+                            Saved successfully
+                        </motion.span>
+                    )}
+                </AnimatePresence>
             </div>
         </form>
     );

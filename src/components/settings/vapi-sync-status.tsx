@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { RefreshCw, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { fadeIn } from "@/lib/settings-animations";
 
 export function VapiSyncStatus({ clientId }: { clientId: string }) {
     const [status, setStatus] = useState<{
@@ -50,18 +55,18 @@ export function VapiSyncStatus({ clientId }: { clientId: string }) {
     };
 
     return (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
+        <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
                 <div>
                     <h3 className="text-lg font-semibold text-gray-900">Vapi Integration</h3>
                     <p className="text-sm text-gray-500">
                         Link your Vapi account to enable contact auto-creation
                     </p>
                 </div>
-                <button
+                <Button
                     onClick={handleSync}
                     disabled={syncing}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                    className="bg-indigo-600 hover:bg-indigo-700"
                 >
                     {syncing ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -69,46 +74,59 @@ export function VapiSyncStatus({ clientId }: { clientId: string }) {
                         <RefreshCw className="w-4 h-4" />
                     )}
                     Sync
-                </button>
-            </div>
+                </Button>
+            </CardHeader>
 
-            {error && (
-                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 mb-4">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    {error}
+            <CardContent className="space-y-4">
+                <AnimatePresence>
+                    {error && (
+                        <motion.div
+                            variants={fadeIn}
+                            initial="hidden"
+                            animate="show"
+                            exit="exit"
+                            className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600"
+                        >
+                            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                            {error}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                <div className="flex items-center gap-3">
+                    {status?.isConfigured ? (
+                        <>
+                            <CheckCircle className="w-5 h-5 text-green-500" />
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <p className="text-sm font-medium text-gray-900">Connected</p>
+                                    <Badge className="bg-green-100 text-green-700 border-green-200">Active</Badge>
+                                </div>
+                                <p className="text-xs text-gray-500 font-mono">
+                                    Org ID: {status.orgId}
+                                </p>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <AlertCircle className="w-5 h-5 text-amber-500" />
+                            <div>
+                                <p className="text-sm font-medium text-gray-900">Not Connected</p>
+                                <p className="text-xs text-gray-500">
+                                    Click Sync to link your Vapi organization
+                                </p>
+                            </div>
+                        </>
+                    )}
                 </div>
-            )}
 
-            <div className="flex items-center gap-3">
-                {status?.isConfigured ? (
-                    <>
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                        <div>
-                            <p className="text-sm font-medium text-gray-900">Connected</p>
-                            <p className="text-xs text-gray-500 font-mono">
-                                Org ID: {status.orgId}
-                            </p>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <AlertCircle className="w-5 h-5 text-amber-500" />
-                        <div>
-                            <p className="text-sm font-medium text-gray-900">Not Connected</p>
-                            <p className="text-xs text-gray-500">
-                                Click Sync to link your Vapi organization
-                            </p>
-                        </div>
-                    </>
-                )}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-100">
-                <p className="text-xs text-gray-500">
-                    <strong>Why sync?</strong> When calls come in, we use the Vapi Org ID to identify
-                    which client the call belongs to, enabling automatic contact creation.
-                </p>
-            </div>
-        </div>
+                <div className="pt-4 border-t border-gray-100">
+                    <p className="text-xs text-gray-500">
+                        <strong>Why sync?</strong> When calls come in, we use the Vapi Org ID to identify
+                        which client the call belongs to, enabling automatic contact creation.
+                    </p>
+                </div>
+            </CardContent>
+        </Card>
     );
 }

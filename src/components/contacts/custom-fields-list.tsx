@@ -2,6 +2,25 @@
 
 import { useState } from "react";
 import { Plus, Trash2, Type, Hash, Mail, Calendar, Link as LinkIcon, CheckSquare, MapPin, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    AlertDialog,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import { staggerContainer, staggerItem, expandCollapse } from "@/lib/settings-animations";
 
 interface CustomField {
     id: string;
@@ -65,8 +84,6 @@ export function CustomFieldsList({
     };
 
     const handleDeleteField = async (fieldId: string) => {
-        if (!confirm('Delete this custom field? This will remove it from all contacts.')) return;
-
         setDeleting(fieldId);
         try {
             const res = await fetch(`/api/client/${clientId}/contact-fields/${fieldId}`, {
@@ -89,66 +106,79 @@ export function CustomFieldsList({
     };
 
     return (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <Card className="overflow-hidden">
+            <CardHeader className="border-b border-gray-100 flex-row items-center justify-between space-y-0 px-6 py-4">
                 <div>
                     <h3 className="font-semibold text-gray-900">Custom Properties</h3>
                     <p className="text-sm text-gray-500">{fields.length} field{fields.length !== 1 ? 's' : ''}</p>
                 </div>
-                <button
+                <Button
                     onClick={() => setShowAddForm(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
+                    className="bg-indigo-600 hover:bg-indigo-700"
                 >
                     <Plus className="w-4 h-4" />
                     Add Field
-                </button>
-            </div>
+                </Button>
+            </CardHeader>
 
-            {showAddForm && (
-                <div className="px-6 py-4 bg-gray-50 border-b border-gray-100">
-                    <div className="flex items-end gap-3">
-                        <div className="flex-1">
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Field Name</label>
-                            <input
-                                type="text"
-                                value={newFieldName}
-                                onChange={(e) => setNewFieldName(e.target.value)}
-                                placeholder="e.g. Company, Birthday"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                            />
+            <AnimatePresence>
+                {showAddForm && (
+                    <motion.div
+                        variants={expandCollapse}
+                        initial="hidden"
+                        animate="show"
+                        exit="exit"
+                    >
+                        <div className="px-6 py-4 bg-gray-50 border-b border-gray-100">
+                            <div className="flex items-end gap-3">
+                                <div className="flex-1">
+                                    <Label htmlFor="field-name" className="mb-1.5 block">Field Name</Label>
+                                    <Input
+                                        id="field-name"
+                                        type="text"
+                                        value={newFieldName}
+                                        onChange={(e) => setNewFieldName(e.target.value)}
+                                        placeholder="e.g. Company, Birthday"
+                                    />
+                                </div>
+                                <div className="w-40">
+                                    <Label className="mb-1.5 block">Type</Label>
+                                    <Select value={newFieldType} onValueChange={setNewFieldType}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {FIELD_TYPES.map(type => (
+                                                <SelectItem key={type.id} value={type.id}>
+                                                    {type.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <Button
+                                    onClick={handleAddField}
+                                    disabled={loading || !newFieldName.trim()}
+                                    variant="secondary"
+                                    className="bg-gray-900 text-white hover:bg-gray-800"
+                                >
+                                    {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                                    Add
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        setShowAddForm(false);
+                                        setNewFieldName('');
+                                    }}
+                                >
+                                    Cancel
+                                </Button>
+                            </div>
                         </div>
-                        <div className="w-40">
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Type</label>
-                            <select
-                                value={newFieldType}
-                                onChange={(e) => setNewFieldType(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                            >
-                                {FIELD_TYPES.map(type => (
-                                    <option key={type.id} value={type.id}>{type.label}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <button
-                            onClick={handleAddField}
-                            disabled={loading || !newFieldName.trim()}
-                            className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                            Add
-                        </button>
-                        <button
-                            onClick={() => {
-                                setShowAddForm(false);
-                                setNewFieldName('');
-                            }}
-                            className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-100"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {fields.length === 0 ? (
                 <div className="p-12 text-center">
@@ -159,41 +189,74 @@ export function CustomFieldsList({
                     </p>
                 </div>
             ) : (
-                <div className="divide-y divide-gray-100">
-                    {fields.map((field) => {
-                        const Icon = getFieldIcon(field.field_type);
-                        return (
-                            <div key={field.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-gray-100 rounded-lg">
-                                        <Icon className="w-4 h-4 text-gray-600" />
+                <motion.div
+                    variants={staggerContainer}
+                    initial="hidden"
+                    animate="show"
+                    className="divide-y divide-gray-100"
+                >
+                    <AnimatePresence>
+                        {fields.map((field) => {
+                            const Icon = getFieldIcon(field.field_type);
+                            return (
+                                <motion.div
+                                    key={field.id}
+                                    variants={staggerItem}
+                                    exit={{ opacity: 0, x: -20, transition: { duration: 0.2 } }}
+                                    layout
+                                    className="px-6 py-4 flex items-center justify-between hover:bg-gray-50"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-gray-100 rounded-lg">
+                                            <Icon className="w-4 h-4 text-gray-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-gray-900">{field.name}</p>
+                                            <p className="text-xs text-gray-500 font-mono">{field.field_key}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="font-medium text-gray-900">{field.name}</p>
-                                        <p className="text-xs text-gray-500 font-mono">{field.field_key}</p>
+                                    <div className="flex items-center gap-3">
+                                        <Badge variant="secondary" className="capitalize">
+                                            {field.field_type}
+                                        </Badge>
+                                        <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                                <button
+                                                    disabled={deleting === field.id}
+                                                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                                                >
+                                                    {deleting === field.id ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <Trash2 className="w-4 h-4" />
+                                                    )}
+                                                </button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                    <AlertDialogTitle>Delete custom field</AlertDialogTitle>
+                                                    <AlertDialogDescription>
+                                                        Delete &quot;{field.name}&quot;? This will remove it from all contacts.
+                                                    </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                    <AlertDialogAction
+                                                        onClick={() => handleDeleteField(field.id)}
+                                                        className="bg-red-600 hover:bg-red-700"
+                                                    >
+                                                        Delete
+                                                    </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                        </AlertDialog>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded capitalize">
-                                        {field.field_type}
-                                    </span>
-                                    <button
-                                        onClick={() => handleDeleteField(field.id)}
-                                        disabled={deleting === field.id}
-                                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                                    >
-                                        {deleting === field.id ? (
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                            <Trash2 className="w-4 h-4" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                                </motion.div>
+                            );
+                        })}
+                    </AnimatePresence>
+                </motion.div>
             )}
-        </div>
+        </Card>
     );
 }

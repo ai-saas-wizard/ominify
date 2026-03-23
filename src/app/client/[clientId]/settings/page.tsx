@@ -1,10 +1,10 @@
 import { supabase } from "@/lib/supabase";
 import { currentUser } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { ArrowLeft, User, Shield, Users, ChevronRight, Webhook, Plug, Mail } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { revalidatePath } from "next/cache";
-import { UpdateProfileForm } from "@/components/settings/update-profile-form";
 import { getClientMembers } from "@/lib/auth";
+import { SettingsHub } from "@/components/settings/settings-hub";
 
 
 export default async function ClientSettingsPage(props: {
@@ -64,9 +64,9 @@ export default async function ClientSettingsPage(props: {
     }
 
     return (
-        <div className="p-4 lg:p-8 max-w-4xl mx-auto space-y-8">
+        <div className="p-4 lg:p-8 max-w-4xl mx-auto">
             {/* Header */}
-            <div>
+            <div className="mb-8">
                 <Link
                     href={`/client/${clientId}`}
                     className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4"
@@ -78,151 +78,22 @@ export default async function ClientSettingsPage(props: {
                 <p className="mt-1 text-gray-600">Manage your account settings and preferences</p>
             </div>
 
-            {/* Account Details Card */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <div className="flex items-center gap-3">
-                        <Shield className="w-5 h-5 text-gray-600" />
-                        <h2 className="text-lg font-semibold text-gray-900">Account Details</h2>
-                    </div>
-                </div>
-                <div className="p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <p className="text-sm text-gray-500">Account ID</p>
-                            <p className="font-mono text-sm text-gray-900">{client.id}</p>
-                        </div>
-                        <div>
-                            <p className="text-sm text-gray-500">Member Since</p>
-                            <p className="text-gray-900">{new Date(client.created_at).toLocaleDateString()}</p>
-                        </div>
-                    </div>
-                    {clerkUser && (
-                        <div className="pt-4 border-t border-gray-100">
-                            <p className="text-sm text-gray-500 mb-2">Signed in as</p>
-                            <div className="flex items-center gap-3">
-                                {clerkUser.imageUrl && (
-                                    <img
-                                        src={clerkUser.imageUrl}
-                                        alt="Profile"
-                                        className="w-10 h-10 rounded-full"
-                                    />
-                                )}
-                                <div>
-                                    <p className="font-medium text-gray-900">
-                                        {clerkUser.firstName} {clerkUser.lastName}
-                                    </p>
-                                    <p className="text-sm text-gray-500">
-                                        {clerkUser.emailAddresses[0]?.emailAddress}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Profile Settings */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <div className="flex items-center gap-3">
-                        <User className="w-5 h-5 text-gray-600" />
-                        <h2 className="text-lg font-semibold text-gray-900">Profile Information</h2>
-                    </div>
-                </div>
-                <div className="p-6">
-                    <UpdateProfileForm
-                        currentName={client.name || ""}
-                        currentEmail={client.email || ""}
-                        currentBusinessName={tenantProfile?.legal_business_name || ""}
-                        updateProfile={updateProfile}
-                    />
-                </div>
-            </div>
-
-            {/* Team Members Link */}
-            <Link
-                href={`/client/${clientId}/settings/team`}
-                className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-violet-300 transition-colors"
-            >
-                <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-violet-100 rounded-lg">
-                            <Users className="w-5 h-5 text-violet-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
-                            <p className="text-sm text-gray-500">
-                                {members.length} member{members.length !== 1 ? 's' : ''} • Manage who can access this account
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                </div>
-            </Link>
-
-            {/* Email Configuration Link */}
-            <Link
-                href={`/client/${clientId}/settings/email`}
-                className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-emerald-300 transition-colors"
-            >
-                <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-emerald-100 rounded-lg">
-                            <Mail className="w-5 h-5 text-emerald-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Email (SMTP)</h2>
-                            <p className="text-sm text-gray-500">
-                                Configure SMTP settings for sequence emails
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                </div>
-            </Link>
-
-            {/* Integrations Link */}
-            <Link
-                href={`/client/${clientId}/settings/integrations`}
-                className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-blue-300 transition-colors"
-            >
-                <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 rounded-lg">
-                            <Plug className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Integrations</h2>
-                            <p className="text-sm text-gray-500">
-                                Connect Google Calendar and other services
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                </div>
-            </Link>
-
-            {/* Webhooks Link */}
-            <Link
-                href={`/client/${clientId}/settings/webhooks`}
-                className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-indigo-300 transition-colors"
-            >
-                <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-100 rounded-lg">
-                            <Webhook className="w-5 h-5 text-indigo-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Webhooks</h2>
-                            <p className="text-sm text-gray-500">
-                                {webhookCount || 0} webhook{webhookCount !== 1 ? 's' : ''} • Receive real-time call notifications
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                </div>
-            </Link>
+            <SettingsHub
+                clientId={clientId}
+                client={{ id: client.id, created_at: client.created_at }}
+                clerkUser={clerkUser ? {
+                    imageUrl: clerkUser.imageUrl,
+                    firstName: clerkUser.firstName,
+                    lastName: clerkUser.lastName,
+                    email: clerkUser.emailAddresses[0]?.emailAddress,
+                } : null}
+                memberCount={members.length}
+                webhookCount={webhookCount || 0}
+                updateProfile={updateProfile}
+                currentName={client.name || ""}
+                currentEmail={client.email || ""}
+                currentBusinessName={tenantProfile?.legal_business_name || ""}
+            />
         </div>
     );
 }
