@@ -1,8 +1,8 @@
 import { listAgents, getOrgIdFromAgents, VapiAgent } from "@/lib/vapi";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Filter } from "lucide-react";
+import { Plus, Search, Bot, Phone, Activity } from "lucide-react";
 import Link from "next/link";
-import { AgentTable } from "@/components/agents/agent-table";
+import { AgentGrid } from "@/components/agents/agent-grid";
 
 export default async function AgentsPage(props: {
     params: Promise<{ clientId: string }>;
@@ -21,7 +21,7 @@ export default async function AgentsPage(props: {
             .single();
         if (data) {
             vapiKey = data.vapi_key;
-            clientName = `${data.name}'s Agents`;
+            clientName = data.name ? `${data.name}'s Agents` : "Agents";
             currentOrgId = data.vapi_org_id;
             accountType = data.account_type;
         }
@@ -30,8 +30,6 @@ export default async function AgentsPage(props: {
     let agents: VapiAgent[] = await listAgents(vapiKey);
 
     // ═══ UMBRELLA AGENT ISOLATION ═══
-    // UMBRELLA clients share a VAPI org with other tenants.
-    // Filter to only show agents that belong to THIS client via the local agents table.
     if (accountType === "UMBRELLA" && params.clientId) {
         const { data: localAgents } = await supabase
             .from("agents")
@@ -39,16 +37,14 @@ export default async function AgentsPage(props: {
             .eq("client_id", params.clientId);
 
         if (localAgents && localAgents.length > 0) {
-            // Only show VAPI agents that are registered to this client locally
             const clientVapiIds = new Set(localAgents.map((a) => a.vapi_id));
             agents = agents.filter((agent) => clientVapiIds.has(agent.id));
         } else {
-            // No agents registered locally for this client — show empty
             agents = [];
         }
     }
 
-    // Auto-sync org ID silently in background if not set (Type A only)
+    // Auto-sync org ID silently
     if (params.clientId && !currentOrgId && agents.length > 0 && accountType !== "UMBRELLA") {
         const orgId = getOrgIdFromAgents(agents);
         if (orgId) {
@@ -59,84 +55,89 @@ export default async function AgentsPage(props: {
                         .update({ vapi_org_id: orgId })
                         .eq("id", params.clientId);
                 } catch (e) {
-                    // Silent fail - not critical
+                    // Silent fail
                 }
             })();
         }
     }
 
     return (
-        <div className="flex flex-col h-full">
-            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                <h2 className="text-xl font-semibold text-gray-900">
-                    {clientName}
-                </h2>
-                <div className="flex items-center gap-3">
-                    <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            placeholder="Search..."
-                            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
-                        />
+        <div className="flex flex-col h-full bg-gray-50/50">
+            {/* ── Header ────────────────────────────────────────────────── */}
+            <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-gray-200/60">
+                <div className="px-8 py-5 flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+                            {clientName}
+                        </h1>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                            Manage and configure your AI voice agents
+                        </p>
                     </div>
-                    <button className="p-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">
-                        <Filter className="w-4 h-4" />
-                    </button>
-                    <button className="bg-[#111827] hover:bg-gray-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors">
-                        <Plus className="w-4 h-4" />
-                        Create Agent
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                placeholder="Search agents..."
+                                className="pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm w-64 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all placeholder:text-gray-400"
+                            />
+                        </div>
+                        <button className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-violet-500/20 hover:shadow-lg hover:shadow-violet-500/25 transition-all">
+                            <Plus className="w-4 h-4" />
+                            New Agent
+                        </button>
+                    </div>
                 </div>
+
+                {/* Stats bar */}
+                {agents.length > 0 && (
+                    <div className="px-8 pb-4 flex items-center gap-6">
+                        <div className="flex items-center gap-2 text-sm">
+                            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-violet-50">
+                                <Bot className="w-3.5 h-3.5 text-violet-600" />
+                            </div>
+                            <span className="text-gray-500">Total</span>
+                            <span className="font-semibold text-gray-900">{agents.length}</span>
+                        </div>
+                        <div className="w-px h-5 bg-gray-200" />
+                        <div className="flex items-center gap-2 text-sm">
+                            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-50">
+                                <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                            </div>
+                            <span className="text-gray-500">Active</span>
+                            <span className="font-semibold text-emerald-600">{agents.length}</span>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            <div className="p-8 bg-gray-50 flex-1 overflow-auto">
+            {/* ── Content ───────────────────────────────────────────────── */}
+            <div className="p-8 flex-1 overflow-auto">
                 {accountType === "UMBRELLA" && agents.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center">
-                        <div className="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mb-4">
-                            <svg
-                                className="w-8 h-8 text-violet-600"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                                />
-                            </svg>
+                        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center mb-6 shadow-lg shadow-violet-500/20">
+                            <Bot className="w-10 h-10 text-white" />
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">
                             No Agents Yet
                         </h3>
-                        <p className="text-gray-500 text-sm max-w-sm">
+                        <p className="text-gray-500 text-sm max-w-md leading-relaxed mb-6">
                             Complete your onboarding to have AI agents set up
                             for your business. Once configured, your agents will
                             appear here.
                         </p>
                         <Link
                             href={`/client/${params.clientId}/onboarding`}
-                            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm font-medium"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl hover:from-violet-700 hover:to-indigo-700 transition-all text-sm font-semibold shadow-md shadow-violet-500/20"
                         >
                             Go to Onboarding
-                            <svg
-                                className="w-4 h-4"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M9 5l7 7-7 7"
-                                />
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                             </svg>
                         </Link>
                     </div>
                 ) : (
-                    <AgentTable agents={agents} />
+                    <AgentGrid agents={agents} />
                 )}
             </div>
         </div>
