@@ -2,8 +2,9 @@
 
 import { VapiAgent, VapiVoice } from "@/lib/vapi";
 import { updateAgentAction } from "@/app/actions/agent-actions";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Loader2, Save, MoreVertical, Upload, Info } from "lucide-react";
+import { PromptEditor } from "@/components/agents/prompt-editor";
 import { useFormStatus } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -55,6 +56,8 @@ const LANGUAGES = [
 
 export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
     const [activeTab, setActiveTab] = useState("profile");
+    const [showCopilot, setShowCopilot] = useState(false);
+    const promptRef = useRef<HTMLTextAreaElement>(null);
 
     const initialSystemPrompt = agent.model?.systemPrompt ||
         (Array.isArray(agent.model?.messages)
@@ -181,12 +184,13 @@ export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
                                     </label>
                                     <div className="flex items-center gap-2">
                                         <button type="button" className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-md hover:bg-gray-50 text-gray-700">Use templates</button>
-                                        <button type="button" className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-md hover:bg-gray-50 text-gray-700">Ask Copilot</button>
+                                        <button type="button" onClick={() => setShowCopilot(true)} className="px-3 py-1.5 text-xs font-medium border border-violet-200 rounded-md hover:bg-violet-50 text-violet-700 bg-violet-50/50">Ask Copilot</button>
                                     </div>
                                 </div>
 
                                 <div className="flex gap-6 items-start">
                                     <textarea
+                                        ref={promptRef}
                                         name="systemPrompt"
                                         defaultValue={initialSystemPrompt}
                                         className="flex-1 min-h-[600px] p-4 border border-gray-200 rounded-lg text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 resize-y text-gray-800"
@@ -206,6 +210,25 @@ export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
                     )}
                 </div>
             </form>
+
+            {showCopilot && (
+                <PromptEditor
+                    agentId={agent.id}
+                    initialPrompt={promptRef.current?.value || initialSystemPrompt}
+                    onSave={async (newPrompt) => {
+                        // Update the textarea value so the form picks it up
+                        if (promptRef.current) {
+                            promptRef.current.value = newPrompt;
+                        }
+                        // Save to VAPI via the existing server action
+                        const formData = new FormData();
+                        formData.set("systemPrompt", newPrompt);
+                        const result = await updateAgentAction(agent.id, formData);
+                        if (!result.success) throw new Error(result.error);
+                    }}
+                    onClose={() => setShowCopilot(false)}
+                />
+            )}
         </div>
     );
 };
