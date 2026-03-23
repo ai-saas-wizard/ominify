@@ -11,6 +11,7 @@ interface WorkspaceDisplayProps {
 interface ClientInfo {
     id: string;
     name: string;
+    business_name?: string | null;
 }
 
 export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
@@ -59,8 +60,8 @@ export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
         );
     }
 
-    const displayName = currentClient?.name || "Workspace";
-    const initial = displayName.charAt(0).toUpperCase();
+    const displayName = (currentClient?.business_name || currentClient?.name || "Workspace").toUpperCase();
+    const initial = displayName.charAt(0);
     const hasMultipleClients = allClients.length > 1;
 
     return (
@@ -101,9 +102,9 @@ export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
                                 onClick={() => setIsOpen(false)}
                             >
                                 <div className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-gray-600 font-semibold text-xs">
-                                    {client.name?.charAt(0).toUpperCase() || 'C'}
+                                    {(client.business_name || client.name)?.charAt(0).toUpperCase() || 'C'}
                                 </div>
-                                <span className="text-sm text-gray-700 truncate">{client.name}</span>
+                                <span className="text-sm text-gray-700 truncate">{(client.business_name || client.name || '').toUpperCase()}</span>
                             </Link>
                         ))}
                 </div>

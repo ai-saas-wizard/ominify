@@ -25,8 +25,27 @@ export async function GET(request: NextRequest) {
             throw error;
         }
 
+        // Fetch business names from tenant_profiles for all clients
+        const clientIds = (clients || []).map(c => c.id);
+        let profileMap: Record<string, string> = {};
+        if (clientIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('tenant_profiles')
+                .select('client_id, business_name, legal_business_name')
+                .in('client_id', clientIds);
+            if (profiles) {
+                for (const p of profiles) {
+                    const bName = p.business_name || p.legal_business_name;
+                    if (bName) profileMap[p.client_id] = bName;
+                }
+            }
+        }
+
         return NextResponse.json({
-            clients: clients || []
+            clients: (clients || []).map(c => ({
+                ...c,
+                business_name: profileMap[c.id] || null,
+            }))
         });
     } catch (error: any) {
         console.error('User clients fetch error:', error);
