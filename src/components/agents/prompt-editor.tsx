@@ -101,7 +101,7 @@ export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: Prompt
     setInput("");
     setIsLoading(true);
 
-    const result = await editPromptWithAI(currentPrompt, text.trim());
+    const result = await editPromptWithAI(currentPrompt, text.trim(), messages);
 
     if (result.success && result.data) {
       setPendingPrompt(result.data.newPrompt);
