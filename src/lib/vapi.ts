@@ -44,6 +44,8 @@ export interface VapiCall {
     startedAt: string;
     endedAt?: string;
     cost?: number;
+    type?: string;
+    durationSeconds?: number;
 }
 
 // ─── CREATE ASSISTANT ───

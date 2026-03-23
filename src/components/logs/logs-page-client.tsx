@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient, RealtimeChannel } from '@supabase/supabase-js';
-import { VapiCall, VapiAgent, VapiPhoneNumber } from '@/lib/vapi';
+import { VapiCall, VapiPhoneNumber } from '@/lib/vapi';
 import { LogViewerWithLive } from './log-viewer-live';
+import type { ClientAgent } from '@/app/client/[clientId]/logs/page';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -26,7 +27,7 @@ export interface ActiveCall {
 
 interface LogsPageClientProps {
     calls: VapiCall[];
-    agents: VapiAgent[];
+    agents: ClientAgent[];
     phoneNumbers: VapiPhoneNumber[];
     clientId: string;
 }
@@ -49,7 +50,6 @@ export function LogsPageClient({ calls, agents, phoneNumbers, clientId }: LogsPa
     useEffect(() => {
         fetchActiveCalls();
 
-        // Subscribe to realtime changes
         const channel: RealtimeChannel = supabaseClient
             .channel(`active_calls_logs:${clientId}`)
             .on(
@@ -61,8 +61,6 @@ export function LogsPageClient({ calls, agents, phoneNumbers, clientId }: LogsPa
                     filter: `client_id=eq.${clientId}`
                 },
                 (payload) => {
-                    console.log('Realtime update:', payload);
-
                     if (payload.eventType === 'INSERT') {
                         setActiveCalls(prev => [payload.new as ActiveCall, ...prev]);
                     } else if (payload.eventType === 'UPDATE') {

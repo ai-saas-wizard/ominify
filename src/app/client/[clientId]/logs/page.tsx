@@ -1,6 +1,14 @@
-import { listAgents, listPhoneNumbers, VapiCall } from "@/lib/vapi";
+import { listPhoneNumbers, VapiCall } from "@/lib/vapi";
 import { LogsPageClient } from "@/components/logs/logs-page-client";
 import { supabase } from "@/lib/supabase";
+
+// Agent record from Supabase (scoped to client)
+export interface ClientAgent {
+    id: string;        // internal UUID
+    vapi_id: string;   // VAPI assistant ID
+    name: string;
+    agent_type: string;
+}
 
 // Supabase call record with agent join
 interface SupabaseCallWithAgent {
@@ -26,7 +34,6 @@ interface SupabaseCallWithAgent {
 }
 
 function transformToVapiCall(call: SupabaseCallWithAgent): VapiCall {
-    // Parse transcript into messages array (component expects messages, not raw transcript)
     let messages: Array<{ role: string; message: string }> | undefined;
     if (call.transcript) {
         messages = call.transcript
@@ -61,7 +68,9 @@ function transformToVapiCall(call: SupabaseCallWithAgent): VapiCall {
         messages,
         startedAt: call.started_at || new Date().toISOString(),
         endedAt: call.ended_at || undefined,
-        cost: call.cost
+        cost: call.cost,
+        type: call.type,
+        durationSeconds: call.duration_seconds
     };
 }
 
@@ -83,9 +92,7 @@ async function fetchCallsFromSupabase(
         .order('started_at', { ascending: false })
         .limit(500);
 
-    // If filtering by Vapi assistantId, we need to join and filter
     if (assistantId) {
-        // First get the agent UUID for this vapi_id
         const { data: agent } = await supabase
             .from('agents')
             .select('id')
@@ -108,6 +115,22 @@ async function fetchCallsFromSupabase(
     return ((data || []) as SupabaseCallWithAgent[]).map(transformToVapiCall);
 }
 
+// Fetch agents from Supabase scoped to this client only
+async function fetchClientAgents(clientId: string): Promise<ClientAgent[]> {
+    const { data, error } = await supabase
+        .from('agents')
+        .select('id, vapi_id, name, agent_type')
+        .eq('client_id', clientId)
+        .order('name');
+
+    if (error) {
+        console.error('Error fetching client agents:', error);
+        return [];
+    }
+
+    return (data || []) as ClientAgent[];
+}
+
 export default async function LogsPage({
     params,
     searchParams,
@@ -127,20 +150,25 @@ export default async function LogsPage({
         }
     }
 
-    // Fetch calls from Supabase, agents and phone numbers from Vapi API
-    // (Agents and phone numbers are configuration data that changes rarely)
-    const [calls, agents, phoneNumbers] = await Promise.all([
+    // Fetch calls from Supabase, agents from Supabase (client-scoped), phone numbers from Vapi
+    const [calls, clientAgents, phoneNumbers] = await Promise.all([
         fetchCallsFromSupabase(clientId, assistantId),
-        listAgents(vapiKey),
+        fetchClientAgents(clientId),
         listPhoneNumbers(vapiKey)
     ]);
+
+    // Filter phone numbers to only those matching this client's agent vapi_ids
+    const clientVapiIds = new Set(clientAgents.map(a => a.vapi_id));
+    const filteredPhoneNumbers = phoneNumbers.filter(
+        pn => pn.assistantId && clientVapiIds.has(pn.assistantId)
+    );
 
     return (
         <div className="h-[calc(100vh-64px)] overflow-hidden">
             <LogsPageClient
                 calls={calls}
-                agents={agents}
-                phoneNumbers={phoneNumbers}
+                agents={clientAgents}
+                phoneNumbers={filteredPhoneNumbers}
                 clientId={clientId}
             />
         </div>
