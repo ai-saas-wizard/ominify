@@ -45,7 +45,7 @@ User request: ${userMessage}`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "anthropic/claude-haiku-4-5-20251001",
+        model: "z-ai/glm-4.7",
         max_tokens: 4096,
         messages: [
           { role: "user", content: systemPrompt },

@@ -3,7 +3,7 @@
 import { VapiAgent, VapiVoice } from "@/lib/vapi";
 import { updateAgentAction } from "@/app/actions/agent-actions";
 import { useState, useRef } from "react";
-import { Loader2, Save, MoreVertical, Upload, Info } from "lucide-react";
+import { Loader2, Save, MoreVertical, Upload, Info, Sparkles } from "lucide-react";
 import { PromptEditor } from "@/components/agents/prompt-editor";
 import { useFormStatus } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -184,7 +184,10 @@ export const AgentEditor = ({ agent, voices }: AgentEditorProps) => {
                                     </label>
                                     <div className="flex items-center gap-2">
                                         <button type="button" className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-md hover:bg-gray-50 text-gray-700">Use templates</button>
-                                        <button type="button" onClick={() => setShowCopilot(true)} className="px-3 py-1.5 text-xs font-medium border border-violet-200 rounded-md hover:bg-violet-50 text-violet-700 bg-violet-50/50">Ask Copilot</button>
+                                        <button type="button" onClick={() => setShowCopilot(true)} className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white rounded-lg shadow-sm transition-colors">
+                                            <Sparkles className="w-3.5 h-3.5" />
+                                            Edit with AI
+                                        </button>
                                     </div>
                                 </div>
 
