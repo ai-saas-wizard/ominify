@@ -11,6 +11,23 @@ interface PromptEditorResponse {
   error?: string;
 }
 
+function stripMarkdownFences(text: string): string {
+  return text
+    .replace(/^```(?:json)?\s*/im, "")
+    .replace(/\s*```\s*$/im, "")
+    .trim();
+}
+
+function extractJSON(text: string): string {
+  // Find the outermost { ... } in the response
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1);
+  }
+  return text;
+}
+
 export async function editPromptWithAI(
   currentPrompt: string,
   userMessage: string
@@ -24,13 +41,15 @@ export async function editPromptWithAI(
 
 The user will describe what they want to change in plain English. Your job is to:
 1. Rewrite the ENTIRE prompt incorporating their requested changes — keep everything that should stay the same
-2. Return ONLY valid JSON in this exact format, nothing else, no markdown:
+2. Return ONLY valid JSON in this exact format, nothing else, no markdown fences:
 {
   "newPrompt": "<full rewritten prompt>",
   "changes": [
     { "type": "add|edit|remove", "description": "short description" }
   ]
 }
+
+IMPORTANT: Escape all special characters in JSON strings properly. Use \\n for newlines inside the newPrompt value. Make sure the JSON is complete and valid.
 
 Current prompt:
 ${currentPrompt}
@@ -46,7 +65,7 @@ User request: ${userMessage}`;
       },
       body: JSON.stringify({
         model: "z-ai/glm-4.7",
-        max_tokens: 4096,
+        max_tokens: 16384,
         messages: [
           { role: "user", content: systemPrompt },
         ],
@@ -60,13 +79,24 @@ User request: ${userMessage}`;
     }
 
     const json = await res.json();
-    const rawText: string = json.choices?.[0]?.message?.content || "";
+    const choice = json.choices?.[0];
+    const rawText: string = choice?.message?.content || "";
 
-    // Strip markdown fences if present
-    const cleaned = rawText
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
+    // Detect truncated response
+    if (choice?.finish_reason === "length") {
+      console.error("OpenRouter response truncated (finish_reason: length)");
+      return {
+        success: false,
+        error: "AI response was too long and got cut off. Try a more specific edit request.",
+      };
+    }
+
+    if (!rawText.trim()) {
+      return { success: false, error: "AI returned an empty response. Please try again." };
+    }
+
+    // Strip markdown fences and extract JSON
+    const cleaned = extractJSON(stripMarkdownFences(rawText));
 
     const parsed: PromptEditResult = JSON.parse(cleaned);
 
@@ -78,7 +108,10 @@ User request: ${userMessage}`;
   } catch (err: any) {
     console.error("Prompt editor error:", err);
     if (err instanceof SyntaxError) {
-      return { success: false, error: "Failed to parse AI response. Please try again." };
+      return {
+        success: false,
+        error: "Failed to parse AI response. The model may have returned malformed JSON. Please try again.",
+      };
     }
     return { success: false, error: "Something went wrong. Please try again." };
   }

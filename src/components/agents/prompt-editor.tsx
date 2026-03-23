@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Send, Sparkles, Check, Undo2, Eye, EyeOff, Loader2 } from "lucide-react";
+import { X, Send, Sparkles, Check, Undo2, Eye, EyeOff, Loader2, History } from "lucide-react";
 import { editPromptWithAI } from "@/app/actions/prompt-editor-actions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,6 +74,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
 export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: PromptEditorProps) {
   const [currentPrompt, setCurrentPrompt] = useState(initialPrompt);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [showingDiff, setShowingDiff] = useState(false);
@@ -137,6 +138,7 @@ export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: Prompt
     setIsSaving(true);
     try {
       await onSave(pendingPrompt);
+      setPromptHistory((prev) => [...prev, currentPrompt]);
       setCurrentPrompt(pendingPrompt);
       setPendingPrompt(null);
       setShowingDiff(false);
@@ -162,6 +164,31 @@ export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: Prompt
       ...prev,
       { role: "assistant", content: "No changes were made. Feel free to try a different edit." },
     ]);
+  };
+
+  const handleRollback = async () => {
+    if (promptHistory.length === 0) return;
+    setIsSaving(true);
+    const previousPrompt = promptHistory[promptHistory.length - 1];
+    try {
+      await onSave(previousPrompt);
+      setCurrentPrompt(previousPrompt);
+      setPromptHistory((prev) => prev.slice(0, -1));
+      setPendingPrompt(null);
+      setShowingDiff(false);
+      setShowSaved(true);
+      setTimeout(() => setShowSaved(false), 2000);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Rolled back to the previous version." },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Failed to rollback. Please try again." },
+      ]);
+    }
+    setIsSaving(false);
   };
 
   // ── Diff ──────────────────────────────────────────────────────────────────
@@ -198,15 +225,27 @@ export function PromptEditor({ agentId, initialPrompt, onSave, onClose }: Prompt
               <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                 System Prompt
               </span>
-              {pendingPrompt && (
-                <button
-                  onClick={() => setShowingDiff(!showingDiff)}
-                  className="flex items-center gap-1.5 text-[11px] font-medium text-violet-600 hover:text-violet-700 transition-colors"
-                >
-                  {showingDiff ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  {showingDiff ? "Edit" : "Show diff"}
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {promptHistory.length > 0 && !pendingPrompt && (
+                  <button
+                    onClick={handleRollback}
+                    disabled={isSaving}
+                    className="flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700 transition-colors disabled:opacity-50"
+                  >
+                    <History className="w-3 h-3" />
+                    Rollback
+                  </button>
+                )}
+                {pendingPrompt && (
+                  <button
+                    onClick={() => setShowingDiff(!showingDiff)}
+                    className="flex items-center gap-1.5 text-[11px] font-medium text-violet-600 hover:text-violet-700 transition-colors"
+                  >
+                    {showingDiff ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    {showingDiff ? "Edit" : "Show diff"}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Content area */}
