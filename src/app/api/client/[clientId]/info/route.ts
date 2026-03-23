@@ -24,13 +24,13 @@ export async function GET(
         // Fetch business name from tenant_profiles
         const { data: profile } = await supabase
             .from('tenant_profiles')
-            .select('business_name, legal_business_name')
+            .select('legal_business_name')
             .eq('client_id', clientId)
             .single();
 
         return NextResponse.json({
             ...client,
-            business_name: profile?.business_name || profile?.legal_business_name || null,
+            business_name: profile?.legal_business_name || null,
         });
     } catch (error: any) {
         console.error('Client info fetch error:', error);

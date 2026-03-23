@@ -31,12 +31,11 @@ export async function GET(request: NextRequest) {
         if (clientIds.length > 0) {
             const { data: profiles } = await supabase
                 .from('tenant_profiles')
-                .select('client_id, business_name, legal_business_name')
+                .select('client_id, legal_business_name')
                 .in('client_id', clientIds);
             if (profiles) {
                 for (const p of profiles) {
-                    const bName = p.business_name || p.legal_business_name;
-                    if (bName) profileMap[p.client_id] = bName;
+                    if (p.legal_business_name) profileMap[p.client_id] = p.legal_business_name;
                 }
             }
         }
