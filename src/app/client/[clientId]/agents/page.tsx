@@ -21,7 +21,7 @@ export default async function AgentsPage(props: {
             .single();
         if (data) {
             vapiKey = data.vapi_key;
-            clientName = data.name ? `${data.name}'s Agents` : "Agents";
+            clientName = "Agents";
             currentOrgId = data.vapi_org_id;
             accountType = data.account_type;
         }
