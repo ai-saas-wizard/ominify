@@ -6,16 +6,18 @@ import { Save, Loader2 } from "lucide-react";
 interface UpdateProfileFormProps {
     currentName: string;
     currentEmail: string;
+    currentBusinessName?: string;
     updateProfile: (formData: FormData) => Promise<void>;
 }
 
-export function UpdateProfileForm({ currentName, currentEmail, updateProfile }: UpdateProfileFormProps) {
+export function UpdateProfileForm({ currentName, currentEmail, currentBusinessName = "", updateProfile }: UpdateProfileFormProps) {
     const [name, setName] = useState(currentName);
     const [email, setEmail] = useState(currentEmail);
+    const [businessName, setBusinessName] = useState(currentBusinessName);
     const [isSaving, setIsSaving] = useState(false);
     const [saved, setSaved] = useState(false);
 
-    const hasChanges = name !== currentName || email !== currentEmail;
+    const hasChanges = name !== currentName || email !== currentEmail || businessName !== currentBusinessName;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -25,6 +27,7 @@ export function UpdateProfileForm({ currentName, currentEmail, updateProfile }: 
         const formData = new FormData();
         formData.set("name", name);
         formData.set("email", email);
+        formData.set("business_name", businessName);
 
         await updateProfile(formData);
         setIsSaving(false);
@@ -36,6 +39,20 @@ export function UpdateProfileForm({ currentName, currentEmail, updateProfile }: 
         <form onSubmit={handleSubmit} className="space-y-4">
             <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Business Name
+                </label>
+                <input
+                    type="text"
+                    value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                    placeholder="e.g. Acme Corp"
+                />
+                <p className="mt-1 text-xs text-gray-500">This name is displayed in the sidebar and used across your dashboard.</p>
+            </div>
+
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                     Display Name
                 </label>
                 <input
@@ -43,7 +60,7 @@ export function UpdateProfileForm({ currentName, currentEmail, updateProfile }: 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
-                    placeholder="Your name or company name"
+                    placeholder="Your name"
                 />
             </div>
 

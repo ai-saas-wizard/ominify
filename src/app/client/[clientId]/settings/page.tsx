@@ -24,6 +24,13 @@ export default async function ClientSettingsPage(props: {
         return <div className="p-8 text-center text-red-600">Client not found</div>;
     }
 
+    // Fetch business name from tenant_profiles
+    const { data: tenantProfile } = await supabase
+        .from('tenant_profiles')
+        .select('business_name')
+        .eq('client_id', clientId)
+        .single();
+
     // Get Clerk user info
     const clerkUser = await currentUser();
 
@@ -40,11 +47,20 @@ export default async function ClientSettingsPage(props: {
         "use server";
         const name = formData.get("name") as string;
         const email = formData.get("email") as string;
+        const businessName = formData.get("business_name") as string;
 
         await supabase
             .from('clients')
             .update({ name, email })
             .eq('id', clientId);
+
+        // Upsert business name in tenant_profiles
+        await supabase
+            .from('tenant_profiles')
+            .upsert(
+                { client_id: clientId, business_name: businessName || null },
+                { onConflict: 'client_id' }
+            );
 
         revalidatePath(`/client/${clientId}/settings`);
     }
@@ -120,6 +136,7 @@ export default async function ClientSettingsPage(props: {
                     <UpdateProfileForm
                         currentName={client.name || ""}
                         currentEmail={client.email || ""}
+                        currentBusinessName={tenantProfile?.business_name || ""}
                         updateProfile={updateProfile}
                     />
                 </div>
