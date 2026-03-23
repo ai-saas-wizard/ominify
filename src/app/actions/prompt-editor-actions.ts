@@ -30,14 +30,15 @@ function extractJSON(text: string): string {
 
 export async function editPromptWithAI(
   currentPrompt: string,
-  userMessage: string
+  userMessage: string,
+  conversationHistory?: { role: "user" | "assistant"; content: string }[]
 ): Promise<PromptEditorResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return { success: false, error: "OpenRouter API key not configured" };
   }
 
-  const systemPrompt = `You are an expert AI voice agent prompt engineer helping non-technical SaaS users improve their AI agent system prompts.
+  const systemMessage = `You are an expert AI voice agent prompt engineer helping non-technical SaaS users improve their AI agent system prompts.
 
 The user will describe what they want to change in plain English. Your job is to:
 1. Rewrite the ENTIRE prompt incorporating their requested changes — keep everything that should stay the same
@@ -52,9 +53,23 @@ The user will describe what they want to change in plain English. Your job is to
 IMPORTANT: Escape all special characters in JSON strings properly. Use \\n for newlines inside the newPrompt value. Make sure the JSON is complete and valid.
 
 Current prompt:
-${currentPrompt}
+${currentPrompt}`;
 
-User request: ${userMessage}`;
+  // Build messages array with conversation history for context
+  const messages: { role: string; content: string }[] = [
+    { role: "system", content: systemMessage },
+  ];
+
+  // Include recent conversation history (last 6 messages to avoid token bloat)
+  if (conversationHistory && conversationHistory.length > 0) {
+    const recent = conversationHistory.slice(-6);
+    for (const msg of recent) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // Add the current user message
+  messages.push({ role: "user", content: userMessage });
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -64,11 +79,9 @@ User request: ${userMessage}`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "z-ai/glm-4.7",
+        model: "openai/gpt-4o-mini",
         max_tokens: 16384,
-        messages: [
-          { role: "user", content: systemPrompt },
-        ],
+        messages,
       }),
     });
 
