@@ -81,8 +81,8 @@ export function ChatPanel({
                         {/* Header */}
                         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
-                                    <Bot className="h-4 w-4 text-violet-600" />
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50">
+                                    <Bot className="h-4 w-4 text-emerald-600" />
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-semibold text-gray-900">
@@ -149,7 +149,7 @@ export function ChatPanel({
                                     onClick={handleSend}
                                     disabled={sending || !input.trim()}
                                     size="icon"
-                                    className="bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50"
+                                    className="bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
                                 >
                                     <Send className="h-4 w-4" />
                                 </Button>
@@ -173,19 +173,19 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         >
             <div
                 className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-                    isUser ? "bg-gray-200" : "bg-violet-50"
+                    isUser ? "bg-gray-200" : "bg-emerald-50"
                 }`}
             >
                 {isUser ? (
                     <User className="h-3.5 w-3.5 text-gray-600" />
                 ) : (
-                    <Bot className="h-3.5 w-3.5 text-violet-600" />
+                    <Bot className="h-3.5 w-3.5 text-emerald-600" />
                 )}
             </div>
             <div
                 className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
                     isUser
-                        ? "bg-violet-600 text-white"
+                        ? "bg-emerald-600 text-white"
                         : "bg-gray-100 text-gray-700"
                 }`}
             >

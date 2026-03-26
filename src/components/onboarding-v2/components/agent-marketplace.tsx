@@ -131,7 +131,7 @@ export function AgentMarketplace({
                     <Button
                         onClick={onDeploy}
                         disabled={deploying || enabledCount === 0}
-                        className="bg-violet-600 px-6 text-white hover:bg-violet-500 disabled:opacity-50"
+                        className="bg-emerald-600 px-6 text-white hover:bg-emerald-500 disabled:opacity-50"
                     >
                         <Rocket className="mr-2 h-4 w-4" />
                         Deploy {enabledCount} Agent{enabledCount !== 1 ? "s" : ""}
@@ -142,7 +142,7 @@ export function AgentMarketplace({
             {/* Floating chat button */}
             <motion.button
                 onClick={onOpenChat}
-                className="fixed bottom-24 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-violet-600 text-white shadow-lg shadow-violet-500/20 transition-colors hover:bg-violet-500"
+                className="fixed bottom-24 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
             >

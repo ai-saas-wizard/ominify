@@ -65,7 +65,7 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                                 ? "bg-red-500"
                                 : usagePercent >= 70
                                   ? "bg-amber-500"
-                                  : "bg-indigo-500"
+                                  : "bg-emerald-500"
                         }`}
                         style={{ width: `${Math.min(usagePercent, 100)}%` }}
                     />
@@ -79,7 +79,7 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                     {!editing && (
                         <button
                             onClick={() => setEditing(true)}
-                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                            className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
                         >
                             Edit
                         </button>
@@ -94,7 +94,7 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                             max="100"
                             value={concurrency}
                             onChange={(e) => setConcurrency(parseInt(e.target.value) || 1)}
-                            className="w-24 p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                            className="w-24 p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                         />
                         <span className="text-sm text-gray-500">
                             lines = <span className="font-medium text-gray-900">${costEstimate}/mo</span>
@@ -109,7 +109,7 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                         <button
                             onClick={handleSave}
                             disabled={loading || concurrency === umbrella.concurrency_limit}
-                            className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                            className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
                         >
                             {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                             Save

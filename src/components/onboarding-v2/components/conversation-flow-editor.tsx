@@ -44,7 +44,7 @@ export function ConversationFlowEditor({
                 <p className="text-sm text-gray-400">No conversation flow yet.</p>
                 <button
                     onClick={onRegenerate}
-                    className="mt-2 text-xs font-medium text-violet-600 hover:text-violet-500"
+                    className="mt-2 text-xs font-medium text-emerald-600 hover:text-emerald-500"
                 >
                     Generate Flow
                 </button>
@@ -60,7 +60,7 @@ export function ConversationFlowEditor({
                 {onRegenerate && (
                     <button
                         onClick={onRegenerate}
-                        className="flex items-center gap-1 text-[10px] font-medium text-violet-600 hover:text-violet-500"
+                        className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 hover:text-emerald-500"
                     >
                         <RefreshCw className="h-3 w-3" />
                         Regenerate
@@ -86,7 +86,7 @@ export function ConversationFlowEditor({
                                     className={cn(
                                         "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold",
                                         step.isEdited
-                                            ? "bg-violet-100 text-violet-700 ring-1 ring-violet-200"
+                                            ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200"
                                             : "bg-gray-100 text-gray-500 ring-1 ring-gray-200"
                                     )}
                                 >
@@ -109,7 +109,7 @@ export function ConversationFlowEditor({
                                             }
                                         }}
                                         rows={2}
-                                        className="w-full rounded-md border border-violet-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                        className="w-full rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                     />
                                 ) : (
                                     <button
@@ -117,7 +117,7 @@ export function ConversationFlowEditor({
                                         className={cn(
                                             "w-full rounded-md px-2.5 py-1.5 text-left text-xs transition-colors",
                                             step.isEdited
-                                                ? "bg-violet-50/50 text-gray-800"
+                                                ? "bg-emerald-50/50 text-gray-800"
                                                 : "text-gray-600 hover:bg-gray-50"
                                         )}
                                     >
@@ -159,7 +159,7 @@ export function ConversationFlowEditor({
             {/* Add step */}
             <button
                 onClick={onAddStep}
-                className="mt-2 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-600 hover:bg-violet-50"
+                className="mt-2 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
             >
                 <Plus className="h-3.5 w-3.5" />
                 Add Step

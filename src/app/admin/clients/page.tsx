@@ -67,7 +67,7 @@ export default async function AdminClientsPage() {
                     <p className="text-muted-foreground">
                         Manage your agency clients.
                         {umbrellaClients.length > 0 && (
-                            <span className="ml-2 text-indigo-600">
+                            <span className="ml-2 text-emerald-600">
                                 {umbrellaClients.length} Umbrella · {customClients.length} Custom
                             </span>
                         )}
@@ -76,7 +76,7 @@ export default async function AdminClientsPage() {
                 <div className="flex items-center gap-3">
                     <Link
                         href="/admin/billing"
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
                     >
                         <CreditCard className="w-4 h-4" />
                         Billing
@@ -88,7 +88,7 @@ export default async function AdminClientsPage() {
             {/* ── UMBRELLA CLIENTS ── */}
             {umbrellaClients.length > 0 && (
                 <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-indigo-700 uppercase tracking-wide flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-2">
                         <Umbrella className="w-4 h-4" />
                         Type B — Umbrella Clients
                     </h3>
@@ -97,13 +97,13 @@ export default async function AdminClientsPage() {
                             <ClientCard key={client.id} index={i} disabled={!!client.disabled} variant="umbrella">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-indigo-50 text-indigo-600"}`}>
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-emerald-50 text-emerald-600"}`}>
                                             {client.name?.[0]?.toUpperCase() || "C"}
                                         </div>
                                         <div>
                                             <h3 className={`font-semibold ${client.disabled ? "text-gray-400" : "text-gray-900"}`}>{client.name}</h3>
                                             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                                <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-indigo-100 text-indigo-700 border-indigo-200">
+                                                <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-700 border-emerald-200">
                                                     UMBRELLA
                                                 </Badge>
                                                 {client.disabled && (
@@ -141,7 +141,7 @@ export default async function AdminClientsPage() {
                                                 </span>
                                             )}
                                         </div>
-                                        <Link href={`/client/${client.id}/agents`} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                                        <Link href={`/client/${client.id}/agents`} className="text-xs font-medium text-emerald-600 hover:text-emerald-700">
                                             Manage →
                                         </Link>
                                     </div>
@@ -205,7 +205,7 @@ export default async function AdminClientsPage() {
                                                 {client.vapi_key ? "••••" + client.vapi_key.slice(-4) : "Not Configured"}
                                             </span>
                                         </div>
-                                        <Link href={`/client/${client.id}/agents`} className="text-xs font-medium text-violet-600 hover:text-violet-700">
+                                        <Link href={`/client/${client.id}/agents`} className="text-xs font-medium text-emerald-600 hover:text-emerald-700">
                                             Manage Agents →
                                         </Link>
                                     </div>

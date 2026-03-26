@@ -26,7 +26,7 @@ export function MutationBadge({
         <div className="inline-block">
             <button
                 onClick={() => setExpanded(!expanded)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
             >
                 <Sparkles className="w-3 h-3" />
                 AI Adapted
@@ -38,10 +38,10 @@ export function MutationBadge({
             </button>
 
             {expanded && (
-                <div className="mt-2 p-3 bg-violet-50 rounded-lg border border-violet-200 text-xs space-y-3 max-w-md">
+                <div className="mt-2 p-3 bg-emerald-50 rounded-lg border border-emerald-200 text-xs space-y-3 max-w-md">
                     {mutationReason && (
                         <div>
-                            <span className="font-medium text-violet-700">Why:</span>{" "}
+                            <span className="font-medium text-emerald-700">Why:</span>{" "}
                             <span className="text-gray-600">{mutationReason}</span>
                         </div>
                     )}
@@ -59,10 +59,10 @@ export function MutationBadge({
 
                         {/* Mutated */}
                         <div className="space-y-1">
-                            <span className="font-medium text-violet-600 uppercase tracking-wide text-[10px]">
+                            <span className="font-medium text-emerald-600 uppercase tracking-wide text-[10px]">
                                 AI Version
                             </span>
-                            <div className="p-2 bg-violet-50 rounded border border-violet-200 text-violet-800 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                            <div className="p-2 bg-emerald-50 rounded border border-emerald-200 text-emerald-800 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
                                 {formatContent(mutatedContent)}
                             </div>
                         </div>
@@ -88,7 +88,7 @@ export function MutationBadge({
 export function MutationEnabledDot() {
     return (
         <span
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-50 text-violet-600 border border-violet-100"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-100"
             title="AI Adaptive Mutation enabled for this step"
         >
             <Sparkles className="w-3 h-3" />

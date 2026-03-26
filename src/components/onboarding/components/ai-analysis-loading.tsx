@@ -41,7 +41,7 @@ export function AIAnalysisLoading({ currentStage, websiteUrl, error, onRetry, on
                                 {onRetry && (
                                     <button
                                         onClick={onRetry}
-                                        className="px-5 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition"
+                                        className="px-5 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition"
                                     >
                                         Try Again
                                     </button>
@@ -74,11 +74,11 @@ export function AIAnalysisLoading({ currentStage, websiteUrl, error, onRetry, on
                     <CardContent className="pt-8 pb-8 px-8">
                         {/* Pulsing Icon */}
                         <motion.div
-                            className="w-16 h-16 bg-violet-100 rounded-2xl flex items-center justify-center mx-auto mb-6"
+                            className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto mb-6"
                             animate={{ scale: [1, 1.08, 1], opacity: [0.8, 1, 0.8] }}
                             transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
                         >
-                            <Sparkles className="w-8 h-8 text-violet-600" />
+                            <Sparkles className="w-8 h-8 text-emerald-600" />
                         </motion.div>
 
                         <h3 className="text-lg font-semibold text-gray-900 text-center mb-1">
@@ -113,7 +113,7 @@ export function AIAnalysisLoading({ currentStage, websiteUrl, error, onRetry, on
                                             </motion.div>
                                         )}
                                         {isActive && (
-                                            <Loader2 className="w-5 h-5 text-violet-600 flex-shrink-0 animate-spin" />
+                                            <Loader2 className="w-5 h-5 text-emerald-600 flex-shrink-0 animate-spin" />
                                         )}
                                         {isPending && (
                                             <Circle className="w-5 h-5 text-gray-300 flex-shrink-0" />
@@ -122,7 +122,7 @@ export function AIAnalysisLoading({ currentStage, websiteUrl, error, onRetry, on
                                             isComplete
                                                 ? "text-sm text-gray-700"
                                                 : isActive
-                                                ? "text-sm text-violet-700 font-medium"
+                                                ? "text-sm text-emerald-700 font-medium"
                                                 : "text-sm text-gray-400"
                                         }>
                                             {stage.label}
@@ -135,7 +135,7 @@ export function AIAnalysisLoading({ currentStage, websiteUrl, error, onRetry, on
                         {/* Progress Bar */}
                         <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
                             <motion.div
-                                className="absolute inset-y-0 left-0 bg-violet-600 rounded-full"
+                                className="absolute inset-y-0 left-0 bg-emerald-600 rounded-full"
                                 animate={{ width: `${progress}%` }}
                                 transition={{ type: "spring", stiffness: 50, damping: 15 }}
                             />

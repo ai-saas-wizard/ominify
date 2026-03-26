@@ -227,9 +227,9 @@ export function OnboardingWizard({ clientId, clientName, initialProfile }: Onboa
                             className={cn(
                                 "h-1.5 rounded-full transition-all",
                                 idx === currentStep
-                                    ? "bg-violet-600 w-6"
+                                    ? "bg-emerald-600 w-6"
                                     : completedSteps.has(idx)
-                                    ? "bg-violet-300 w-3"
+                                    ? "bg-emerald-300 w-3"
                                     : "bg-gray-200 w-3"
                             )}
                         />

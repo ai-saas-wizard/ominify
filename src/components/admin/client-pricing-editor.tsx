@@ -118,7 +118,7 @@ export function ClientPricingEditor({
         return (
             <button
                 onClick={() => setIsEditing(true)}
-                className="inline-flex items-center gap-1 text-sm text-violet-600 hover:text-violet-700 font-medium"
+                className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-700 font-medium"
             >
                 <Edit2 className="w-4 h-4" />
                 Edit
@@ -140,7 +140,7 @@ export function ClientPricingEditor({
                     {/* Global Pricing Section */}
                     <div className="space-y-3">
                         <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-violet-600"></span>
+                            <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
                             Default Client Rate
                         </h4>
                         <div className="flex items-end gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
@@ -153,7 +153,7 @@ export function ClientPricingEditor({
                                         step="0.01"
                                         value={price}
                                         onChange={(e) => setPrice(e.target.value)}
-                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                     />
                                 </div>
                             </div>
@@ -166,14 +166,14 @@ export function ClientPricingEditor({
                                         step="0.01"
                                         value={cost}
                                         onChange={(e) => setCost(e.target.value)}
-                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                     />
                                 </div>
                             </div>
                             <button
                                 onClick={handleSaveGlobal}
                                 disabled={isSavingGlobal}
-                                className="h-[34px] px-3 bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50 text-sm font-medium"
+                                className="h-[34px] px-3 bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium"
                             >
                                 {isSavingGlobal ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
                             </button>
@@ -203,7 +203,7 @@ export function ClientPricingEditor({
                         ) : (
                             <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-3">
                                 <select
-                                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded bg-white focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                     value={selectedAgentId}
                                     onChange={(e) => setSelectedAgentId(e.target.value)}
                                 >
@@ -228,7 +228,7 @@ export function ClientPricingEditor({
                                                         placeholder="Default"
                                                         value={agentPrice}
                                                         onChange={(e) => setAgentPrice(e.target.value)}
-                                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                                     />
                                                 </div>
                                             </div>
@@ -242,7 +242,7 @@ export function ClientPricingEditor({
                                                         placeholder="Default"
                                                         value={agentCost}
                                                         onChange={(e) => setAgentCost(e.target.value)}
-                                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                                                        className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                                                     />
                                                 </div>
                                             </div>

@@ -20,7 +20,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className={inter.className}>
-          <NextTopLoader color="#7c3aed" showSpinner={false} />
+          <NextTopLoader color="#047857" showSpinner={false} />
           {children}
         </body>
       </html>

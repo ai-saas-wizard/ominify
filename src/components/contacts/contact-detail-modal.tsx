@@ -155,7 +155,7 @@ export function ContactDetailModal({
                                 value={editedFields.name}
                                 onChange={(e) => setEditedFields(prev => ({ ...prev, name: e.target.value }))}
                                 placeholder="Enter name"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500"
                             />
                         </div>
 
@@ -182,7 +182,7 @@ export function ContactDetailModal({
                                 value={editedFields.email}
                                 onChange={(e) => setEditedFields(prev => ({ ...prev, email: e.target.value }))}
                                 placeholder="Enter email"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500"
                             />
                         </div>
                     </div>
@@ -211,7 +211,7 @@ export function ContactDetailModal({
                                                         [field.field_key]: e.target.checked
                                                     }
                                                 }))}
-                                                className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                                                className="w-4 h-4 rounded border-gray-300 text-emerald-600"
                                             />
                                             <span className="text-sm text-gray-600">Yes</span>
                                         </label>
@@ -227,7 +227,7 @@ export function ContactDetailModal({
                                                 }
                                             }))}
                                             placeholder={`Enter ${field.name.toLowerCase()}`}
-                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500"
                                         />
                                     )}
                                 </div>
@@ -242,7 +242,7 @@ export function ContactDetailModal({
                                 <MessageSquare className="w-4 h-4" />
                                 AI Summary
                             </h4>
-                            <div className="bg-indigo-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line">
+                            <div className="bg-emerald-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-line">
                                 {fullContact.conversation_summary}
                             </div>
                         </div>
@@ -304,7 +304,7 @@ export function ContactDetailModal({
                                         {fullContact.active_enrollment.recommended_tone && (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-400 uppercase font-medium">Tone</span>
-                                                <span className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded capitalize">
+                                                <span className="text-[10px] px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded capitalize">
                                                     {fullContact.active_enrollment.recommended_tone}
                                                 </span>
                                             </div>
@@ -365,7 +365,7 @@ export function ContactDetailModal({
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Save Changes

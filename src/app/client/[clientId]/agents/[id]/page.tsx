@@ -150,7 +150,7 @@ export default async function AgentEditorPage(props: {
                                             latency and response quality.
                                         </p>
                                     </div>
-                                    <button className="w-full py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700 shadow-md shadow-violet-500/20 hover:shadow-lg hover:shadow-violet-500/25 transition-all">
+                                    <button className="w-full py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-emerald-600 to-emerald-600 text-white hover:from-emerald-700 hover:to-emerald-700 shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/25 transition-all">
                                         Start Test Call
                                     </button>
                                     <Link

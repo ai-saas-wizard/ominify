@@ -107,7 +107,7 @@ function FleetAgentCard({
                         </div>
                     </div>
                     {isInbound && agent.confidence >= 1.0 ? (
-                        <span className="flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-600 ring-1 ring-violet-200">
+                        <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600 ring-1 ring-emerald-200">
                             <Lock className="h-3 w-3" />
                             Required
                         </span>
@@ -144,7 +144,7 @@ function FleetAgentCard({
                     <button
                         onClick={onCustomize}
                         aria-label={`Customize ${agent.name}`}
-                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-600 transition-colors hover:bg-violet-50"
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50"
                     >
                         <MessageSquare className="h-3.5 w-3.5" />
                         Customize
@@ -290,7 +290,7 @@ export function AgentFleet({
                         <AlertDialogTrigger asChild>
                             <Button
                                 disabled={deploying || enabledCount === 0}
-                                className="bg-violet-600 px-6 text-white hover:bg-violet-500 disabled:opacity-50"
+                                className="bg-emerald-600 px-6 text-white hover:bg-emerald-500 disabled:opacity-50"
                             >
                                 <Rocket className="mr-2 h-4 w-4" />
                                 Deploy {enabledCount} Agent{enabledCount !== 1 ? "s" : ""}
@@ -319,7 +319,7 @@ export function AgentFleet({
             <motion.button
                 onClick={onOpenChat}
                 aria-label="Open chat to customize agents"
-                className="fixed bottom-24 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-violet-600 text-white shadow-lg shadow-violet-500/20 transition-colors hover:bg-violet-500"
+                className="fixed bottom-24 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
             >

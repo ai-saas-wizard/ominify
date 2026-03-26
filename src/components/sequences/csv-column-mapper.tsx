@@ -41,8 +41,8 @@ const ROLE_LABELS: Record<ColumnRole, string> = {
 const ROLE_COLORS: Record<ColumnRole, string> = {
     phone: "bg-emerald-100 text-emerald-700",
     email: "bg-blue-100 text-blue-700",
-    first_name: "bg-violet-100 text-violet-700",
-    last_name: "bg-purple-100 text-purple-700",
+    first_name: "bg-emerald-100 text-emerald-700",
+    last_name: "bg-emerald-100 text-emerald-700",
     company: "bg-amber-100 text-amber-700",
     custom_variable: "bg-gray-100 text-gray-600",
     skip: "bg-gray-50 text-gray-400",
@@ -103,8 +103,8 @@ export function CSVColumnMapper({
             {/* Header */}
             <div className="px-6 py-4 border-b flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-                        <FileSpreadsheet className="w-5 h-5 text-violet-600" />
+                    <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                        <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                     </div>
                     <div>
                         <h3 className="font-semibold text-gray-900">

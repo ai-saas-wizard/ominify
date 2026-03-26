@@ -40,9 +40,9 @@ const channelConfig = {
     voice: {
         icon: Phone,
         label: "Voice",
-        outboundColor: "bg-purple-50 border-purple-200",
-        inboundColor: "bg-purple-100 border-purple-300",
-        dotColor: "bg-purple-500",
+        outboundColor: "bg-emerald-50 border-emerald-200",
+        inboundColor: "bg-emerald-100 border-emerald-300",
+        dotColor: "bg-emerald-500",
     },
 };
 
@@ -63,7 +63,7 @@ const outcomeColors: Record<string, string> = {
     no_answer: "text-yellow-600",
     bounced: "text-red-600",
     opened: "text-blue-600",
-    clicked: "text-indigo-600",
+    clicked: "text-emerald-600",
     failed: "text-red-600",
 };
 
@@ -198,7 +198,7 @@ export function InteractionTimeline({ contactId }: { contactId: string }) {
                                         </span>
                                     )}
                                     {interaction.intent && interaction.direction === "inbound" && (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">
                                             {interaction.intent}
                                         </span>
                                     )}
@@ -249,7 +249,7 @@ export function InteractionTimeline({ contactId }: { contactId: string }) {
                                                 </span>
                                                 <div className="flex gap-1 flex-wrap">
                                                     {interaction.key_topics.map((topic, i) => (
-                                                        <span key={i} className="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                                                        <span key={i} className="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">
                                                             {topic}
                                                         </span>
                                                     ))}

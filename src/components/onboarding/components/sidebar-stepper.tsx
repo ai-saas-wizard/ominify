@@ -49,7 +49,7 @@ export function SidebarStepper({ currentStep, completedSteps, onStepClick, clien
                                     className={cn(
                                         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all",
                                         isActive
-                                            ? "bg-violet-50 text-violet-700"
+                                            ? "bg-emerald-50 text-emerald-700"
                                             : isCompleted
                                             ? "text-gray-700 hover:bg-gray-50"
                                             : idx <= maxReachableStep
@@ -64,7 +64,7 @@ export function SidebarStepper({ currentStep, completedSteps, onStepClick, clien
                                         className={cn(
                                             "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-medium transition-colors",
                                             isActive
-                                                ? "bg-violet-600 text-white shadow-sm"
+                                                ? "bg-emerald-600 text-white shadow-sm"
                                                 : isCompleted
                                                 ? "bg-emerald-100 text-emerald-600"
                                                 : "bg-gray-100 text-gray-400"
@@ -81,7 +81,7 @@ export function SidebarStepper({ currentStep, completedSteps, onStepClick, clien
                                     <div className="min-w-0">
                                         <div className={cn(
                                             "text-sm font-medium truncate",
-                                            isActive ? "text-violet-700" : isCompleted ? "text-gray-700" : "text-gray-400"
+                                            isActive ? "text-emerald-700" : isCompleted ? "text-gray-700" : "text-gray-400"
                                         )}>
                                             {step.label}
                                         </div>

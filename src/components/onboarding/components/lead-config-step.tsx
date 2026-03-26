@@ -41,7 +41,7 @@ export function LeadConfigStep({ form, fieldMeta, updateField, resetFieldToAI, t
                                 className={cn(
                                     "px-3 py-2 rounded-lg border text-sm font-medium transition-all",
                                     form.lead_sources.includes(source)
-                                        ? "border-violet-500 bg-violet-50 text-violet-700"
+                                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                                         : "border-gray-200 text-gray-600 hover:border-gray-300 bg-white"
                                 )}
                             >

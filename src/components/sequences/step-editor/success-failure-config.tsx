@@ -25,7 +25,7 @@ export default function SuccessFailureConfig({
               target_step: e.target.value === "jump_to_step" ? onSuccess.target_step ?? 1 : undefined,
             })
           }
-          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500 mt-1"
+          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 mt-1"
         >
           <option value="continue">Continue to Next</option>
           <option value="jump_to_step">Jump to Step</option>
@@ -43,7 +43,7 @@ export default function SuccessFailureConfig({
               })
             }
             placeholder="Step number"
-            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 mt-2"
+            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 mt-2"
           />
         )}
       </div>
@@ -58,7 +58,7 @@ export default function SuccessFailureConfig({
               retry_delay: e.target.value === "retry_after_seconds" ? onFailure.retry_delay ?? 60 : undefined,
             })
           }
-          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500 mt-1"
+          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 mt-1"
         >
           <option value="skip">Skip and Continue</option>
           <option value="end_sequence">End Sequence</option>
@@ -76,7 +76,7 @@ export default function SuccessFailureConfig({
               })
             }
             placeholder="Seconds"
-            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 mt-2"
+            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 mt-2"
           />
         )}
       </div>

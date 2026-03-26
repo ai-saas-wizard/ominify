@@ -58,8 +58,8 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1 }}
             >
-                <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-violet-100/50 blur-3xl" />
-                <div className="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-violet-100/50 blur-3xl" />
+                <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-emerald-100/50 blur-3xl" />
+                <div className="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-emerald-100/50 blur-3xl" />
             </motion.div>
 
             {/* Main content */}
@@ -71,12 +71,12 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
             >
                 {/* Icon */}
                 <motion.div
-                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-50 ring-1 ring-violet-200"
+                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 ring-1 ring-emerald-200"
                     initial={{ scale: 0.8 }}
                     animate={{ scale: 1 }}
                     transition={{ duration: 0.4, delay: 0.2 }}
                 >
-                    <Sparkles className="h-8 w-8 text-violet-600" />
+                    <Sparkles className="h-8 w-8 text-emerald-600" />
                 </motion.div>
 
                 {/* Headline */}
@@ -101,7 +101,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                             onKeyDown={handleKeyDown}
                             disabled={launching}
                             aria-label="Your business website URL"
-                            className="h-14 border-gray-200 bg-white pl-12 text-lg text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:ring-violet-500/20"
+                            className="h-14 border-gray-200 bg-white pl-12 text-lg text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:ring-emerald-500/20"
                         />
                     </div>
                     {error && (
@@ -117,7 +117,7 @@ export function UrlLaunchScreen({ onLaunch, launching }: UrlLaunchScreenProps) {
                     <Button
                         onClick={handleSubmit}
                         disabled={launching || !url.trim()}
-                        className="h-14 w-full bg-violet-600 text-lg font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+                        className="h-14 w-full bg-emerald-600 text-lg font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                     >
                         {launching ? (
                             <motion.div

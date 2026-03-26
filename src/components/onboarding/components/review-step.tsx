@@ -46,10 +46,10 @@ function SectionCard({
                 className="w-full px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between hover:bg-gray-100 transition-colors"
             >
                 <div className="flex items-center gap-2">
-                    <Icon className="w-4 h-4 text-violet-600" />
+                    <Icon className="w-4 h-4 text-emerald-600" />
                     <span className="text-sm font-semibold text-gray-700">{title}</span>
                 </div>
-                <span className="text-xs text-violet-600 font-medium">Edit</span>
+                <span className="text-xs text-emerald-600 font-medium">Edit</span>
             </button>
             <div className="px-5 py-4 space-y-2">{children}</div>
         </div>
@@ -159,7 +159,7 @@ export function ReviewStep({ form, fieldMeta, completing, completeError, onCompl
                     type="button"
                     onClick={onComplete}
                     disabled={completing}
-                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-base"
+                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-base"
                 >
                     {completing ? (
                         <>

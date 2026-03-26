@@ -64,11 +64,11 @@ export const AdminSidebar = () => {
                             className={cn(
                                 "flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors mb-0.5",
                                 isActive
-                                    ? "bg-indigo-50 text-indigo-700"
+                                    ? "bg-emerald-50 text-emerald-700"
                                     : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                             )}
                         >
-                            <route.icon className={cn("h-4 w-4 mr-3", isActive ? "text-indigo-600" : "text-gray-400")} />
+                            <route.icon className={cn("h-4 w-4 mr-3", isActive ? "text-emerald-600" : "text-gray-400")} />
                             {route.label}
                         </Link>
                     )

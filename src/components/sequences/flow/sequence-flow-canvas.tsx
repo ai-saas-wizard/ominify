@@ -152,13 +152,13 @@ export function SequenceFlowCanvas({
     // MiniMap node color
     const nodeColor = useCallback((node: Node) => {
         const channel = (node.data as any)?.channel;
-        if (node.type === "trigger") return "#8b5cf6";
+        if (node.type === "trigger") return "#10b981";
         if (node.type === "addNode") return "#d1d5db";
         if (node.type === "end") return "#ef4444";
         const config = CHANNEL_FLOW_CONFIG[channel];
         if (channel === "sms") return "#22c55e";
         if (channel === "email") return "#3b82f6";
-        if (channel === "voice_call" || channel === "voice") return "#8b5cf6";
+        if (channel === "voice_call" || channel === "voice") return "#10b981";
         if (channel === "wait") return "#f59e0b";
         if (channel === "condition") return "#ec4899";
         return "#9ca3af";
@@ -264,21 +264,21 @@ export function SequenceFlowCanvas({
             {steps.length === 0 && !showStepEditor && (
                 <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
                     <div className="bg-white/95 backdrop-blur-sm rounded-2xl border shadow-xl p-8 text-center max-w-sm pointer-events-auto">
-                        <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-                            <Sparkles className="w-6 h-6 text-violet-600" />
+                        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+                            <Sparkles className="w-6 h-6 text-emerald-600" />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">Describe Your Sequence</h3>
                         <p className="text-sm text-gray-500 mb-4">Let AI build your follow-up steps, or add them manually.</p>
                         <button
                             onClick={() => setShowAIDialog(true)}
-                            className="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all mb-3"
+                            className="w-full bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all mb-3"
                         >
                             <Sparkles className="w-4 h-4" />
                             Generate with AI
                         </button>
                         <button
                             onClick={() => { setEditingStep(null); setShowStepEditor(true); }}
-                            className="text-sm text-violet-600 hover:text-violet-800 font-medium transition-colors"
+                            className="text-sm text-emerald-600 hover:text-emerald-800 font-medium transition-colors"
                         >
                             or add steps manually
                         </button>

@@ -138,7 +138,7 @@ export function VerticalReview({
                             <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200">
                                 Inbound
                             </span>
-                            <span className="rounded-full bg-violet-50 px-2.5 py-0.5 text-[10px] font-medium text-violet-600 ring-1 ring-violet-200">
+                            <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-emerald-200">
                                 Battle-tested Template
                             </span>
                         </div>

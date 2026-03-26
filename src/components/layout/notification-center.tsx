@@ -115,7 +115,7 @@ export function NotificationCenter({ clientId }: { clientId: string }) {
                             {unreadCount > 0 && (
                                 <button
                                     onClick={handleMarkAllRead}
-                                    className="text-xs text-violet-600 hover:text-violet-700 font-medium flex items-center gap-1"
+                                    className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1"
                                 >
                                     <CheckCheck className="w-3 h-3" />
                                     Mark all read
@@ -131,7 +131,7 @@ export function NotificationCenter({ clientId }: { clientId: string }) {
                     <div className="flex-1 overflow-y-auto">
                         {loading ? (
                             <div className="flex items-center justify-center py-8">
-                                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin" />
+                                <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
                             </div>
                         ) : notifications.length === 0 ? (
                             <div className="text-center py-8 text-sm text-gray-400">
@@ -167,7 +167,7 @@ function NotificationItem({
     return (
         <div
             className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer ${
-                !notification.read ? 'bg-violet-50/30' : ''
+                !notification.read ? 'bg-emerald-50/30' : ''
             }`}
             onClick={() => !notification.read && onMarkRead(notification.id)}
         >
@@ -184,7 +184,7 @@ function NotificationItem({
                             {notification.title}
                         </p>
                         {!notification.read && (
-                            <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-violet-500" />
+                            <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500" />
                         )}
                     </div>
 
@@ -220,7 +220,7 @@ function NotificationItem({
 function getTypeConfig(type: string) {
     const configs: Record<string, { icon: any; bg: string; color: string }> = {
         hot_lead: { icon: Flame, bg: 'bg-orange-100', color: 'text-orange-600' },
-        needs_human: { icon: UserCheck, bg: 'bg-purple-100', color: 'text-purple-600' },
+        needs_human: { icon: UserCheck, bg: 'bg-emerald-100', color: 'text-emerald-600' },
         objection_detected: { icon: AlertTriangle, bg: 'bg-yellow-100', color: 'text-yellow-600' },
         sentiment_drop: { icon: TrendingDown, bg: 'bg-red-100', color: 'text-red-600' },
         appointment_booked: { icon: Calendar, bg: 'bg-green-100', color: 'text-green-600' },

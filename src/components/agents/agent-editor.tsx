@@ -36,7 +36,7 @@ function SubmitButton() {
     <button
       type="submit"
       disabled={pending}
-      className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-2 rounded-xl font-semibold text-sm shadow-md shadow-violet-500/20 hover:shadow-lg hover:shadow-violet-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-5 py-2 rounded-xl font-semibold text-sm shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {pending ? (
         <Loader2 className="w-4 h-4 animate-spin" />
@@ -128,7 +128,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                   onClick={() => setActiveTab(tab.id)}
                   className={`relative flex items-center gap-2 px-4 py-3.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? "text-violet-700"
+                      ? "text-emerald-700"
                       : "text-gray-500 hover:text-gray-700"
                   }`}
                 >
@@ -137,7 +137,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                   {isActive && (
                     <motion.div
                       layoutId="tab-indicator"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full"
+                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-emerald-500 to-emerald-500 rounded-full"
                       transition={{ type: "spring", stiffness: 380, damping: 30 }}
                     />
                   )}
@@ -195,8 +195,8 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                     {/* Identity Section */}
                     <div className="space-y-5">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center">
-                          <User className="w-3.5 h-3.5 text-violet-600" />
+                        <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
+                          <User className="w-3.5 h-3.5 text-emerald-600" />
                         </div>
                         <h3 className="text-sm font-bold text-gray-900">Identity</h3>
                       </div>
@@ -215,19 +215,19 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                               </TooltipContent>
                             </Tooltip>
                           </label>
-                          <div className="group border-2 border-dashed border-gray-200 hover:border-violet-300 rounded-xl p-3 flex items-center gap-3 bg-gray-50/50 hover:bg-violet-50/30 cursor-pointer transition-all">
-                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold shrink-0 text-sm shadow-sm">
+                          <div className="group border-2 border-dashed border-gray-200 hover:border-emerald-300 rounded-xl p-3 flex items-center gap-3 bg-gray-50/50 hover:bg-emerald-50/30 cursor-pointer transition-all">
+                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white font-bold shrink-0 text-sm shadow-sm">
                               {agent.name?.[0]?.toUpperCase() || "A"}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-700 group-hover:text-violet-700 transition-colors">
+                              <p className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">
                                 Upload Image
                               </p>
                               <p className="text-[10px] text-gray-400">
                                 PNG, JPG up to 2MB
                               </p>
                             </div>
-                            <Upload className="w-4 h-4 text-gray-400 group-hover:text-violet-500 transition-colors" />
+                            <Upload className="w-4 h-4 text-gray-400 group-hover:text-emerald-500 transition-colors" />
                           </div>
                         </div>
 
@@ -239,7 +239,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                           <input
                             name="name"
                             defaultValue={agent.name}
-                            className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all placeholder:text-gray-400"
+                            className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 transition-all placeholder:text-gray-400"
                             placeholder="e.g., Sales Assistant"
                           />
                         </div>
@@ -249,8 +249,8 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                     {/* Voice & Language Section */}
                     <div className="space-y-5">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center">
-                          <Mic className="w-3.5 h-3.5 text-indigo-600" />
+                        <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
+                          <Mic className="w-3.5 h-3.5 text-emerald-600" />
                         </div>
                         <h3 className="text-sm font-bold text-gray-900">
                           Voice & Language
@@ -264,7 +264,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                           </label>
                           <div className="relative">
                             <Globe className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                            <select className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 appearance-none transition-all">
+                            <select className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 appearance-none transition-all">
                               {LANGUAGES.map((lang) => (
                                 <option key={lang}>{lang}</option>
                               ))}
@@ -281,7 +281,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                             <select
                               name="voiceId"
                               defaultValue={agent.voice?.voiceId}
-                              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 appearance-none transition-all"
+                              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 appearance-none transition-all"
                             >
                               {voices.map((voice) => (
                                 <option
@@ -332,8 +332,8 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center">
-                            <FileText className="w-3.5 h-3.5 text-violet-600" />
+                          <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
+                            <FileText className="w-3.5 h-3.5 text-emerald-600" />
                           </div>
                           <h3 className="text-sm font-bold text-gray-900">
                             System Prompt
@@ -358,7 +358,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                           <button
                             type="button"
                             onClick={() => setShowCopilot(true)}
-                            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-lg shadow-sm shadow-violet-500/20 transition-all"
+                            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white rounded-lg shadow-sm shadow-emerald-500/20 transition-all"
                           >
                             <Sparkles className="w-3.5 h-3.5" />
                             Edit with AI
@@ -371,7 +371,7 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                           ref={promptRef}
                           name="systemPrompt"
                           defaultValue={initialSystemPrompt}
-                          className="flex-1 min-h-[500px] p-4 border border-gray-200 rounded-xl text-sm font-mono leading-relaxed text-gray-800 bg-gray-50/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 resize-y transition-all placeholder:text-gray-400"
+                          className="flex-1 min-h-[500px] p-4 border border-gray-200 rounded-xl text-sm font-mono leading-relaxed text-gray-800 bg-gray-50/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 resize-y transition-all placeholder:text-gray-400"
                           placeholder="Enter your system prompt here..."
                         />
 
@@ -387,9 +387,9 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                             Upload documents to give your agent additional
                             knowledge and context.
                           </p>
-                          <div className="group border-2 border-dashed border-gray-200 hover:border-violet-300 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-gray-50/50 hover:bg-violet-50/20 cursor-pointer transition-all min-h-[100px]">
-                            <Upload className="w-5 h-5 text-gray-400 group-hover:text-violet-500 mb-2 transition-colors" />
-                            <span className="text-xs font-medium text-gray-500 group-hover:text-violet-600 transition-colors">
+                          <div className="group border-2 border-dashed border-gray-200 hover:border-emerald-300 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-gray-50/50 hover:bg-emerald-50/20 cursor-pointer transition-all min-h-[100px]">
+                            <Upload className="w-5 h-5 text-gray-400 group-hover:text-emerald-500 mb-2 transition-colors" />
+                            <span className="text-xs font-medium text-gray-500 group-hover:text-emerald-600 transition-colors">
                               Drop files or click to upload
                             </span>
                             <span className="text-[10px] text-gray-400 mt-1">

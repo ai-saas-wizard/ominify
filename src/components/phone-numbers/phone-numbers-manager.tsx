@@ -133,7 +133,7 @@ export function PhoneNumbersManager({
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                    <Phone className="w-6 h-6 text-violet-600" />
+                    <Phone className="w-6 h-6 text-emerald-600" />
                     Phone Numbers
                 </h1>
                 <p className="text-gray-500 text-sm mt-1">
@@ -144,8 +144,8 @@ export function PhoneNumbersManager({
             {/* Twilio Account Status */}
             <div className="bg-white rounded-xl border shadow-sm p-6">
                 <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-indigo-100 rounded-lg">
-                        <Server className="w-5 h-5 text-indigo-600" />
+                    <div className="p-2 bg-emerald-100 rounded-lg">
+                        <Server className="w-5 h-5 text-emerald-600" />
                     </div>
                     <div>
                         <h2 className="font-semibold text-gray-900">Twilio Subaccount</h2>
@@ -189,7 +189,7 @@ export function PhoneNumbersManager({
                         <button
                             onClick={handleProvision}
                             disabled={provisioning}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
                         >
                             {provisioning ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -207,8 +207,8 @@ export function PhoneNumbersManager({
                 <div className="bg-white rounded-xl border shadow-sm p-6">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-violet-100 rounded-lg">
-                                <Phone className="w-5 h-5 text-violet-600" />
+                            <div className="p-2 bg-emerald-100 rounded-lg">
+                                <Phone className="w-5 h-5 text-emerald-600" />
                             </div>
                             <div>
                                 <h2 className="font-semibold text-gray-900">Your Numbers</h2>
@@ -233,7 +233,7 @@ export function PhoneNumbersManager({
                                         setPaymentRequired(false);
                                     }
                                 }}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm"
                             >
                                 <Plus className="w-4 h-4" />
                                 Purchase Number
@@ -267,7 +267,7 @@ export function PhoneNumbersManager({
                                             </td>
                                             <td className="py-3 pr-4">
                                                 {number.agent_id && agentMap[number.agent_id] ? (
-                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
+                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
                                                         {agentMap[number.agent_id]}
                                                     </span>
                                                 ) : (
@@ -364,7 +364,7 @@ export function PhoneNumbersManager({
                                     placeholder="Area code (e.g. 415)"
                                     value={areaCode}
                                     onChange={(e) => setAreaCode(e.target.value)}
-                                    className="flex-1 max-w-[200px] px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                                    className="flex-1 max-w-[200px] px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                                 />
                                 <button
                                     onClick={handleSearch}
@@ -398,7 +398,7 @@ export function PhoneNumbersManager({
                                             <button
                                                 onClick={() => handlePurchase(number.phoneNumber)}
                                                 disabled={purchasing === number.phoneNumber}
-                                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-xs disabled:opacity-50"
+                                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-xs disabled:opacity-50"
                                             >
                                                 {purchasing === number.phoneNumber ? (
                                                     <Loader2 className="w-3 h-3 animate-spin" />

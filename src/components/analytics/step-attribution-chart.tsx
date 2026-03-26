@@ -36,7 +36,7 @@ const channelIcons: Record<string, any> = {
 const channelColors: Record<string, string> = {
     sms: "bg-blue-500",
     email: "bg-amber-500",
-    voice: "bg-purple-500",
+    voice: "bg-emerald-500",
 };
 
 export function StepAttributionChart({ sequenceId }: StepAttributionChartProps) {
@@ -135,7 +135,7 @@ export function StepAttributionChart({ sequenceId }: StepAttributionChartProps) 
                                 <span>Reply: <b className="text-gray-700">{(replyRate * 100).toFixed(1)}%</b></span>
                                 <span>Conv: <b className="text-gray-700">{(convRate * 100).toFixed(1)}%</b></span>
                                 {sa.mutated_executions > 0 && (
-                                    <span className="text-violet-500">
+                                    <span className="text-emerald-500">
                                         AI: {(parseFloat(String(sa.mutated_conversion_rate)) * 100).toFixed(1)}%
                                     </span>
                                 )}

@@ -123,12 +123,12 @@ function WelcomeScreen({
             >
                 {/* Icon */}
                 <motion.div
-                    className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-violet-50 ring-2 ring-violet-200"
+                    className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 ring-2 ring-emerald-200"
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", delay: 0.15 }}
                 >
-                    <Compass className="h-8 w-8 text-violet-600" />
+                    <Compass className="h-8 w-8 text-emerald-600" />
                 </motion.div>
 
                 <h2 className="text-center text-2xl font-bold text-gray-900">
@@ -142,7 +142,7 @@ function WelcomeScreen({
                 <div className="mt-8 flex flex-col gap-3">
                     <button
                         onClick={onNext}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
                     >
                         Start Tour
                         <ArrowRight className="h-4 w-4" />
@@ -257,7 +257,7 @@ function SidebarSpotlight({
             {targetRect && (
                 <motion.div
                     key={step.id}
-                    className="absolute rounded-lg ring-2 ring-violet-400 ring-offset-2"
+                    className="absolute rounded-lg ring-2 ring-emerald-400 ring-offset-2"
                     style={{
                         left: targetRect.left - PAD,
                         top: targetRect.top - PAD,
@@ -300,8 +300,8 @@ function SidebarSpotlight({
                         {/* Header */}
                         <div className="mb-3 flex items-center gap-3">
                             {Icon && (
-                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50">
-                                    <Icon className="h-5 w-5 text-violet-600" />
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50">
+                                    <Icon className="h-5 w-5 text-emerald-600" />
                                 </div>
                             )}
                             <h3 className="text-lg font-semibold text-gray-900">
@@ -330,7 +330,7 @@ function SidebarSpotlight({
                                 )}
                                 <button
                                     onClick={onNext}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
                                 >
                                     Next
                                     <ArrowRight className="h-3.5 w-3.5" />
@@ -419,11 +419,11 @@ function ActionScreen({
                                 key={step.id}
                                 href={`/client/${clientId}${step.actionUrl}`}
                                 onClick={onFinish}
-                                className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-violet-200 hover:bg-violet-50/50"
+                                className="group flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-emerald-200 hover:bg-emerald-50/50"
                             >
-                                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gray-50 transition-colors group-hover:bg-violet-50">
+                                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gray-50 transition-colors group-hover:bg-emerald-50">
                                     {Icon && (
-                                        <Icon className="h-5 w-5 text-gray-400 transition-colors group-hover:text-violet-600" />
+                                        <Icon className="h-5 w-5 text-gray-400 transition-colors group-hover:text-emerald-600" />
                                     )}
                                 </div>
                                 <div className="min-w-0 flex-1">
@@ -434,7 +434,7 @@ function ActionScreen({
                                         {step.description}
                                     </p>
                                 </div>
-                                <ArrowRight className="h-4 w-4 flex-shrink-0 text-gray-300 transition-colors group-hover:text-violet-500" />
+                                <ArrowRight className="h-4 w-4 flex-shrink-0 text-gray-300 transition-colors group-hover:text-emerald-500" />
                             </a>
                         );
                     })}
@@ -444,7 +444,7 @@ function ActionScreen({
                 <div className="mt-6 flex flex-col items-center gap-2">
                     <button
                         onClick={onFinish}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-8 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-8 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
                     >
                         Got it, let&apos;s go!
                     </button>

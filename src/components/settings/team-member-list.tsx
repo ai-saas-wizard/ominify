@@ -16,7 +16,7 @@ interface Member {
 }
 
 const roleBadgeClass: Record<string, string> = {
-    owner: "bg-violet-100 text-violet-700 border-violet-200",
+    owner: "bg-emerald-100 text-emerald-700 border-emerald-200",
     admin: "bg-blue-100 text-blue-700 border-blue-200",
     member: "bg-gray-100 text-gray-600 border-gray-200",
 };

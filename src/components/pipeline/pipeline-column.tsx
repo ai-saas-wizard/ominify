@@ -47,7 +47,7 @@ export function PipelineColumn({
             className={cn(
                 "flex flex-col w-[300px] h-full rounded-xl transition-all duration-200",
                 "bg-gray-50/80 border border-gray-200/60",
-                highlighted && "bg-violet-50/60 border-violet-300/60 ring-2 ring-violet-200/40"
+                highlighted && "bg-emerald-50/60 border-emerald-300/60 ring-2 ring-emerald-200/40"
             )}
         >
             {/* Column Header */}

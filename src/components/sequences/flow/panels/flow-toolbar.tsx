@@ -164,13 +164,13 @@ export function FlowToolbar({
 
                 {/* AI Mutation */}
                 <div className="flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-                    <span className="text-xs font-medium text-violet-700">AI</span>
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-xs font-medium text-emerald-700">AI</span>
                     <Switch
                         checked={mutationEnabled}
                         onCheckedChange={handleMutationToggle}
                         disabled={savingMutation}
-                        className="data-[state=checked]:bg-violet-600 h-5 w-9"
+                        className="data-[state=checked]:bg-emerald-600 h-5 w-9"
                     />
                     {mutationEnabled && (
                         <Select
@@ -178,7 +178,7 @@ export function FlowToolbar({
                             onValueChange={handleAggressivenessChange}
                             disabled={savingMutation}
                         >
-                            <SelectTrigger className="h-7 w-[110px] text-xs border-violet-200">
+                            <SelectTrigger className="h-7 w-[110px] text-xs border-emerald-200">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -198,7 +198,7 @@ export function FlowToolbar({
                         <TooltipTrigger asChild>
                             <Link
                                 href={`/client/${clientId}/sequences/${sequenceId}/learning`}
-                                className="flex items-center justify-center w-8 h-8 rounded-lg text-violet-600 hover:bg-violet-50 transition-colors"
+                                className="flex items-center justify-center w-8 h-8 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
                             >
                                 <Brain className="w-4 h-4" />
                             </Link>
@@ -215,7 +215,7 @@ export function FlowToolbar({
                                 variant="ghost"
                                 size="icon"
                                 onClick={onOpenAIDialog}
-                                className="w-8 h-8 text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                                className="w-8 h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                             >
                                 <Sparkles className="w-4 h-4" />
                             </Button>
@@ -262,7 +262,7 @@ export function FlowToolbar({
                                         }
                                         className={`w-8 h-8 ${
                                             sidebarTab === item.key
-                                                ? "bg-violet-600 text-white hover:bg-violet-700"
+                                                ? "bg-emerald-600 text-white hover:bg-emerald-700"
                                                 : "text-gray-500 hover:text-gray-900"
                                         }`}
                                     >

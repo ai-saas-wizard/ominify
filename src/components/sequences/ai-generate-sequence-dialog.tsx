@@ -185,7 +185,7 @@ export function AIGenerateSequenceDialog({
             return (
                 <button
                     onClick={handleOpen}
-                    className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl flex items-center gap-3 transition-all text-base font-semibold shadow-lg shadow-violet-200 hover:shadow-violet-300"
+                    className="bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-6 py-3 rounded-xl flex items-center gap-3 transition-all text-base font-semibold shadow-lg shadow-emerald-200 hover:shadow-emerald-300"
                 >
                     <Sparkles className="w-5 h-5" />
                     Describe Your First Sequence
@@ -196,7 +196,7 @@ export function AIGenerateSequenceDialog({
         return (
             <button
                 onClick={handleOpen}
-                className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all text-sm font-medium shadow-sm"
+                className="bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all text-sm font-medium shadow-sm"
             >
                 <Sparkles className="w-4 h-4" />
                 Generate with AI
@@ -221,8 +221,8 @@ export function AIGenerateSequenceDialog({
                             {/* Header */}
                             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
                                 <div className="flex items-center gap-2">
-                                    <div className="p-1.5 bg-violet-100 rounded-lg">
-                                        <Sparkles className="w-4 h-4 text-violet-600" />
+                                    <div className="p-1.5 bg-emerald-100 rounded-lg">
+                                        <Sparkles className="w-4 h-4 text-emerald-600" />
                                     </div>
                                     <h2 className="text-lg font-semibold text-gray-900">
                                         Create Sequence with AI
@@ -256,10 +256,10 @@ export function AIGenerateSequenceDialog({
                                         >
                                             {msg.role === "assistant" && (
                                                 <div className="flex gap-3 max-w-[85%]">
-                                                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center mt-1">
-                                                        <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+                                                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center mt-1">
+                                                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                                                     </div>
-                                                    <div className="bg-violet-50 border border-violet-100 rounded-xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+                                                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
                                                         {msg.content}
                                                     </div>
                                                 </div>
@@ -280,14 +280,14 @@ export function AIGenerateSequenceDialog({
                                         animate={{ opacity: 1 }}
                                         className="flex gap-3"
                                     >
-                                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center">
-                                            <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+                                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center">
+                                            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                                         </div>
-                                        <div className="bg-violet-50 border border-violet-100 rounded-xl rounded-tl-sm px-4 py-3">
+                                        <div className="bg-emerald-50 border border-emerald-100 rounded-xl rounded-tl-sm px-4 py-3">
                                             <div className="flex gap-1">
-                                                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                                                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                                                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                                                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                                                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                                                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                                             </div>
                                         </div>
                                     </motion.div>
@@ -298,34 +298,34 @@ export function AIGenerateSequenceDialog({
                                     <motion.div
                                         initial={{ opacity: 0, y: 10 }}
                                         animate={{ opacity: 1, y: 0 }}
-                                        className="bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-5 space-y-4"
+                                        className="bg-gradient-to-br from-emerald-50 to-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-4"
                                     >
-                                        <div className="flex items-center gap-2 text-violet-700 font-semibold">
+                                        <div className="flex items-center gap-2 text-emerald-700 font-semibold">
                                             <Wand2 className="w-4 h-4" />
                                             Ready to Generate
                                         </div>
                                         <p className="text-sm text-gray-700">{plan.summary}</p>
 
                                         <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-white/80 rounded-lg p-3 border border-violet-100">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
                                                 <p className="text-xs text-gray-500 mb-1">Trigger</p>
                                                 <p className="text-sm font-medium text-gray-900">
                                                     {TRIGGER_LABELS[plan.trigger_type] || plan.trigger_type}
                                                 </p>
                                             </div>
-                                            <div className="bg-white/80 rounded-lg p-3 border border-violet-100">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
                                                 <p className="text-xs text-gray-500 mb-1">Urgency</p>
                                                 <p className="text-sm font-medium text-gray-900 capitalize">
                                                     {plan.urgency_tier}
                                                 </p>
                                             </div>
-                                            <div className="bg-white/80 rounded-lg p-3 border border-violet-100">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
                                                 <p className="text-xs text-gray-500 mb-1">Channels</p>
                                                 <p className="text-sm font-medium text-gray-900">
                                                     {plan.channels.map((c) => CHANNEL_LABELS[c] || c).join(", ")}
                                                 </p>
                                             </div>
-                                            <div className="bg-white/80 rounded-lg p-3 border border-violet-100">
+                                            <div className="bg-white/80 rounded-lg p-3 border border-emerald-100">
                                                 <p className="text-xs text-gray-500 mb-1">Steps</p>
                                                 <p className="text-sm font-medium text-gray-900">
                                                     ~{plan.step_count} steps
@@ -337,7 +337,7 @@ export function AIGenerateSequenceDialog({
                                             <button
                                                 onClick={handleGenerate}
                                                 disabled={loading}
-                                                className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all text-sm font-medium shadow-sm"
+                                                className="flex-1 bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all text-sm font-medium shadow-sm"
                                             >
                                                 {loading ? (
                                                     <>
@@ -354,7 +354,7 @@ export function AIGenerateSequenceDialog({
                                             <button
                                                 onClick={handleRefine}
                                                 disabled={loading}
-                                                className="px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100 rounded-lg transition-colors flex items-center gap-2"
+                                                className="px-4 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors flex items-center gap-2"
                                             >
                                                 <ArrowLeft className="w-4 h-4" />
                                                 Refine
@@ -370,8 +370,8 @@ export function AIGenerateSequenceDialog({
                                         animate={{ opacity: 1 }}
                                         className="flex flex-col items-center gap-3 py-6"
                                     >
-                                        <div className="p-3 bg-violet-100 rounded-full">
-                                            <Loader2 className="w-6 h-6 text-violet-600 animate-spin" />
+                                        <div className="p-3 bg-emerald-100 rounded-full">
+                                            <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" />
                                         </div>
                                         <p className="text-sm text-gray-600">Building your sequence...</p>
                                     </motion.div>
@@ -399,7 +399,7 @@ export function AIGenerateSequenceDialog({
                                                 key={chip.label}
                                                 onClick={() => handleSend(chip.label)}
                                                 disabled={loading}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-full transition-colors disabled:opacity-50"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full transition-colors disabled:opacity-50"
                                             >
                                                 <chip.icon className="w-3 h-3" />
                                                 {chip.label}
@@ -417,12 +417,12 @@ export function AIGenerateSequenceDialog({
                                                 onKeyDown={handleKeyDown}
                                                 placeholder="Describe what you need..."
                                                 rows={1}
-                                                className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+                                                className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
                                             />
                                             <button
                                                 onClick={() => handleSend()}
                                                 disabled={!input.trim() || loading}
-                                                className="p-2.5 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex-shrink-0"
+                                                className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex-shrink-0"
                                             >
                                                 {loading ? (
                                                     <Loader2 className="w-4 h-4 animate-spin" />

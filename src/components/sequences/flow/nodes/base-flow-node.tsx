@@ -47,7 +47,7 @@ export function BaseFlowNode({
             onClick={onClick}
             className={cn(
                 "relative bg-white rounded-xl border shadow-sm cursor-pointer transition-all hover:shadow-md",
-                selected && "ring-2 ring-violet-500 ring-offset-2",
+                selected && "ring-2 ring-emerald-500 ring-offset-2",
             )}
             style={{ width: FLOW_NODE_WIDTH }}
         >
@@ -80,8 +80,8 @@ export function BaseFlowNode({
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-violet-100">
-                                        <Sparkles className="w-3 h-3 text-violet-600" />
+                                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100">
+                                        <Sparkles className="w-3 h-3 text-emerald-600" />
                                     </div>
                                 </TooltipTrigger>
                                 <TooltipContent>AI Mutation enabled</TooltipContent>

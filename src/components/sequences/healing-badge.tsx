@@ -17,7 +17,7 @@ import {
 
 const HEALING_ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
     switch_channel: { icon: ArrowRightLeft, color: "text-blue-600 bg-blue-100", label: "Switched Channel" },
-    override_channel: { icon: ArrowRightLeft, color: "text-indigo-600 bg-indigo-100", label: "Channel Override" },
+    override_channel: { icon: ArrowRightLeft, color: "text-emerald-600 bg-emerald-100", label: "Channel Override" },
     retry_alternative: { icon: RefreshCw, color: "text-amber-600 bg-amber-100", label: "Retry Alternative" },
     skip_and_advance: { icon: SkipForward, color: "text-gray-600 bg-gray-100", label: "Skipped" },
     inject_fallback_sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "Fallback SMS" },

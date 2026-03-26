@@ -13,7 +13,7 @@ const SOURCE_STYLES: Record<string, { bg: string; text: string; label: string }>
     manual: { bg: "bg-gray-50", text: "text-gray-600", label: "Manual" },
     api: { bg: "bg-amber-50", text: "text-amber-600", label: "API" },
     form: { bg: "bg-emerald-50", text: "text-emerald-600", label: "Form" },
-    import: { bg: "bg-purple-50", text: "text-purple-600", label: "Import" },
+    import: { bg: "bg-emerald-50", text: "text-emerald-600", label: "Import" },
 };
 
 // ─── Engagement color scale ─────────────────────────────────────────────────
@@ -70,8 +70,8 @@ function getInitials(name: string | null): string {
 }
 
 const AVATAR_COLORS = [
-    "from-violet-500 to-purple-600",
-    "from-blue-500 to-indigo-600",
+    "from-emerald-500 to-emerald-600",
+    "from-blue-500 to-emerald-600",
     "from-emerald-500 to-teal-600",
     "from-amber-500 to-orange-600",
     "from-pink-500 to-rose-600",
@@ -123,7 +123,7 @@ export function PipelineContactCard({
                 "hover:border-gray-300 hover:shadow-md transition-all duration-150",
                 "select-none",
                 isDragging && "opacity-30 shadow-none",
-                isGhost && "shadow-xl border-violet-300 bg-white/95 backdrop-blur-sm"
+                isGhost && "shadow-xl border-emerald-300 bg-white/95 backdrop-blur-sm"
             )}
         >
             {/* Top: Avatar + Name + Source badge */}
@@ -158,7 +158,7 @@ export function PipelineContactCard({
             {/* Sequence info */}
             {hasSequence && (
                 <div className="flex items-center gap-1.5 mb-2 pl-0.5">
-                    <MessageSquare className="w-3 h-3 text-violet-400 flex-shrink-0" />
+                    <MessageSquare className="w-3 h-3 text-emerald-400 flex-shrink-0" />
                     <span className="text-xs text-gray-600 truncate">{contact.enrollment!.sequence_name}</span>
                     <span
                         className={cn(

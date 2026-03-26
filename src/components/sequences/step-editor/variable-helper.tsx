@@ -16,7 +16,7 @@ export function VariableHelper({ onInsert }: VariableHelperProps) {
             key={v.key}
             type="button"
             onClick={() => onInsert(`{{${v.key}}}`)}
-            className="bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 text-xs px-2.5 py-1 font-mono rounded-full transition-colors cursor-pointer"
+            className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs px-2.5 py-1 font-mono rounded-full transition-colors cursor-pointer"
           >
             {v.key}
           </button>

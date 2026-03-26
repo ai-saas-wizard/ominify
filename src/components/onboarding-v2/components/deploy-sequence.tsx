@@ -26,11 +26,11 @@ export function DeploySequence({ progress, onRetry, onBackToProfile }: DeploySeq
                 {/* Header */}
                 <div className="text-center">
                     <motion.div
-                        className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-50 ring-1 ring-violet-200"
+                        className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 ring-1 ring-emerald-200"
                         animate={{ scale: [1, 1.05, 1] }}
                         transition={{ duration: 2, repeat: Infinity }}
                     >
-                        <Rocket className="h-8 w-8 text-violet-600" />
+                        <Rocket className="h-8 w-8 text-emerald-600" />
                     </motion.div>
                     <h2 className="text-2xl font-bold text-gray-900">Deploying Your Agents</h2>
                     <p className="mt-2 text-sm text-gray-500">
@@ -42,7 +42,7 @@ export function DeploySequence({ progress, onRetry, onBackToProfile }: DeploySeq
                 <div className="w-full">
                     <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                         <motion.div
-                            className="h-full rounded-full bg-gradient-to-r from-violet-500 to-violet-400"
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
                             initial={{ width: "0%" }}
                             animate={{ width: `${percentage}%` }}
                             transition={{ duration: 0.3 }}
@@ -120,7 +120,7 @@ export function DeploySequence({ progress, onRetry, onBackToProfile }: DeploySeq
                         </div>
                         <div className="flex justify-center gap-3">
                             {onRetry && (
-                                <Button onClick={onRetry} className="bg-violet-600 text-white hover:bg-violet-500">
+                                <Button onClick={onRetry} className="bg-emerald-600 text-white hover:bg-emerald-500">
                                     Try Again
                                 </Button>
                             )}
@@ -152,7 +152,7 @@ function StepIcon({ status }: { status: string }) {
         case "in_progress":
             return (
                 <div className="flex h-6 w-6 items-center justify-center">
-                    <Loader2 className="h-5 w-5 animate-spin text-violet-600" />
+                    <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
                 </div>
             );
         case "failed":
@@ -175,7 +175,7 @@ function SubstepIcon({ status }: { status: string }) {
         case "completed":
             return <Check className="h-3 w-3 text-emerald-600" />;
         case "in_progress":
-            return <Loader2 className="h-3 w-3 animate-spin text-violet-600" />;
+            return <Loader2 className="h-3 w-3 animate-spin text-emerald-600" />;
         case "failed":
             return <AlertCircle className="h-3 w-3 text-red-500" />;
         default:

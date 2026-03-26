@@ -45,7 +45,7 @@ const URGENCY_COLORS: Record<string, string> = {
 const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
     sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "SMS" },
     email: { icon: Mail, color: "text-blue-600 bg-blue-100", label: "Email" },
-    voice_call: { icon: Phone, color: "text-violet-600 bg-violet-100", label: "Voice Call" },
+    voice_call: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
     wait: { icon: Clock, color: "text-amber-600 bg-amber-100", label: "Wait / Delay" },
     condition: { icon: GitBranch, color: "text-pink-600 bg-pink-100", label: "Condition" },
 };
@@ -144,7 +144,7 @@ export function FlowSidebarPanel({
 
                             {/* Meta badges */}
                             <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="default" className="bg-violet-50 text-violet-600 border-violet-100">
+                                <Badge variant="default" className="bg-emerald-50 text-emerald-600 border-emerald-100">
                                     {TRIGGER_LABELS[sequence.trigger_type] || sequence.trigger_type}
                                 </Badge>
                                 <Badge
@@ -178,7 +178,7 @@ export function FlowSidebarPanel({
                                         { label: "Active", value: stats.active, icon: Zap, color: "text-green-600", bg: "bg-green-50" },
                                         { label: "Paused", value: stats.paused, icon: Pause, color: "text-yellow-600", bg: "bg-yellow-50" },
                                         { label: "Completed", value: stats.completed, icon: CheckCircle2, color: "text-blue-600", bg: "bg-blue-50" },
-                                        { label: "Replied", value: stats.replied, icon: MessageSquare, color: "text-purple-600", bg: "bg-purple-50" },
+                                        { label: "Replied", value: stats.replied, icon: MessageSquare, color: "text-emerald-600", bg: "bg-emerald-50" },
                                         { label: "Booked", value: stats.booked, icon: Users, color: "text-emerald-600", bg: "bg-emerald-50" },
                                         { label: "Failed", value: stats.failed, icon: XCircle, color: "text-red-600", bg: "bg-red-50" },
                                     ].map((stat) => (

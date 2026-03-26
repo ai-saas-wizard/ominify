@@ -60,7 +60,7 @@ export function EmotionBadge({
             )}
 
             {needsHuman && (
-                <span className={`${sizeClasses} rounded-full bg-purple-100 text-purple-700 font-medium inline-flex items-center gap-0.5`}>
+                <span className={`${sizeClasses} rounded-full bg-emerald-100 text-emerald-700 font-medium inline-flex items-center gap-0.5`}>
                     \uD83D\uDC64 Needs Human
                 </span>
             )}

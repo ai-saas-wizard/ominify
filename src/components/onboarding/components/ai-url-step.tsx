@@ -55,12 +55,12 @@ export function AIUrlStep({ initialUrl, onAnalyze, onSkip, analyzing }: AIUrlSte
                     <CardContent className="pt-8 pb-8 px-8">
                         {/* Icon */}
                         <motion.div
-                            className="w-16 h-16 bg-violet-100 rounded-2xl flex items-center justify-center mx-auto mb-6"
+                            className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto mb-6"
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.1 }}
                         >
-                            <Sparkles className="w-8 h-8 text-violet-600" />
+                            <Sparkles className="w-8 h-8 text-emerald-600" />
                         </motion.div>
 
                         {/* Title */}

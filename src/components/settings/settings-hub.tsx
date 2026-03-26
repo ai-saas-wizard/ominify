@@ -30,9 +30,9 @@ const navLinks = [
         key: "team",
         path: "settings/team",
         icon: Users,
-        iconBg: "bg-violet-100",
-        iconColor: "text-violet-600",
-        gradient: "from-violet-500 via-indigo-500 to-violet-600",
+        iconBg: "bg-emerald-100",
+        iconColor: "text-emerald-600",
+        gradient: "from-emerald-500 via-emerald-500 to-emerald-600",
         title: "Team Members",
         description: (count: number) =>
             `${count} member${count !== 1 ? "s" : ""} \u00B7 Manage who can access this account`,
@@ -61,9 +61,9 @@ const navLinks = [
         key: "webhooks",
         path: "settings/webhooks",
         icon: Webhook,
-        iconBg: "bg-indigo-100",
-        iconColor: "text-indigo-600",
-        gradient: "from-indigo-500 via-purple-500 to-indigo-600",
+        iconBg: "bg-emerald-100",
+        iconColor: "text-emerald-600",
+        gradient: "from-emerald-500 via-emerald-500 to-emerald-600",
         title: "Webhooks",
         description: (count: number) =>
             `${count} webhook${count !== 1 ? "s" : ""} \u00B7 Receive real-time call notifications`,
@@ -116,7 +116,7 @@ export function SettingsHub({
                                         {clerkUser.imageUrl && (
                                             <AvatarImage src={clerkUser.imageUrl} alt="Profile" />
                                         )}
-                                        <AvatarFallback className="bg-violet-100 text-violet-700">
+                                        <AvatarFallback className="bg-emerald-100 text-emerald-700">
                                             {clerkUser.firstName?.[0] || "U"}
                                         </AvatarFallback>
                                     </Avatar>
@@ -158,7 +158,7 @@ export function SettingsHub({
                 return (
                     <motion.div key={link.key} variants={staggerItem}>
                         <Link href={`/client/${clientId}/${link.path}`} className="block group">
-                            <Card className="overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-500/5">
+                            <Card className="overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/5">
                                 <div className={`h-[3px] bg-gradient-to-r ${link.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-200`} />
                                 <div className="px-6 py-4 flex items-center justify-between">
                                     <div className="flex items-center gap-3">

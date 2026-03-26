@@ -84,11 +84,11 @@ export default async function ClientBillingPage(props: {
             </div>
 
             {/* Buy Minutes Section */}
-            <div className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-xl p-6 text-white shadow-lg">
+            <div className="bg-gradient-to-r from-emerald-600 to-emerald-600 rounded-xl p-6 text-white shadow-lg">
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-xl font-bold">Need more minutes?</h2>
-                        <p className="text-violet-200 mt-1">Purchase any amount at ${billing.price_per_minute.toFixed(2)} per minute</p>
+                        <p className="text-emerald-200 mt-1">Purchase any amount at ${billing.price_per_minute.toFixed(2)} per minute</p>
                     </div>
                     <PurchaseModal
                         clientId={clientId}

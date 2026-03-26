@@ -18,8 +18,8 @@ export function AddNodeButton({ data }: NodeProps) {
                 className="!w-3 !h-3 !bg-gray-300 !border-2 !border-white !-top-1.5"
             />
 
-            <div className="flex items-center justify-center w-12 h-12 rounded-full border-2 border-dashed border-gray-300 bg-white hover:border-violet-400 hover:bg-violet-50 transition-all cursor-pointer group shadow-sm">
-                <Plus className="w-5 h-5 text-gray-400 group-hover:text-violet-600 transition-colors" />
+            <div className="flex items-center justify-center w-12 h-12 rounded-full border-2 border-dashed border-gray-300 bg-white hover:border-emerald-400 hover:bg-emerald-50 transition-all cursor-pointer group shadow-sm">
+                <Plus className="w-5 h-5 text-gray-400 group-hover:text-emerald-600 transition-colors" />
             </div>
         </motion.div>
     );

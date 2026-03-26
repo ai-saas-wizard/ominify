@@ -275,8 +275,8 @@ export function PipelineBoard({
                     className="flex-1 flex items-center justify-center"
                 >
                     <div className="text-center max-w-sm mx-auto">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center mx-auto mb-4">
-                            <KanbanSquare className="w-8 h-8 text-violet-500" />
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-100 flex items-center justify-center mx-auto mb-4">
+                            <KanbanSquare className="w-8 h-8 text-emerald-500" />
                         </div>
                         <h2 className="text-lg font-semibold text-gray-900 mb-2">No leads in your pipeline yet</h2>
                         <p className="text-sm text-gray-500 mb-6">
@@ -284,7 +284,7 @@ export function PipelineBoard({
                         </p>
                         <a
                             href={`/client/${clientId}/contacts`}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors shadow-sm"
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
                         >
                             Go to Contacts
                             <ArrowRight className="w-4 h-4" />
@@ -324,7 +324,7 @@ export function PipelineBoard({
                 {/* Stats row */}
                 <div className="flex items-center gap-3 mb-4">
                     {[
-                        { icon: Users, label: "Total leads", value: totalContacts, color: "text-violet-600 bg-violet-50" },
+                        { icon: Users, label: "Total leads", value: totalContacts, color: "text-emerald-600 bg-emerald-50" },
                         { icon: TrendingUp, label: "In pipeline", value: contactsWithStage, color: "text-blue-600 bg-blue-50" },
                         { icon: KanbanSquare, label: "Converted", value: terminalContacts, color: "text-emerald-600 bg-emerald-50" },
                     ].map((stat, i) => (
@@ -354,7 +354,7 @@ export function PipelineBoard({
                             placeholder="Search leads..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-56 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-300 transition-all"
+                            className="w-56 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-300 transition-all"
                         />
                     </div>
                 </div>

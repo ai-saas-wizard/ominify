@@ -172,7 +172,7 @@ export function EmailConfigForm({
                         onClick={() => setProvider("smtp")}
                         className={`flex-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
                             provider === "smtp"
-                                ? "border-violet-500 bg-violet-50 text-violet-700"
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                                 : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
                         }`}
                     >
@@ -206,7 +206,7 @@ export function EmailConfigForm({
                             onClick={() => applyPreset(key)}
                             className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
                                 smtpHost === SMTP_PRESETS[key].host && key !== "custom"
-                                    ? "bg-violet-100 border-violet-300 text-violet-700"
+                                    ? "bg-emerald-100 border-emerald-300 text-emerald-700"
                                     : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
                             }`}
                         >
@@ -341,7 +341,7 @@ export function EmailConfigForm({
                             if (checked && smtpPort === 587) setSmtpPort(465);
                             if (!checked && smtpPort === 465) setSmtpPort(587);
                         }}
-                        className="data-[state=checked]:bg-violet-600"
+                        className="data-[state=checked]:bg-emerald-600"
                     />
                     <div>
                         <span className="text-sm font-medium text-gray-700">Use SSL/TLS</span>

@@ -93,7 +93,7 @@ export function AddContactModal({
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
                             placeholder="+1234567890"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         />
                     </div>
 
@@ -106,7 +106,7 @@ export function AddContactModal({
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             placeholder="Contact name"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         />
                     </div>
 
@@ -119,7 +119,7 @@ export function AddContactModal({
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="email@example.com"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         />
                     </div>
 
@@ -137,7 +137,7 @@ export function AddContactModal({
                                             ...prev,
                                             [field.field_key]: e.target.checked
                                         }))}
-                                        className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+                                        className="w-4 h-4 rounded border-gray-300 text-emerald-600"
                                     />
                                     <span className="text-sm text-gray-600">Yes</span>
                                 </label>
@@ -150,7 +150,7 @@ export function AddContactModal({
                                         [field.field_key]: e.target.value
                                     }))}
                                     placeholder={`Enter ${field.name.toLowerCase()}`}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                 />
                             )}
                         </div>
@@ -168,7 +168,7 @@ export function AddContactModal({
                         <button
                             type="submit"
                             disabled={loading}
-                            className="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                            className="flex-1 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
                             Add Contact

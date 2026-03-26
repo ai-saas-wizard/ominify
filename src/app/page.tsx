@@ -162,7 +162,7 @@ export default async function HomePage() {
                 href={`/client/${client.id}/agents`}
                 className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
               >
-                <div className="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center text-violet-700 font-semibold">
+                <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-semibold">
                   {client.name?.charAt(0).toUpperCase() || "C"}
                 </div>
                 <div>

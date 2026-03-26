@@ -43,7 +43,7 @@ export default async function AdminLayout({
                     <p className="text-sm text-gray-500">
                         Signed in as: <span className="font-medium">{userEmail}</span>
                     </p>
-                    <a href="/" className="mt-6 inline-block text-violet-600 hover:underline">
+                    <a href="/" className="mt-6 inline-block text-emerald-600 hover:underline">
                         ← Go back home
                     </a>
                 </div>

@@ -46,11 +46,11 @@ export function CreateClientDialog() {
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-gray-700">Client Name</label>
-                        <input name="name" required placeholder="Acme Corp" className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500" />
+                        <input name="name" required placeholder="Acme Corp" className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500" />
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-gray-700">Email (Optional)</label>
-                        <input name="email" type="email" placeholder="client@example.com" className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500" />
+                        <input name="email" type="email" placeholder="client@example.com" className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500" />
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-gray-700">Account Type</label>
@@ -58,7 +58,7 @@ export function CreateClientDialog() {
                             name="type"
                             value={accountType}
                             onChange={(e) => setAccountType(e.target.value as "CUSTOM" | "UMBRELLA")}
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500"
+                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                             <option value="CUSTOM">Type A (Custom Key)</option>
                             <option value="UMBRELLA">Type B (Umbrella)</option>
@@ -72,7 +72,7 @@ export function CreateClientDialog() {
                                 <Key className="w-3.5 h-3.5" />
                                 Vapi Private API Key
                             </label>
-                            <input name="vapi_key" required placeholder="sk_..." className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm" />
+                            <input name="vapi_key" required placeholder="sk_..." className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-sm" />
                             <p className="text-xs text-gray-500">Use the API key provided by the client.</p>
                         </div>
                     )}
@@ -80,12 +80,12 @@ export function CreateClientDialog() {
                     {/* ── TYPE B: Auto-assigned to agency umbrella ── */}
                     {accountType === "UMBRELLA" && (
                         <div className="space-y-4">
-                            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
-                                <div className="flex items-center gap-2 text-indigo-700 text-sm font-medium mb-1">
+                            <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-emerald-700 text-sm font-medium mb-1">
                                     <Umbrella className="w-4 h-4" />
                                     Umbrella Mode
                                 </div>
-                                <p className="text-xs text-indigo-600/80">
+                                <p className="text-xs text-emerald-600/80">
                                     This client will use agency-managed VAPI credentials and get a Twilio subaccount provisioned automatically.
                                 </p>
                             </div>
@@ -98,7 +98,7 @@ export function CreateClientDialog() {
                                     min="1"
                                     max="20"
                                     defaultValue="2"
-                                    className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                                    className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
                                 <p className="text-xs text-gray-500">Max concurrent calls this tenant can make within the umbrella.</p>
                             </div>
@@ -118,8 +118,8 @@ export function CreateClientDialog() {
                             disabled={loading}
                             className={`px-4 py-2 text-sm font-medium text-white rounded-lg flex items-center ${
                                 accountType === "UMBRELLA"
-                                    ? "bg-indigo-600 hover:bg-indigo-700"
-                                    : "bg-violet-600 hover:bg-violet-700"
+                                    ? "bg-emerald-600 hover:bg-emerald-700"
+                                    : "bg-emerald-600 hover:bg-emerald-700"
                             } disabled:opacity-50`}
                         >
                             {loading && <Loader2 className="w-3 h-3 animate-spin mr-2" />}

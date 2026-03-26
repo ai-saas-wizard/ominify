@@ -39,7 +39,7 @@ export const AgentTable = ({ agents }: AgentTableProps) => {
                             <tr key={agent.id} className="hover:bg-gray-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0">
                                 <td className="px-6 py-4">
                                     <Link href={`/client/${clientId}/agents/${agent.id}`} className="flex items-center gap-3">
-                                        <Avatar className="h-10 w-10 border border-gray-100 bg-violet-100 text-violet-600">
+                                        <Avatar className="h-10 w-10 border border-gray-100 bg-emerald-100 text-emerald-600">
                                             <AvatarFallback className="font-medium">{agent.name?.[0]?.toUpperCase()}</AvatarFallback>
                                         </Avatar>
                                         <div className="font-medium text-gray-900">{agent.name || "Untitled"}</div>

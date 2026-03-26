@@ -90,7 +90,7 @@ const TRIGGER_LABELS: Record<string, string> = {
 
 const CHANNEL_ICONS: Record<string, { icon: typeof MessageSquare; color: string; label: string }> = {
     sms: { icon: MessageSquare, color: "text-blue-500", label: "SMS" },
-    email: { icon: Mail, color: "text-violet-500", label: "Email" },
+    email: { icon: Mail, color: "text-emerald-500", label: "Email" },
     voice: { icon: Phone, color: "text-emerald-500", label: "Voice" },
     wait: { icon: Clock, color: "text-amber-500", label: "Wait" },
     condition: { icon: GitBranch, color: "text-pink-500", label: "Condition" },
@@ -250,7 +250,7 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
     return (
         <motion.div variants={cardVariants} layout>
             <Link href={`/client/${clientId}/sequences/${sequence.id}`} className="block h-full">
-                <Card className="h-full overflow-hidden border-gray-200/60 hover:border-violet-300 hover:shadow-lg transition-all duration-200 group cursor-pointer">
+                <Card className="h-full overflow-hidden border-gray-200/60 hover:border-emerald-300 hover:shadow-lg transition-all duration-200 group cursor-pointer">
                     {/* Active indicator bar */}
                     <div
                         className={`h-1 w-full ${
@@ -264,7 +264,7 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                         {/* Row 1: Title + Status */}
                         <div className="flex items-start justify-between gap-2">
                             <div className="flex-1 min-w-0">
-                                <h3 className="font-semibold text-gray-900 group-hover:text-violet-700 transition-colors truncate text-[15px]">
+                                <h3 className="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors truncate text-[15px]">
                                     {sequence.name}
                                 </h3>
                                 {sequence.description && (
@@ -277,8 +277,8 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                                 {sequence.generation_mode === "dynamic" && (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <div className="p-1 rounded-md bg-violet-50">
-                                                <Brain className="w-3.5 h-3.5 text-violet-500" />
+                                            <div className="p-1 rounded-md bg-emerald-50">
+                                                <Brain className="w-3.5 h-3.5 text-emerald-500" />
                                             </div>
                                         </TooltipTrigger>
                                         <TooltipContent>Dynamic (AI-driven) sequence</TooltipContent>
@@ -322,7 +322,7 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                         {/* Row 2: Badges (trigger + urgency + channels) */}
                         <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                                <Badge variant="outline" className="text-[11px] px-2 py-0 h-5 bg-violet-50/50 border-violet-100 text-violet-600">
+                                <Badge variant="outline" className="text-[11px] px-2 py-0 h-5 bg-emerald-50/50 border-emerald-100 text-emerald-600">
                                     {TRIGGER_LABELS[sequence.trigger_type] || sequence.trigger_type}
                                 </Badge>
                                 <Badge
@@ -351,8 +351,8 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                                 </Tooltip>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-violet-50/60 border border-violet-100/50">
-                                            <Reply className="w-3 h-3 text-violet-500 mb-0.5" />
+                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-emerald-50/60 border border-emerald-100/50">
+                                            <Reply className="w-3 h-3 text-emerald-500 mb-0.5" />
                                             <span className="text-xs font-bold text-gray-900">{sequence.replied_count}</span>
                                             <span className="text-[9px] text-gray-500">Replied</span>
                                         </div>
@@ -408,7 +408,7 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                                     <Calendar className="w-3 h-3" />
                                     {relativeTime(sequence.created_at)}
                                 </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all" />
+                                <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
                             </div>
                         </div>
                     </CardContent>
@@ -471,8 +471,8 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                 >
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                            <div className="p-1.5 bg-violet-100 rounded-lg">
-                                <Zap className="w-5 h-5 text-violet-600" />
+                            <div className="p-1.5 bg-emerald-100 rounded-lg">
+                                <Zap className="w-5 h-5 text-emerald-600" />
                             </div>
                             Sequences
                         </h1>
@@ -507,8 +507,8 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                         icon={ListOrdered}
                         label="Total Sequences"
                         value={totalSequences}
-                        iconBg="bg-violet-100"
-                        iconColor="text-violet-600"
+                        iconBg="bg-emerald-100"
+                        iconColor="text-emerald-600"
                         index={0}
                     />
                     <StatCard
@@ -552,9 +552,9 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                                         repeat: Infinity,
                                         repeatType: "reverse",
                                     }}
-                                    className="inline-flex p-4 bg-gradient-to-br from-violet-100 to-purple-100 rounded-2xl mb-4"
+                                    className="inline-flex p-4 bg-gradient-to-br from-emerald-100 to-emerald-100 rounded-2xl mb-4"
                                 >
-                                    <Sparkles className="w-8 h-8 text-violet-600" />
+                                    <Sparkles className="w-8 h-8 text-emerald-600" />
                                 </motion.div>
                                 <h3 className="text-lg font-semibold text-gray-900 mb-1">
                                     Describe your first sequence

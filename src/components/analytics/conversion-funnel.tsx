@@ -56,9 +56,9 @@ export function ConversionFunnel({ sequenceId }: ConversionFunnelProps) {
 
     const stages = [
         { label: "Enrolled", count: funnel.enrolled, icon: Users, color: "bg-blue-500" },
-        { label: "Engaged", count: funnel.engaged, icon: MessageSquare, color: "bg-indigo-500" },
-        { label: "Replied", count: funnel.replied, icon: MessageSquare, color: "bg-violet-500" },
-        { label: "Answered Call", count: funnel.answered, icon: Phone, color: "bg-purple-500" },
+        { label: "Engaged", count: funnel.engaged, icon: MessageSquare, color: "bg-emerald-500" },
+        { label: "Replied", count: funnel.replied, icon: MessageSquare, color: "bg-emerald-500" },
+        { label: "Answered Call", count: funnel.answered, icon: Phone, color: "bg-emerald-500" },
         { label: "Converted", count: funnel.converted, icon: CalendarCheck, color: "bg-green-500" },
     ];
 

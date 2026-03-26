@@ -79,8 +79,8 @@ export default async function AdminBillingPage() {
 
                     <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                         <div className="flex items-center gap-4">
-                            <div className="p-3 bg-violet-100 rounded-lg">
-                                <DollarSign className="w-6 h-6 text-violet-600" />
+                            <div className="p-3 bg-emerald-100 rounded-lg">
+                                <DollarSign className="w-6 h-6 text-emerald-600" />
                             </div>
                             <div>
                                 <p className="text-sm text-gray-500">Profit</p>

@@ -9,7 +9,7 @@ const STATUS_COLORS: Record<string, string> = {
     active: "bg-green-100 text-green-700",
     paused: "bg-yellow-100 text-yellow-700",
     completed: "bg-blue-100 text-blue-700",
-    replied: "bg-purple-100 text-purple-700",
+    replied: "bg-emerald-100 text-emerald-700",
     booked: "bg-emerald-100 text-emerald-700",
     failed: "bg-red-100 text-red-700",
     unenrolled: "bg-gray-100 text-gray-500",
@@ -141,7 +141,7 @@ export function EnrollmentTable({
                                     )}
                                 </td>
                                 <td className="px-6 py-4 text-center">
-                                    <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-violet-100 text-violet-700 text-xs font-medium rounded-full">
+                                    <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
                                         #{enrollment.current_step_order}
                                     </span>
                                 </td>

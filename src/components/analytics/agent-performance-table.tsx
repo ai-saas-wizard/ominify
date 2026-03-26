@@ -57,8 +57,8 @@ export function AgentPerformanceTable({ data }: { data: AgentStats[] }) {
                             <tr key={agent.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
-                                            <Bot className="w-4 h-4 text-indigo-600" />
+                                        <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+                                            <Bot className="w-4 h-4 text-emerald-600" />
                                         </div>
                                         <span className="font-medium text-gray-900">{agent.name}</span>
                                     </div>

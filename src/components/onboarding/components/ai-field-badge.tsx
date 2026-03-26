@@ -29,7 +29,7 @@ export function AIFieldBadge({ meta, onReset }: AIFieldBadgeProps) {
                     <button
                         type="button"
                         onClick={onReset}
-                        className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 transition-colors"
+                        className="flex items-center gap-1 text-[10px] text-emerald-500 hover:text-emerald-700 transition-colors"
                         title="Restore AI suggestion"
                     >
                         <RotateCcw className="w-3 h-3" />

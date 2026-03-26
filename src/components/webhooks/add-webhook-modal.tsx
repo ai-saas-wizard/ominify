@@ -192,7 +192,7 @@ export function AddWebhookModal({
                                 <Switch
                                     checked={selectedAgents.length === agents.length}
                                     onCheckedChange={handleAllAgentsToggle}
-                                    className="data-[state=checked]:bg-indigo-600 h-5 w-9"
+                                    className="data-[state=checked]:bg-emerald-600 h-5 w-9"
                                 />
                             </div>
 
@@ -202,7 +202,7 @@ export function AddWebhookModal({
                                     <Switch
                                         checked={selectedAgents.includes(agent.id)}
                                         onCheckedChange={() => handleAgentToggle(agent.id)}
-                                        className="data-[state=checked]:bg-indigo-600 h-5 w-9"
+                                        className="data-[state=checked]:bg-emerald-600 h-5 w-9"
                                     />
                                 </div>
                             ))}
@@ -220,7 +220,7 @@ export function AddWebhookModal({
                                 <Switch
                                     checked={selectedEvents.length === EVENT_TYPES.length}
                                     onCheckedChange={handleAllEventsToggle}
-                                    className="data-[state=checked]:bg-indigo-600 h-5 w-9"
+                                    className="data-[state=checked]:bg-emerald-600 h-5 w-9"
                                 />
                             </div>
 
@@ -230,7 +230,7 @@ export function AddWebhookModal({
                                     <Switch
                                         checked={selectedEvents.includes(event.id)}
                                         onCheckedChange={() => handleEventToggle(event.id)}
-                                        className="data-[state=checked]:bg-indigo-600 h-5 w-9"
+                                        className="data-[state=checked]:bg-emerald-600 h-5 w-9"
                                     />
                                 </div>
                             ))}
@@ -251,7 +251,7 @@ export function AddWebhookModal({
                         <Button
                             type="submit"
                             disabled={loading}
-                            className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700"
                         >
                             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
                             Create webhook

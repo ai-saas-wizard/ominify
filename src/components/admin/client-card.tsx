@@ -17,7 +17,7 @@ export function ClientCard({
     const borderColor = disabled
         ? "border-red-200"
         : variant === "umbrella"
-            ? "border-indigo-100"
+            ? "border-emerald-100"
             : "border-gray-200";
 
     return (

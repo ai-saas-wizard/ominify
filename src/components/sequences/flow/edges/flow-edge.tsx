@@ -91,7 +91,7 @@ export function FlowEdge({
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.8 }}
                                 transition={{ duration: 0.15 }}
-                                className="flex items-center justify-center w-6 h-6 rounded-full bg-violet-500 text-white shadow-lg cursor-pointer hover:bg-violet-600 transition-colors"
+                                className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white shadow-lg cursor-pointer hover:bg-emerald-600 transition-colors"
                                 data-add-index={data.insertIndex}
                             >
                                 <Plus className="w-3.5 h-3.5" />

@@ -114,7 +114,7 @@ export function CustomFieldsList({
                 </div>
                 <Button
                     onClick={() => setShowAddForm(true)}
-                    className="bg-indigo-600 hover:bg-indigo-700"
+                    className="bg-emerald-600 hover:bg-emerald-700"
                 >
                     <Plus className="w-4 h-4" />
                     Add Field

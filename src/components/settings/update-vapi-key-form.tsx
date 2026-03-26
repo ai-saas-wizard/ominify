@@ -60,7 +60,7 @@ export function UpdateVapiKeyForm({ currentKey, updateVapiKey }: UpdateVapiKeyFo
                     </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                    Get your API key from the <a href="https://dashboard.vapi.ai" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline">Vapi Dashboard</a>
+                    Get your API key from the <a href="https://dashboard.vapi.ai" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline">Vapi Dashboard</a>
                 </p>
             </div>
 

@@ -77,7 +77,7 @@ export function EmailContentEditor({
           value={content.subject}
           onChange={(e) => handleSubjectChange(e.target.value)}
           onFocus={() => setFocusedField("subject")}
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
           placeholder="Email subject line..."
         />
       </div>
@@ -93,7 +93,7 @@ export function EmailContentEditor({
           value={content.body_html}
           onChange={(e) => handleBodyHtmlChange(e.target.value)}
           onFocus={() => setFocusedField("body_html")}
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
           placeholder="Write your email body here..."
         />
         <p className="text-xs text-gray-400 mt-1">

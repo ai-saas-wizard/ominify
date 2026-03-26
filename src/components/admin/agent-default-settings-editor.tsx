@@ -166,7 +166,7 @@ export function AgentDefaultSettingsEditor({
                     onClick={() => { setActiveTab("inbound"); setError(null); setSaved(false); }}
                     className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                         activeTab === "inbound"
-                            ? "border-violet-600 text-violet-600"
+                            ? "border-emerald-600 text-emerald-600"
                             : "border-transparent text-gray-500 hover:text-gray-700"
                     }`}
                 >
@@ -176,7 +176,7 @@ export function AgentDefaultSettingsEditor({
                     onClick={() => { setActiveTab("outbound"); setError(null); setSaved(false); }}
                     className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                         activeTab === "outbound"
-                            ? "border-violet-600 text-violet-600"
+                            ? "border-emerald-600 text-emerald-600"
                             : "border-transparent text-gray-500 hover:text-gray-700"
                     }`}
                 >
@@ -194,7 +194,7 @@ export function AgentDefaultSettingsEditor({
                     onChange={(e) => { setCurrentJson(e.target.value); setError(null); }}
                     rows={20}
                     spellCheck={false}
-                    className={`w-full font-mono text-sm p-4 border rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 bg-gray-50 ${
+                    className={`w-full font-mono text-sm p-4 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 ${
                         !isValidJson && currentJson.length > 0
                             ? "border-red-300"
                             : "border-gray-300"
@@ -218,7 +218,7 @@ export function AgentDefaultSettingsEditor({
                 <button
                     onClick={handleSave}
                     disabled={!isValidJson || isSaving}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg font-medium hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {isSaving ? (
                         <>

@@ -53,7 +53,7 @@ export function VoiceContentEditor({
             onChange({ ...content, first_message: e.target.value })
           }
           onFocus={() => setFocusedField("first_message")}
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
           placeholder="Hi, this is..."
         />
         <p className="text-xs text-gray-400 mt-1">Keep under 20 words</p>
@@ -70,7 +70,7 @@ export function VoiceContentEditor({
             onChange({ ...content, system_prompt: e.target.value })
           }
           onFocus={() => setFocusedField("system_prompt")}
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
           placeholder="You are a helpful assistant that..."
         />
       </div>
@@ -91,7 +91,7 @@ export function VoiceContentEditor({
               vapi_assistant_id: e.target.value || undefined,
             })
           }
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
           placeholder="Leave blank to use default"
         />
       </div>

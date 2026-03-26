@@ -46,16 +46,16 @@ export const CHANNEL_FLOW_CONFIG: Record<string, ChannelFlowConfig> = {
     },
     voice_call: {
         icon: Phone,
-        bgColor: "bg-violet-50",
-        textColor: "text-violet-700",
-        accentColor: "bg-violet-500",
+        bgColor: "bg-emerald-50",
+        textColor: "text-emerald-700",
+        accentColor: "bg-emerald-500",
         label: "Voice Call",
     },
     voice: {
         icon: Phone,
-        bgColor: "bg-violet-50",
-        textColor: "text-violet-700",
-        accentColor: "bg-violet-500",
+        bgColor: "bg-emerald-50",
+        textColor: "text-emerald-700",
+        accentColor: "bg-emerald-500",
         label: "Voice Call",
     },
     wait: {

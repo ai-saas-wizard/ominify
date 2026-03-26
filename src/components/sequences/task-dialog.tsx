@@ -48,7 +48,7 @@ interface TaskDialogProps {
 
 const CHANNEL_CONFIG: Record<string, { icon: typeof MessageSquare; label: string; color: string; bg: string }> = {
     sms: { icon: MessageSquare, label: "SMS", color: "text-blue-600", bg: "bg-blue-50" },
-    email: { icon: Mail, label: "Email", color: "text-violet-600", bg: "bg-violet-50" },
+    email: { icon: Mail, label: "Email", color: "text-emerald-600", bg: "bg-emerald-50" },
     voice: { icon: Phone, label: "Voice", color: "text-emerald-600", bg: "bg-emerald-50" },
 };
 
@@ -241,8 +241,8 @@ export function TaskDialog({
                         {/* ── Header ─────────────────────────────────────── */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
                             <div className="flex items-center gap-2">
-                                <div className="p-1.5 bg-violet-100 rounded-lg">
-                                    <Rocket className="w-4 h-4 text-violet-600" />
+                                <div className="p-1.5 bg-emerald-100 rounded-lg">
+                                    <Rocket className="w-4 h-4 text-emerald-600" />
                                 </div>
                                 <h2 className="text-lg font-semibold text-gray-900">
                                     New Task
@@ -287,12 +287,12 @@ export function TaskDialog({
                                         onDrop={handleDrop}
                                         onDragOver={handleDragOver}
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="border-2 border-dashed border-gray-200 hover:border-violet-300 rounded-lg p-6 text-center cursor-pointer transition-colors group"
+                                        className="border-2 border-dashed border-gray-200 hover:border-emerald-300 rounded-lg p-6 text-center cursor-pointer transition-colors group"
                                     >
-                                        <Upload className="w-6 h-6 text-gray-300 group-hover:text-violet-400 mx-auto mb-2 transition-colors" />
+                                        <Upload className="w-6 h-6 text-gray-300 group-hover:text-emerald-400 mx-auto mb-2 transition-colors" />
                                         <p className="text-sm text-gray-500">
                                             Drop a CSV file here or{" "}
-                                            <span className="text-violet-600 font-medium">browse</span>
+                                            <span className="text-emerald-600 font-medium">browse</span>
                                         </p>
                                         <p className="text-xs text-gray-400 mt-1">
                                             Column headers will be available as template variables
@@ -347,7 +347,7 @@ export function TaskDialog({
                                                     {csvColumns.map((col) => (
                                                         <span
                                                             key={col}
-                                                            className="inline-flex items-center px-2 py-0.5 rounded-md bg-violet-50 border border-violet-100 text-xs font-mono text-violet-700"
+                                                            className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 text-xs font-mono text-emerald-700"
                                                         >
                                                             {`{{${col}}}`}
                                                         </span>
@@ -399,7 +399,7 @@ export function TaskDialog({
                                                             <p className="text-xs">
                                                                 {status.reason}
                                                             </p>
-                                                            <p className="text-xs text-violet-600 mt-1">
+                                                            <p className="text-xs text-emerald-600 mt-1">
                                                                 Configure in Settings &rarr; Integrations
                                                             </p>
                                                         </TooltipContent>

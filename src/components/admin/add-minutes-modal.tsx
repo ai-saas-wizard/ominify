@@ -76,7 +76,7 @@ export function AddMinutesModal({
                                     min="1"
                                     value={minutes}
                                     onChange={(e) => setMinutes(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                     placeholder="Enter amount"
                                 />
                             </div>
@@ -89,7 +89,7 @@ export function AddMinutesModal({
                                     type="text"
                                     value={reason}
                                     onChange={(e) => setReason(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                     placeholder="e.g., Bonus, Refund, Promo"
                                 />
                             </div>

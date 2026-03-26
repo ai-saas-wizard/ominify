@@ -28,7 +28,7 @@ export function AgentDetailHeader({ agent }: AgentDetailHeaderProps) {
         transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
         className="relative shrink-0"
       >
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-violet-500/25">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/25">
           <Bot className="w-8 h-8" />
         </div>
         {/* Status dot */}
@@ -48,12 +48,12 @@ export function AgentDetailHeader({ agent }: AgentDetailHeaderProps) {
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <Mic className="w-3 h-3 text-violet-500" />
+            <Mic className="w-3 h-3 text-emerald-500" />
             {voiceProvider}
           </div>
           <span className="w-1 h-1 rounded-full bg-gray-300" />
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <Brain className="w-3 h-3 text-indigo-500" />
+            <Brain className="w-3 h-3 text-emerald-500" />
             {modelName}
           </div>
           <span className="w-1 h-1 rounded-full bg-gray-300" />

@@ -33,7 +33,7 @@ export function BrandVoiceStep({ form, fieldMeta, updateField, resetFieldToAI }:
                                 className={cn(
                                     "p-4 rounded-lg border-2 text-left transition-all",
                                     form.brand_voice === voice.value
-                                        ? "border-violet-500 bg-violet-50"
+                                        ? "border-emerald-500 bg-emerald-50"
                                         : "border-gray-200 hover:border-gray-300 bg-white"
                                 )}
                             >

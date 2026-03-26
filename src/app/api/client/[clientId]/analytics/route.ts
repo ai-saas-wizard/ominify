@@ -153,9 +153,9 @@ export async function GET(
             'assistant-error': '#ef4444',
             'pipeline-error-openai-llm-failed': '#ef4444',
             'phone-call-provider-closed-websocket': '#6b7280',
-            'assistant-forwarded-call': '#8b5cf6',
+            'assistant-forwarded-call': '#10b981',
             'ended': '#3b82f6',
-            'in-progress': '#8b5cf6',
+            'in-progress': '#10b981',
             'unknown': '#9ca3af'
         };
 

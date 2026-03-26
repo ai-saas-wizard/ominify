@@ -119,7 +119,7 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
             <CardHeader className="border-b border-gray-100 flex-row items-center justify-between space-y-0 px-6 py-4">
                 <div>
                     <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                        <Webhook className="w-5 h-5 text-indigo-600" />
+                        <Webhook className="w-5 h-5 text-emerald-600" />
                         Webhooks
                     </h3>
                     <p className="text-sm text-gray-500 mt-0.5">
@@ -145,7 +145,7 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
                     </p>
                     <Button
                         onClick={() => setShowAddModal(true)}
-                        className="bg-indigo-600 hover:bg-indigo-700"
+                        className="bg-emerald-600 hover:bg-emerald-700"
                     >
                         <Plus className="w-4 h-4" />
                         Create your first webhook
@@ -194,7 +194,7 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
                                                     <span className="text-xs text-gray-400">All agents</span>
                                                 ) : webhook.agents.length <= 2 ? (
                                                     webhook.agents.map(agent => (
-                                                        <Badge key={agent.id} className="bg-indigo-50 text-indigo-700 border-indigo-200">
+                                                        <Badge key={agent.id} className="bg-emerald-50 text-emerald-700 border-emerald-200">
                                                             {agent.name}
                                                         </Badge>
                                                     ))
@@ -212,7 +212,7 @@ export function WebhookManager({ clientId, agents }: { clientId: string; agents:
                                             <Switch
                                                 checked={webhook.is_active}
                                                 onCheckedChange={() => handleToggleActive(webhook.id, webhook.is_active)}
-                                                className="data-[state=checked]:bg-indigo-600"
+                                                className="data-[state=checked]:bg-emerald-600"
                                             />
                                         </TableCell>
                                         <TableCell className="px-6 py-4 text-right">

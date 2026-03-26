@@ -24,11 +24,11 @@ import type { PipelineStage, PipelineContact } from "./pipeline-board";
 // ─── Preset colors ──────────────────────────────────────────────────────────
 
 const PRESET_COLORS = [
-    "#6366f1", // violet
-    "#3b82f6", // blue
-    "#8b5cf6", // purple
-    "#f59e0b", // amber
     "#10b981", // emerald
+    "#3b82f6", // blue
+    "#14b8a6", // teal
+    "#f59e0b", // amber
+    "#059669", // emerald dark
     "#ef4444", // red
     "#ec4899", // pink
     "#06b6d4", // cyan
@@ -353,7 +353,7 @@ export function StageEditorDialog({
                                                 {/* Contact count + badges */}
                                                 <div className="flex items-center gap-2 flex-shrink-0">
                                                     {stage.is_default && (
-                                                        <span className="text-[10px] font-medium text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">
+                                                        <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
                                                             Default
                                                         </span>
                                                     )}
@@ -453,7 +453,7 @@ export function StageEditorDialog({
                                         onChange={(e) => setNewName(e.target.value)}
                                         onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                                         placeholder="Stage name"
-                                        className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-300 transition-all"
+                                        className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-300 transition-all"
                                     />
 
                                     <button
@@ -462,7 +462,7 @@ export function StageEditorDialog({
                                         className={cn(
                                             "inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all",
                                             newName.trim()
-                                                ? "bg-violet-600 text-white hover:bg-violet-700 shadow-sm"
+                                                ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
                                                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
                                         )}
                                     >
@@ -484,7 +484,7 @@ export function StageEditorDialog({
                             <button
                                 onClick={handleSave}
                                 disabled={saving}
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 shadow-sm transition-colors"
+                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm transition-colors"
                             >
                                 {saving ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />

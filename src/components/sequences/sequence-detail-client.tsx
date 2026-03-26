@@ -33,7 +33,7 @@ import { useRouter } from "next/navigation";
 const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
     sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "SMS" },
     email: { icon: Mail, color: "text-blue-600 bg-blue-100", label: "Email" },
-    voice_call: { icon: Phone, color: "text-violet-600 bg-violet-100", label: "Voice Call" },
+    voice_call: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
     wait: { icon: Clock, color: "text-amber-600 bg-amber-100", label: "Wait / Delay" },
     condition: { icon: GitBranch, color: "text-pink-600 bg-pink-100", label: "Condition" },
 };
@@ -180,14 +180,14 @@ export function SequenceDetailClient({
                 </div>
                 <div className="flex items-center gap-3">
                     {/* Phase 3: Mutation controls */}
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-100">
-                        <Sparkles className="w-4 h-4 text-violet-500" />
-                        <span className="text-xs font-medium text-violet-700">AI Mutation</span>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100">
+                        <Sparkles className="w-4 h-4 text-emerald-500" />
+                        <span className="text-xs font-medium text-emerald-700">AI Mutation</span>
                         <button
                             onClick={() => handleMutationToggle(!mutationEnabled)}
                             disabled={savingMutation}
                             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                                mutationEnabled ? "bg-violet-600" : "bg-gray-300"
+                                mutationEnabled ? "bg-emerald-600" : "bg-gray-300"
                             } disabled:opacity-50`}
                         >
                             <span
@@ -201,7 +201,7 @@ export function SequenceDetailClient({
                                 value={mutationAggressiveness}
                                 onChange={(e) => handleAggressivenessChange(e.target.value)}
                                 disabled={savingMutation}
-                                className="text-xs bg-white border border-violet-200 rounded px-1.5 py-0.5 text-violet-700 outline-none focus:ring-1 focus:ring-violet-400"
+                                className="text-xs bg-white border border-emerald-200 rounded px-1.5 py-0.5 text-emerald-700 outline-none focus:ring-1 focus:ring-emerald-400"
                             >
                                 <option value="conservative">Conservative</option>
                                 <option value="moderate">Moderate</option>
@@ -232,7 +232,7 @@ export function SequenceDetailClient({
                                 if (tab.key === "log") loadExecutionLog();
                             }}
                             className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === tab.key
-                                ? "border-violet-600 text-violet-600"
+                                ? "border-emerald-600 text-emerald-600"
                                 : "border-transparent text-gray-500 hover:text-gray-700"
                                 }`}
                         >
@@ -313,7 +313,7 @@ export function SequenceDetailClient({
                                                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-3">
                                                                     <button
                                                                         onClick={() => setEditingStepId(step.id)}
-                                                                        className="p-1.5 text-gray-400 hover:text-violet-600 rounded"
+                                                                        className="p-1.5 text-gray-400 hover:text-emerald-600 rounded"
                                                                     >
                                                                         <ChevronDown className="w-4 h-4" />
                                                                     </button>
@@ -349,7 +349,7 @@ export function SequenceDetailClient({
                             ) : (
                                 <button
                                     onClick={() => setShowAddStep(true)}
-                                    className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-violet-400 hover:text-violet-600 transition-colors"
+                                    className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors"
                                 >
                                     <Plus className="w-4 h-4" />
                                     Add Step

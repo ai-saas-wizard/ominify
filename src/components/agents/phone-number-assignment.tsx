@@ -125,7 +125,7 @@ export function PhoneNumberAssignment({
                   value={selectedNumberId}
                   onChange={(e) => setSelectedNumberId(e.target.value)}
                   disabled={loading}
-                  className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 disabled:opacity-50 appearance-none transition-all"
+                  className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50 appearance-none transition-all"
                 >
                   <option value="">Select a number...</option>
                   {availableNumbers.map((num) => (
@@ -139,7 +139,7 @@ export function PhoneNumberAssignment({
               <button
                 onClick={handleAssign}
                 disabled={loading || !selectedNumberId}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:from-violet-700 hover:to-indigo-700 shadow-sm shadow-violet-500/20 transition-all disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-600 text-white rounded-xl text-sm font-semibold hover:from-emerald-700 hover:to-emerald-700 shadow-sm shadow-emerald-500/20 transition-all disabled:opacity-50"
               >
                 {loading ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -159,7 +159,7 @@ export function PhoneNumberAssignment({
               </p>
               <a
                 href={`/client/${clientId}/phone-numbers`}
-                className="inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-700 transition-colors"
+                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 transition-colors"
               >
                 Purchase a number
                 <ExternalLink className="w-3 h-3" />

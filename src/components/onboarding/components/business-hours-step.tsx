@@ -71,7 +71,7 @@ export function BusinessHoursStep({ form, fieldMeta, updateField, resetFieldToAI
                                             type="checkbox"
                                             checked={!dayHours?.closed}
                                             onChange={(e) => updateHours(key, "closed", !e.target.checked)}
-                                            className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                            className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                                         />
                                         <span className="text-xs text-gray-500">Open</span>
                                     </label>
@@ -82,14 +82,14 @@ export function BusinessHoursStep({ form, fieldMeta, updateField, resetFieldToAI
                                                 type="time"
                                                 value={dayHours?.open || "08:00"}
                                                 onChange={(e) => updateHours(key, "open", e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none"
+                                                className="px-2 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
                                             />
                                             <span className="text-gray-400 text-sm">to</span>
                                             <input
                                                 type="time"
                                                 value={dayHours?.close || "17:00"}
                                                 onChange={(e) => updateHours(key, "close", e.target.value)}
-                                                className="px-2 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none"
+                                                className="px-2 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
                                             />
                                         </div>
                                     )}

@@ -106,12 +106,12 @@ export default async function AdminSettingsPage() {
                     {/* Manage Admins Link */}
                     <Link
                         href="/admin/settings/admins"
-                        className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-violet-300 transition-colors"
+                        className="block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-emerald-300 transition-colors"
                     >
                         <div className="px-6 py-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="p-2 bg-violet-100 rounded-lg">
-                                    <Shield className="w-5 h-5 text-violet-600" />
+                                <div className="p-2 bg-emerald-100 rounded-lg">
+                                    <Shield className="w-5 h-5 text-emerald-600" />
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-semibold text-gray-900">Manage Administrators</h2>
@@ -128,7 +128,7 @@ export default async function AdminSettingsPage() {
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                             <div className="flex items-center gap-3">
-                                <Umbrella className="w-5 h-5 text-indigo-600" />
+                                <Umbrella className="w-5 h-5 text-emerald-600" />
                                 <h2 className="text-lg font-semibold text-gray-900">VAPI Umbrella</h2>
                             </div>
                             <p className="text-sm text-gray-500 mt-1">
@@ -152,7 +152,7 @@ export default async function AdminSettingsPage() {
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                             <div className="flex items-center gap-3">
-                                <Bot className="w-5 h-5 text-indigo-600" />
+                                <Bot className="w-5 h-5 text-emerald-600" />
                                 <h2 className="text-lg font-semibold text-gray-900">Agent Default Settings</h2>
                             </div>
                             <p className="text-sm text-gray-500 mt-1">

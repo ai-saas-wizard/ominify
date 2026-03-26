@@ -40,9 +40,9 @@ export const CATEGORY_CONFIG: Record<
     },
     outbound_retention: {
         label: "Retention",
-        color: "text-purple-600",
-        bgColor: "bg-purple-50",
-        borderColor: "border-purple-200",
+        color: "text-emerald-600",
+        bgColor: "bg-emerald-50",
+        borderColor: "border-emerald-200",
     },
 };
 

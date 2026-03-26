@@ -51,7 +51,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
             return (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="text-sm text-gray-500 hover:text-violet-600 transition-colors underline underline-offset-2"
+                    className="text-sm text-gray-500 hover:text-emerald-600 transition-colors underline underline-offset-2"
                 >
                     or create manually
                 </button>
@@ -62,7 +62,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
             return (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="border border-gray-300 hover:border-violet-300 hover:text-violet-700 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
+                    className="border border-gray-300 hover:border-emerald-300 hover:text-emerald-700 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
                 >
                     <Plus className="w-4 h-4" />
                     Create Manually
@@ -73,7 +73,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
             >
                 <Plus className="w-4 h-4" />
                 Create Sequence
@@ -85,7 +85,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
                 <div className="px-6 py-4 border-b flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-violet-600" />
+                    <Zap className="w-5 h-5 text-emerald-600" />
                     <h3 className="font-semibold text-lg">Create New Sequence</h3>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -98,7 +98,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                             name="name"
                             required
                             placeholder="e.g., Missed Call Follow-up"
-                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500"
+                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                     </div>
 
@@ -111,7 +111,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                             name="description"
                             rows={3}
                             placeholder="Describe what this sequence does..."
-                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 resize-none"
+                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
                         />
                     </div>
 
@@ -123,7 +123,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                         <select
                             name="trigger_type"
                             defaultValue="manual"
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500"
+                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                             {TRIGGER_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -141,7 +141,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                         <select
                             name="urgency_tier"
                             defaultValue="medium"
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500"
+                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                             {URGENCY_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -163,7 +163,7 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                         <button
                             type="submit"
                             disabled={loading}
-                            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 flex items-center"
+                            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 flex items-center"
                         >
                             {loading && <Loader2 className="w-3 h-3 animate-spin mr-2" />}
                             Create Sequence

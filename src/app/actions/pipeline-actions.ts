@@ -6,9 +6,9 @@ import { revalidatePath } from "next/cache";
 // ─── Default stages seeded on first pipeline visit ──────────────────────────
 
 const DEFAULT_STAGES = [
-    { position: 0, name: "New Lead",   color: "#6366f1", is_default: true,  is_terminal: false },
+    { position: 0, name: "New Lead",   color: "#059669", is_default: true,  is_terminal: false },
     { position: 1, name: "Contacted",  color: "#3b82f6", is_default: false, is_terminal: false },
-    { position: 2, name: "Engaged",    color: "#8b5cf6", is_default: false, is_terminal: false },
+    { position: 2, name: "Engaged",    color: "#10b981", is_default: false, is_terminal: false },
     { position: 3, name: "Qualified",  color: "#f59e0b", is_default: false, is_terminal: false },
     { position: 4, name: "Booked",     color: "#10b981", is_default: false, is_terminal: true  },
     { position: 5, name: "Lost",       color: "#ef4444", is_default: false, is_terminal: true  },

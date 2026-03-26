@@ -161,9 +161,9 @@ export function stepsToFlow(
                     target: target.id,
                     type: "flowEdge",
                     data: { sequenceId },
-                    style: { stroke: "#8b5cf6", strokeDasharray: "5,5" },
+                    style: { stroke: "#10b981", strokeDasharray: "5,5" },
                     label: "Jump",
-                    labelStyle: { fill: "#8b5cf6", fontWeight: 600, fontSize: 11 },
+                    labelStyle: { fill: "#10b981", fontWeight: 600, fontSize: 11 },
                     animated: true,
                 });
             }

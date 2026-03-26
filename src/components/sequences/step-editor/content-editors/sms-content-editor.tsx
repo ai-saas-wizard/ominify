@@ -34,7 +34,7 @@ export function SmsContentEditor({ content, onChange }: SmsContentEditorProps) {
           rows={5}
           value={content.body}
           onChange={(e) => onChange({ body: e.target.value })}
-          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+          className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
           placeholder="Type your SMS message..."
         />
         <p className={`text-xs mt-1 ${charColor}`}>

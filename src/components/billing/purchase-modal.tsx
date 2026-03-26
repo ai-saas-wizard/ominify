@@ -58,7 +58,7 @@ export function PurchaseModal({ clientId, email, pricePerMinute }: PurchaseModal
         <>
             <button
                 onClick={() => setIsOpen(true)}
-                className="inline-flex items-center gap-2 bg-white text-violet-600 px-6 py-3 rounded-lg font-semibold hover:bg-violet-50 transition-colors shadow-md"
+                className="inline-flex items-center gap-2 bg-white text-emerald-600 px-6 py-3 rounded-lg font-semibold hover:bg-emerald-50 transition-colors shadow-md"
             >
                 <ShoppingCart className="w-5 h-5" />
                 Buy Minutes
@@ -92,7 +92,7 @@ export function PurchaseModal({ clientId, email, pricePerMinute }: PurchaseModal
                                     min="1"
                                     value={minutes}
                                     onChange={(e) => setMinutes(e.target.value)}
-                                    className="w-full px-4 py-3 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                    className="w-full px-4 py-3 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                     placeholder="Enter minutes"
                                 />
                             </div>
@@ -103,8 +103,8 @@ export function PurchaseModal({ clientId, email, pricePerMinute }: PurchaseModal
                                         key={opt}
                                         onClick={() => setMinutes(opt.toString())}
                                         className={`px-4 py-2 text-sm font-medium rounded-lg border transition-all ${minutes === opt.toString()
-                                                ? 'border-violet-600 bg-violet-50 text-violet-700'
-                                                : 'border-gray-200 hover:border-violet-300 text-gray-600'
+                                                ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+                                                : 'border-gray-200 hover:border-emerald-300 text-gray-600'
                                             }`}
                                     >
                                         {opt} mins
@@ -137,7 +137,7 @@ export function PurchaseModal({ clientId, email, pricePerMinute }: PurchaseModal
                             <button
                                 onClick={handlePurchase}
                                 disabled={!minutes || parseInt(minutes) <= 0 || isLoading}
-                                className="w-full bg-violet-600 text-white py-3 rounded-lg font-semibold hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {isLoading ? (
                                     <>

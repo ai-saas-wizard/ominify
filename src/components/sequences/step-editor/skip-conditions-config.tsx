@@ -32,7 +32,7 @@ export default function SkipConditionsConfig({ selected, onChange }: SkipConditi
               type="checkbox"
               checked={selected.includes(option.key)}
               onChange={() => handleToggle(option.key)}
-              className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+              className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
             />
             <span className="text-sm text-gray-700">{option.label}</span>
           </label>

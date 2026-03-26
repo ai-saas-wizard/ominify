@@ -74,7 +74,7 @@ export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
                 onClick={() => hasMultipleClients && setIsOpen(!isOpen)}
             >
                 <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded bg-violet-100 flex items-center justify-center text-violet-600 font-semibold text-xs border border-violet-200">
+                    <div className="w-8 h-8 rounded bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold text-xs border border-emerald-200">
                         {initial}
                     </div>
                     <div className="text-sm">

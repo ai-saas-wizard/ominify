@@ -55,7 +55,7 @@ export function ContactsPageClient({
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Users className="w-6 h-6 text-indigo-600" />
+                        <Users className="w-6 h-6 text-emerald-600" />
                         Contacts
                     </h1>
                     <p className="text-gray-500 text-sm mt-1">
@@ -71,7 +71,7 @@ export function ContactsPageClient({
                     </Link>
                     <button
                         onClick={() => setShowAddModal(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
                     >
                         <Plus className="w-4 h-4" />
                         Add Contact

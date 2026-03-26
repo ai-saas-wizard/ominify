@@ -77,7 +77,7 @@ export function ABTestPanel({ stepId, stepOrder, channel, sequenceId, clientId }
         <div className="bg-white rounded-xl border p-4">
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                    <FlaskConical className="w-4 h-4 text-purple-500" />
+                    <FlaskConical className="w-4 h-4 text-emerald-500" />
                     <h4 className="text-xs font-semibold text-gray-900">
                         A/B Test &middot; Step {stepOrder} ({channel.toUpperCase()})
                     </h4>
@@ -85,7 +85,7 @@ export function ABTestPanel({ stepId, stepOrder, channel, sequenceId, clientId }
                 {!showCreate && (
                     <button
                         onClick={() => setShowCreate(true)}
-                        className="flex items-center gap-1 px-2 py-1 text-[10px] text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
                     >
                         <Plus className="w-3 h-3" />
                         Add Variant
@@ -169,27 +169,27 @@ export function ABTestPanel({ stepId, stepOrder, channel, sequenceId, clientId }
 
             {/* Create variant form */}
             {showCreate && (
-                <div className="mt-3 p-3 border border-dashed border-purple-200 rounded-lg bg-purple-50/30">
+                <div className="mt-3 p-3 border border-dashed border-emerald-200 rounded-lg bg-emerald-50/30">
                     <div className="space-y-2">
                         <input
                             type="text"
                             value={newName}
                             onChange={(e) => setNewName(e.target.value)}
                             placeholder="Variant name (e.g., B - Shorter SMS)"
-                            className="w-full px-2 py-1.5 text-xs border rounded focus:ring-1 focus:ring-purple-300 focus:border-purple-300"
+                            className="w-full px-2 py-1.5 text-xs border rounded focus:ring-1 focus:ring-emerald-300 focus:border-emerald-300"
                         />
                         <textarea
                             value={newContent}
                             onChange={(e) => setNewContent(e.target.value)}
                             placeholder={`Content JSON (e.g., ${channel === "sms" ? '{"body": "Hi {{first_name}}..."}' : '{"subject": "...", "body_html": "...", "body_text": "..."}'}`}
                             rows={3}
-                            className="w-full px-2 py-1.5 text-xs border rounded font-mono focus:ring-1 focus:ring-purple-300 focus:border-purple-300"
+                            className="w-full px-2 py-1.5 text-xs border rounded font-mono focus:ring-1 focus:ring-emerald-300 focus:border-emerald-300"
                         />
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={handleCreate}
                                 disabled={creating || !newName || !newContent}
-                                className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
+                                className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
                             >
                                 {creating ? "Creating..." : "Create Variant"}
                             </button>

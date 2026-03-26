@@ -71,7 +71,7 @@ export function MinuteBalanceDisplay({ clientId }: MinuteBalanceDisplayProps) {
             </div>
             <Link
                 href={`/client/${clientId}/billing`}
-                className="w-full bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition-colors mb-4"
+                className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition-colors mb-4"
             >
                 <Zap className="w-3 h-3 fill-current" />
                 {isLow ? 'Buy Minutes' : 'Manage Billing'}

@@ -176,7 +176,7 @@ export function SequenceStepEditor({
                                 value={waitContent.reason}
                                 onChange={(e) => setWaitContent({ reason: e.target.value })}
                                 placeholder="e.g., Wait for business hours"
-                                className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm resize-none"
+                                className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
                             />
                         </div>
                     )}
@@ -187,7 +187,7 @@ export function SequenceStepEditor({
                                 <select
                                     value={conditionContent.check}
                                     onChange={(e) => setConditionContent({ ...conditionContent, check: e.target.value })}
-                                    className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                                    className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                                 >
                                     <option value="replied">Contact Replied</option>
                                     <option value="answered_call">Answered Call</option>
@@ -204,7 +204,7 @@ export function SequenceStepEditor({
                                         min={1}
                                         value={conditionContent.true_step}
                                         onChange={(e) => setConditionContent({ ...conditionContent, true_step: parseInt(e.target.value) || 1 })}
-                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                                     />
                                 </div>
                                 <div className="space-y-2">
@@ -214,7 +214,7 @@ export function SequenceStepEditor({
                                         min={1}
                                         value={conditionContent.false_step}
                                         onChange={(e) => setConditionContent({ ...conditionContent, false_step: parseInt(e.target.value) || 1 })}
-                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                                        className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                                     />
                                 </div>
                             </div>
@@ -255,7 +255,7 @@ export function SequenceStepEditor({
                 <button
                     onClick={handleSubmit}
                     disabled={loading}
-                    className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 flex items-center transition-colors"
+                    className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 flex items-center transition-colors"
                 >
                     {loading && <Loader2 className="w-3 h-3 animate-spin mr-2" />}
                     {existingStep ? "Update Step" : "Add Step"}

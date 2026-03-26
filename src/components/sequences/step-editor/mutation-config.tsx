@@ -22,17 +22,17 @@ export default function MutationConfig({
   }
 
   return (
-    <div className="space-y-3 p-4 rounded-lg border border-dashed border-violet-200 bg-violet-50/30">
+    <div className="space-y-3 p-4 rounded-lg border border-dashed border-emerald-200 bg-emerald-50/30">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-violet-600" />
+          <Sparkles className="w-4 h-4 text-emerald-600" />
           <span className="text-sm font-medium text-gray-700">AI Adaptive Mutation</span>
         </div>
         <button
           type="button"
           onClick={() => onEnabledChange(!enabled)}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            enabled ? "bg-violet-600" : "bg-gray-300"
+            enabled ? "bg-emerald-600" : "bg-gray-300"
           }`}
         >
           <span
@@ -53,7 +53,7 @@ export default function MutationConfig({
           value={instructions}
           onChange={(e) => onInstructionsChange(e.target.value)}
           placeholder="Instructions for AI mutation (e.g., personalize tone, adjust urgency level...)"
-          className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+          className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
         />
       )}
     </div>

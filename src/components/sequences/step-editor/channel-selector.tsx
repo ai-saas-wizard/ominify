@@ -28,7 +28,7 @@ export default function ChannelSelector({ value, onChange }: ChannelSelectorProp
             onClick={() => onChange(option.value)}
             className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border text-xs font-medium transition-colors ${
               isSelected
-                ? "border-violet-500 bg-violet-50 text-violet-700"
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                 : "border-gray-200 text-gray-500 hover:bg-gray-50"
             }`}
           >

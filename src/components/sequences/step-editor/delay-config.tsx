@@ -61,12 +61,12 @@ export default function DelayConfig({
             min={1}
             value={amount}
             onChange={(e) => handleAmountChange(Math.max(1, parseInt(e.target.value) || 1))}
-            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-violet-500"
+            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <select
             value={unit}
             onChange={(e) => handleUnitChange(e.target.value)}
-            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500"
+            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="minutes">minutes</option>
             <option value="hours">hours</option>
@@ -80,7 +80,7 @@ export default function DelayConfig({
         <select
           value={delayType}
           onChange={(e) => onDelayTypeChange(e.target.value)}
-          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-violet-500 mt-1"
+          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 mt-1"
         >
           <option value="after_previous">After Previous Step</option>
           <option value="after_enrollment">After Enrollment</option>

@@ -53,7 +53,7 @@ export function AnalysisTheater({
                     <div className="flex gap-3">
                         <Button
                             onClick={onRetry}
-                            className="bg-violet-600 text-white hover:bg-violet-500"
+                            className="bg-emerald-600 text-white hover:bg-emerald-500"
                         >
                             Try Again
                         </Button>
@@ -83,8 +83,8 @@ export function AnalysisTheater({
                     animate={{ scale: [1, 1.05, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
                 >
-                    <div className="absolute inset-0 rounded-full bg-violet-100 blur-xl" />
-                    <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-violet-50 ring-1 ring-violet-200">
+                    <div className="absolute inset-0 rounded-full bg-emerald-100 blur-xl" />
+                    <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-200">
                         <AnimatePresence mode="wait">
                             {ANALYSIS_STAGES.map((stage, idx) => {
                                 if (idx !== currentStage) return null;
@@ -97,7 +97,7 @@ export function AnalysisTheater({
                                         exit={{ opacity: 0, scale: 0.8, rotate: 10 }}
                                         transition={{ duration: 0.3 }}
                                     >
-                                        <Icon className="h-10 w-10 text-violet-600" />
+                                        <Icon className="h-10 w-10 text-emerald-600" />
                                     </motion.div>
                                 );
                             })}
@@ -137,7 +137,7 @@ export function AnalysisTheater({
                                             <Check className="h-3.5 w-3.5 text-emerald-600" />
                                         </motion.div>
                                     ) : isActive ? (
-                                        <Loader2 className="h-5 w-5 animate-spin text-violet-600" />
+                                        <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
                                     ) : (
                                         <div className="h-2 w-2 rounded-full bg-gray-300" />
                                     )}
@@ -161,7 +161,7 @@ export function AnalysisTheater({
                 {/* Progress bar */}
                 <div className="h-1 w-full overflow-hidden rounded-full bg-gray-200">
                     <motion.div
-                        className="h-full rounded-full bg-gradient-to-r from-violet-500 to-violet-400"
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
                         initial={{ width: "0%" }}
                         animate={{
                             width: `${((currentStage + 1) / ANALYSIS_STAGES.length) * 100}%`,

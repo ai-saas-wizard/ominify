@@ -81,7 +81,7 @@ export const LogViewer = ({ calls, agents, phoneNumbers }: LogViewerProps) => {
                                 selectedAgentId === agent.id ? "bg-white shadow-sm border border-gray-100" : "hover:bg-gray-100"
                             )}
                         >
-                            <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
+                            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
                                 <Phone className="w-4 h-4" />
                             </div>
                             <div className="overflow-hidden">
@@ -113,7 +113,7 @@ export const LogViewer = ({ calls, agents, phoneNumbers }: LogViewerProps) => {
                                 onClick={() => setSelectedCallId(call.id)}
                                 className={cn(
                                     "px-5 py-4 cursor-pointer border-b border-gray-50 hover:bg-gray-50 transition-colors relative",
-                                    isSelected && "bg-blue-50/50 hover:bg-blue-50/50 after:absolute after:left-0 after:top-0 after:bottom-0 after:w-1 after:bg-violet-600"
+                                    isSelected && "bg-blue-50/50 hover:bg-blue-50/50 after:absolute after:left-0 after:top-0 after:bottom-0 after:w-1 after:bg-emerald-600"
                                 )}
                             >
                                 <div className="flex justify-between items-start mb-1">
@@ -268,7 +268,7 @@ export const LogViewer = ({ calls, agents, phoneNumbers }: LogViewerProps) => {
                                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
                                         <div className="flex items-center gap-2 mb-2">
                                             <h4 className="font-bold text-xs text-gray-900 uppercase">Call Summary</h4>
-                                            <Sparkles className="w-3 h-3 text-violet-500" />
+                                            <Sparkles className="w-3 h-3 text-emerald-500" />
                                         </div>
                                         <p className="text-sm text-gray-600 leading-relaxed">
                                             {selectedCall.analysis?.summary || "No summary available for this call."}
@@ -288,7 +288,7 @@ export const LogViewer = ({ calls, agents, phoneNumbers }: LogViewerProps) => {
                                                         <div className={cn(
                                                             "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm",
                                                             msg.role === 'user'
-                                                                ? "bg-violet-600 text-white rounded-tr-none"
+                                                                ? "bg-emerald-600 text-white rounded-tr-none"
                                                                 : "bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm"
                                                         )}>
                                                             {msg.message}

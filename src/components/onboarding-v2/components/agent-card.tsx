@@ -62,7 +62,7 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                     </div>
 
                     {isRequired ? (
-                        <span className="flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-600 ring-1 ring-violet-200">
+                        <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-600 ring-1 ring-emerald-200">
                             <Lock className="h-3 w-3" />
                             Required
                         </span>
@@ -110,7 +110,7 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
                 <div className="mt-3 flex items-center gap-2">
                     <button
                         onClick={onCustomize}
-                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-violet-600 transition-colors hover:bg-violet-50"
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50"
                     >
                         <MessageSquare className="h-3.5 w-3.5" />
                         Customize

@@ -33,8 +33,8 @@ export function AnalyticsOverview({ data }: { data: OverviewData }) {
             value: data.totalMinutes.toLocaleString(),
             subtext: "minutes used",
             icon: Clock,
-            color: "bg-violet-500",
-            bgColor: "bg-violet-50"
+            color: "bg-emerald-500",
+            bgColor: "bg-emerald-50"
         },
         {
             title: "Avg Duration",

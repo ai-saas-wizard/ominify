@@ -8,7 +8,7 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const badgeVariants = {
-    default: "bg-violet-100 text-violet-700 border-violet-200",
+    default: "bg-emerald-100 text-emerald-700 border-emerald-200",
     secondary: "bg-gray-100 text-gray-700 border-gray-200",
     outline: "border-gray-300 text-gray-600 bg-transparent",
     "ai-high": "bg-emerald-50 text-emerald-700 border-emerald-200",

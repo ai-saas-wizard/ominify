@@ -124,7 +124,7 @@ export function ConditionNode({ data, selected }: NodeProps) {
             transition={{ duration: 0.2 }}
             className={cn(
                 "relative bg-white rounded-xl border shadow-sm cursor-pointer transition-all hover:shadow-md",
-                selected && "ring-2 ring-violet-500 ring-offset-2",
+                selected && "ring-2 ring-emerald-500 ring-offset-2",
             )}
             style={{ width: FLOW_NODE_WIDTH }}
         >

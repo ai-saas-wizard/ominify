@@ -87,8 +87,8 @@ function Section({
                 className="flex w-full items-center justify-between px-5 py-4"
             >
                 <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50">
-                        <Icon className="h-4.5 w-4.5 text-violet-600" />
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50">
+                        <Icon className="h-4.5 w-4.5 text-emerald-600" />
                     </div>
                     <span className="text-sm font-semibold text-gray-900">{title}</span>
                 </div>
@@ -132,7 +132,7 @@ function ConfidenceBadge({ field, fieldMeta, resetFieldToAI }: {
             {meta.userEdited && (
                 <button
                     onClick={() => resetFieldToAI(field)}
-                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-50"
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-emerald-600 hover:bg-emerald-50"
                 >
                     <RotateCcw className="h-2.5 w-2.5" />
                     Reset
@@ -224,7 +224,7 @@ export function ProfileReview({
                                     value={form.industry}
                                     onChange={(e) => updateField("industry", e.target.value)}
                                     aria-label="Industry"
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 >
                                     <option value="">Select industry...</option>
                                     {INDUSTRIES.map((i) => (
@@ -252,7 +252,7 @@ export function ProfileReview({
                                     rows={3}
                                     aria-label="Business description"
                                     placeholder="Describe your business, services, and what makes you unique..."
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 />
                                 <FieldError field="business_description" errors={validationErrors} />
                             </div>
@@ -356,7 +356,7 @@ export function ProfileReview({
                                 </div>
                                 <button
                                     onClick={addJobType}
-                                    className="mt-2 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-violet-600 hover:bg-violet-50"
+                                    className="mt-2 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
                                 >
                                     <Plus className="h-3.5 w-3.5" />
                                     Add Job Type
@@ -379,7 +379,7 @@ export function ProfileReview({
                                             className={cn(
                                                 "rounded-lg border px-3 py-2 text-left transition-colors",
                                                 form.brand_voice === bv.value
-                                                    ? "border-violet-300 bg-violet-50 text-violet-700"
+                                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                                                     : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                                             )}
                                         >
@@ -398,7 +398,7 @@ export function ProfileReview({
                                     onChange={(e) => updateField("custom_phrases", e.target.value)}
                                     rows={4}
                                     placeholder={'{\n  "always_mention": ["satisfaction guarantee"],\n  "never_say": ["cheapest"]\n}'}
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 />
                             </div>
 
@@ -410,7 +410,7 @@ export function ProfileReview({
                                     rows={2}
                                     aria-label="Greeting style"
                                     placeholder="How should agents greet callers? e.g. 'Thank you for calling [Business], this is [Agent Name], how can I help you today?'"
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 />
                                 <FieldWarning field="greeting_style" warnings={validationWarnings} />
                             </div>
@@ -425,7 +425,7 @@ export function ProfileReview({
                                 <select
                                     value={form.timezone}
                                     onChange={(e) => updateField("timezone", e.target.value)}
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 >
                                     {TIMEZONES.map((tz) => (
                                         <option key={tz.value} value={tz.value}>{tz.label}</option>
@@ -483,7 +483,7 @@ export function ProfileReview({
                                 <select
                                     value={form.after_hours_behavior}
                                     onChange={(e) => updateField("after_hours_behavior", e.target.value)}
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 >
                                     <option value="voicemail">Send to voicemail</option>
                                     <option value="take_message">Take a message</option>
@@ -523,7 +523,7 @@ export function ProfileReview({
                                             className={cn(
                                                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                                                 form.lead_sources.includes(source)
-                                                    ? "border-violet-300 bg-violet-50 text-violet-700"
+                                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                                                     : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"
                                             )}
                                         >
@@ -539,7 +539,7 @@ export function ProfileReview({
                                 <select
                                     value={form.primary_goal}
                                     onChange={(e) => updateField("primary_goal", e.target.value)}
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 >
                                     <option value="">Select primary goal...</option>
                                     {GOAL_OPTIONS.map((g) => (
@@ -556,7 +556,7 @@ export function ProfileReview({
                                     onChange={(e) => updateField("qualification_criteria", e.target.value)}
                                     rows={4}
                                     placeholder={'{\n  "must_have": ["in service area"],\n  "nice_to_have": ["homeowner"],\n  "disqualifiers": ["out of state"]\n}'}
-                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 placeholder:text-gray-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/20"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/20"
                                 />
                             </div>
                         </div>
@@ -576,7 +576,7 @@ export function ProfileReview({
                     )}
                     <Button
                         onClick={onContinue}
-                        className="bg-violet-600 px-6 text-white hover:bg-violet-500"
+                        className="bg-emerald-600 px-6 text-white hover:bg-emerald-500"
                     >
                         Continue to Agent Setup
                         <ArrowRight className="ml-2 h-4 w-4" />
