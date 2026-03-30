@@ -1,4 +1,4 @@
-import { listPhoneNumbers, VapiCall } from "@/lib/vapi";
+import { listCalls, listPhoneNumbers, VapiCall } from "@/lib/vapi";
 import { LogsPageClient } from "@/components/logs/logs-page-client";
 import { supabase } from "@/lib/supabase";
 
@@ -131,6 +131,66 @@ async function fetchClientAgents(clientId: string): Promise<ClientAgent[]> {
     return (data || []) as ClientAgent[];
 }
 
+// Sync calls from VAPI API into Supabase for CUSTOM clients (fallback for missed webhooks)
+async function syncVapiCallsForCustomClient(
+    clientId: string,
+    vapiKey: string,
+    agents: ClientAgent[]
+) {
+    try {
+        const vapiCalls = await listCalls(vapiKey);
+        if (!vapiCalls.length) return;
+
+        // Build assistantId → internal agent UUID map
+        const agentMap = new Map(agents.map(a => [a.vapi_id, a.id]));
+
+        const callRows = vapiCalls.map(call => {
+            // Build transcript from messages if no flat transcript
+            let transcript = call.transcript || '';
+            if (!transcript && call.messages?.length) {
+                transcript = call.messages
+                    .filter(m => m.role === 'user' || m.role === 'bot' || m.role === 'assistant')
+                    .map(m => `${m.role}: ${m.message}`)
+                    .join('\n');
+            }
+
+            return {
+                client_id: clientId,
+                vapi_call_id: call.id,
+                agent_id: agentMap.get(call.assistantId) || null,
+                status: call.status || 'ended',
+                type: call.type || 'inboundPhoneCall',
+                ended_reason: call.endedReason || null,
+                transcript: transcript || null,
+                summary: call.analysis?.summary || null,
+                structured_data: call.analysis?.structuredData || {},
+                recording_url: call.recordingUrl || null,
+                customer_number: call.customer?.number || null,
+                cost: call.cost || 0,
+                duration_seconds: call.durationSeconds || 0,
+                started_at: call.startedAt || null,
+                ended_at: call.endedAt || null,
+            };
+        });
+
+        // Upsert in batches of 50, ignoreDuplicates to preserve richer webhook data
+        for (let i = 0; i < callRows.length; i += 50) {
+            const batch = callRows.slice(i, i + 50);
+            const { error } = await supabase
+                .from('calls')
+                .upsert(batch, { onConflict: 'vapi_call_id', ignoreDuplicates: true });
+
+            if (error) {
+                console.error('[VAPI SYNC] Batch upsert error:', error.message);
+            }
+        }
+
+        console.log(`[VAPI SYNC] Synced ${callRows.length} calls for client ${clientId}`);
+    } catch (error) {
+        console.error('[VAPI SYNC] Error syncing calls:', error);
+    }
+}
+
 export default async function LogsPage({
     params,
     searchParams,
@@ -142,18 +202,27 @@ export default async function LogsPage({
     const { assistantId } = await searchParams;
 
     let vapiKey: string | undefined = undefined;
+    let accountType: string | undefined = undefined;
 
     if (clientId) {
-        const { data } = await supabase.from('clients').select('vapi_key').eq('id', clientId).single();
+        const { data } = await supabase.from('clients').select('vapi_key, account_type').eq('id', clientId).single();
         if (data) {
             vapiKey = data.vapi_key;
+            accountType = data.account_type;
         }
     }
 
-    // Fetch calls from Supabase, agents from Supabase (client-scoped), phone numbers from Vapi
-    const [calls, clientAgents, phoneNumbers] = await Promise.all([
+    // Fetch agents first (needed for both sync and display)
+    const clientAgents = await fetchClientAgents(clientId);
+
+    // For CUSTOM clients, sync calls from VAPI API before reading from Supabase
+    if (accountType === 'CUSTOM' && vapiKey) {
+        await syncVapiCallsForCustomClient(clientId, vapiKey, clientAgents);
+    }
+
+    // Fetch calls from Supabase (now includes any synced VAPI calls) + phone numbers from Vapi
+    const [calls, phoneNumbers] = await Promise.all([
         fetchCallsFromSupabase(clientId, assistantId),
-        fetchClientAgents(clientId),
         listPhoneNumbers(vapiKey)
     ]);
 
