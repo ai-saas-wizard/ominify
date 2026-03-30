@@ -6,6 +6,7 @@ import { CallVolumeChart } from "@/components/analytics/call-volume-chart";
 import { CallOutcomesChart } from "@/components/analytics/call-outcomes-chart";
 import { AgentPerformanceTable } from "@/components/analytics/agent-performance-table";
 import { PeakHoursHeatmap } from "@/components/analytics/peak-hours-heatmap";
+import { SentimentChart } from "@/components/analytics/sentiment-chart";
 import { RefreshCw, BarChart3 } from "lucide-react";
 
 interface AnalyticsData {
@@ -37,6 +38,11 @@ interface AnalyticsData {
         totalCost: number;
     }>;
     peakHours: number[][];
+    sentimentBreakdown: Array<{
+        name: string;
+        value: number;
+        color: string;
+    }>;
 }
 
 export default function AnalyticsPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -145,6 +151,15 @@ export default function AnalyticsPage({ params }: { params: Promise<{ clientId: 
                     <CallOutcomesChart data={data.callOutcomes} />
                 </div>
             </div>
+
+            {/* Sentiment Chart — only shown when sentiment data exists */}
+            {data.sentimentBreakdown && data.sentimentBreakdown.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div>
+                        <SentimentChart data={data.sentimentBreakdown} />
+                    </div>
+                </div>
+            )}
 
             {/* Agent Performance */}
             <AgentPerformanceTable data={data.agentPerformance} />

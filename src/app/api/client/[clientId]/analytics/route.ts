@@ -13,6 +13,7 @@ interface SupabaseCallWithAgent {
     ended_at: string | null;
     duration_seconds: number;
     cost: number;
+    structured_data: Record<string, any> | null;
     agents: {
         id: string;
         vapi_id: string;
@@ -49,6 +50,11 @@ interface AnalyticsData {
         totalCost: number;
     }>;
     peakHours: number[][];
+    sentimentBreakdown: Array<{
+        name: string;
+        value: number;
+        color: string;
+    }>;
 }
 
 export async function GET(
@@ -223,6 +229,29 @@ export async function GET(
             peakHours[dayOfWeek][hour]++;
         });
 
+        // Sentiment breakdown from structured_data
+        const sentimentMap = new Map<string, number>();
+        calls.forEach(call => {
+            const sentiment = call.structured_data?.sentiment;
+            if (sentiment) {
+                sentimentMap.set(sentiment, (sentimentMap.get(sentiment) || 0) + 1);
+            }
+        });
+
+        const sentimentColors: Record<string, string> = {
+            'Positive': '#10b981',
+            'Neutral': '#3b82f6',
+            'Negative': '#ef4444',
+        };
+
+        const sentimentBreakdown = Array.from(sentimentMap.entries())
+            .filter(([_, value]) => value > 0)
+            .map(([name, value]) => ({
+                name,
+                value,
+                color: sentimentColors[name] || '#6b7280'
+            }));
+
         const response: AnalyticsData = {
             overview: {
                 totalCalls,
@@ -236,7 +265,8 @@ export async function GET(
             callsByDay,
             callOutcomes,
             agentPerformance,
-            peakHours
+            peakHours,
+            sentimentBreakdown
         };
 
         return NextResponse.json(response);
