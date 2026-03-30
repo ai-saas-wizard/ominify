@@ -89,6 +89,7 @@ async function fetchCallsFromSupabase(
             )
         `)
         .eq('client_id', clientId)
+        .eq('is_hidden', false)
         .order('started_at', { ascending: false })
         .limit(500);
 
@@ -141,7 +142,41 @@ async function syncVapiCallsForCustomClient(
         const vapiCalls = await listCalls(vapiKey);
         if (!vapiCalls.length) return;
 
-        // Build assistantId → internal agent UUID map
+        // Auto-create missing agents from VAPI assistants
+        const existingVapiIds = new Set(agents.map(a => a.vapi_id));
+        const missingAssistantIds = [...new Set(
+            vapiCalls.map(c => c.assistantId).filter(id => id && !existingVapiIds.has(id))
+        )];
+
+        for (const assistantId of missingAssistantIds) {
+            try {
+                // Fetch assistant name from VAPI
+                const res = await fetch(`https://api.vapi.ai/assistant/${assistantId}`, {
+                    headers: { Authorization: `Bearer ${vapiKey}` }
+                });
+                const assistantName = res.ok ? (await res.json()).name : `Agent ${assistantId.slice(0, 8)}`;
+
+                const { data: newAgent } = await supabase
+                    .from('agents')
+                    .insert({
+                        client_id: clientId,
+                        vapi_id: assistantId,
+                        name: assistantName,
+                        agent_type: 'custom',
+                    })
+                    .select('id, vapi_id, name, agent_type')
+                    .single();
+
+                if (newAgent) {
+                    agents.push(newAgent as ClientAgent);
+                    console.log(`[VAPI SYNC] Auto-created agent: ${assistantName} (${assistantId})`);
+                }
+            } catch (err) {
+                console.error(`[VAPI SYNC] Failed to create agent for ${assistantId}:`, err);
+            }
+        }
+
+        // Build assistantId → internal agent UUID map (includes newly created agents)
         const agentMap = new Map(agents.map(a => [a.vapi_id, a.id]));
 
         const callRows = vapiCalls.map(call => {
@@ -183,6 +218,16 @@ async function syncVapiCallsForCustomClient(
             if (error) {
                 console.error('[VAPI SYNC] Batch upsert error:', error.message);
             }
+        }
+
+        // Link all unlinked calls for this client to the correct agent
+        // For single-agent clients, assign all orphaned calls to that agent
+        if (agents.length === 1) {
+            await supabase
+                .from('calls')
+                .update({ agent_id: agents[0].id })
+                .eq('client_id', clientId)
+                .is('agent_id', null);
         }
 
         console.log(`[VAPI SYNC] Synced ${callRows.length} calls for client ${clientId}`);

@@ -76,6 +76,7 @@ export async function GET(
                 )
             `)
             .eq('client_id', clientId)
+            .eq('is_hidden', false)
             .order('started_at', { ascending: false });
 
         if (callsError) {

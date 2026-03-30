@@ -58,6 +58,7 @@ export async function GET(
                 )
             `, { count: 'exact' })
             .eq('client_id', clientId)
+            .eq('is_hidden', false)
             .order('started_at', { ascending: false });
 
         // Apply agent filter (could be UUID or vapi_id)
