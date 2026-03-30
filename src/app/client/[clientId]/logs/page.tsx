@@ -189,6 +189,14 @@ async function syncVapiCallsForCustomClient(
                     .join('\n');
             }
 
+            // VAPI API doesn't always return durationSeconds — calculate from timestamps
+            let durationSeconds = call.durationSeconds || 0;
+            if (!durationSeconds && call.startedAt && call.endedAt) {
+                durationSeconds = Math.round(
+                    (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000
+                );
+            }
+
             return {
                 client_id: clientId,
                 vapi_call_id: call.id,
@@ -202,18 +210,18 @@ async function syncVapiCallsForCustomClient(
                 recording_url: call.recordingUrl || null,
                 customer_number: call.customer?.number || null,
                 cost: call.cost || 0,
-                duration_seconds: call.durationSeconds || 0,
+                duration_seconds: durationSeconds,
                 started_at: call.startedAt || null,
                 ended_at: call.endedAt || null,
             };
         });
 
-        // Upsert in batches of 50, ignoreDuplicates to preserve richer webhook data
+        // Upsert in batches of 50 — updates existing rows so VAPI data stays fresh
         for (let i = 0; i < callRows.length; i += 50) {
             const batch = callRows.slice(i, i + 50);
             const { error } = await supabase
                 .from('calls')
-                .upsert(batch, { onConflict: 'vapi_call_id', ignoreDuplicates: true });
+                .upsert(batch, { onConflict: 'vapi_call_id', ignoreDuplicates: false });
 
             if (error) {
                 console.error('[VAPI SYNC] Batch upsert error:', error.message);
