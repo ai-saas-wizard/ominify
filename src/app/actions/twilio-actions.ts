@@ -6,9 +6,11 @@ import {
     purchasePhoneNumber,
     releasePhoneNumber,
     listAvailableNumbers,
+    listAvailableNumbersOnAccount,
     listPurchasedNumbers,
     createMessagingService,
     addNumberToMessagingService,
+    validateTwilioCredentials,
     // TrustHub Customer Profile
     createSecondaryCustomerProfile,
     createEndUserBusinessInfo,
@@ -33,6 +35,22 @@ import {
 import { deleteVapiPhoneNumber } from "@/lib/vapi";
 import { revalidatePath } from "next/cache";
 
+// ─── Account Credentials Helper ────────────────────────────────────────────
+// Abstracts the difference between BYOT (type_a_byoa) and subaccount (type_b_subaccount)
+
+function getAccountCredentials(account: any): { sid: string; authToken: string } {
+    if (account.account_type === "type_a_byoa") {
+        return {
+            sid: account.external_account_sid,
+            authToken: account.auth_token_encrypted, // TODO: decrypt
+        };
+    }
+    return {
+        sid: account.subaccount_sid,
+        authToken: account.auth_token_encrypted, // TODO: decrypt
+    };
+}
+
 // ─── Twilio Subaccount Provisioning ─────────────────────────────────────────
 
 export async function provisionTwilioSubaccount(clientId: string) {
@@ -45,7 +63,7 @@ export async function provisionTwilioSubaccount(clientId: string) {
             .single();
 
         if (existing) {
-            return { success: false, error: "Twilio subaccount already provisioned" };
+            return { success: false, error: "Twilio account already connected" };
         }
 
         // Get client info for friendly name
@@ -85,6 +103,111 @@ export async function provisionTwilioSubaccount(clientId: string) {
     }
 }
 
+// ─── Connect External Twilio Account (BYOT) ────────────────────────────────
+
+export async function connectExternalTwilioAccount(
+    clientId: string,
+    accountSid: string,
+    authToken: string
+) {
+    try {
+        // Check if already connected
+        const { data: existing } = await supabase
+            .from("tenant_twilio_accounts")
+            .select("id")
+            .eq("client_id", clientId)
+            .single();
+
+        if (existing) {
+            return { success: false, error: "Twilio account already connected" };
+        }
+
+        // Validate credentials
+        const validation = await validateTwilioCredentials(accountSid, authToken);
+        if (!validation.valid) {
+            return { success: false, error: validation.error || "Invalid credentials" };
+        }
+
+        // Store in DB
+        const { error } = await supabase.from("tenant_twilio_accounts").insert({
+            client_id: clientId,
+            account_type: "type_a_byoa",
+            external_account_sid: accountSid,
+            auth_token_encrypted: authToken, // TODO: encrypt with AES-256-GCM
+            friendly_name: validation.friendlyName || `BYOT - ${accountSid.slice(-4)}`,
+            status: "active",
+        });
+
+        if (error) {
+            console.error("connectExternalTwilioAccount DB error:", error);
+            return { success: false, error: error.message };
+        }
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true, friendlyName: validation.friendlyName };
+    } catch (err: any) {
+        console.error("connectExternalTwilioAccount error:", err);
+        return { success: false, error: err.message || "Failed to connect Twilio account" };
+    }
+}
+
+// ─── Validate Twilio Credentials (for Test Connection button) ──────────────
+
+export async function validateTwilioCredentialsAction(
+    accountSid: string,
+    authToken: string
+): Promise<{ valid: boolean; friendlyName?: string; error?: string }> {
+    try {
+        const result = await validateTwilioCredentials(accountSid, authToken);
+        return result;
+    } catch (err: any) {
+        return { valid: false, error: err.message || "Validation failed" };
+    }
+}
+
+// ─── Disconnect Twilio Account ──────────────────────────────────────────────
+
+export async function disconnectTwilioAccount(clientId: string) {
+    try {
+        // Check for active phone numbers
+        const { data: activeNumbers } = await supabase
+            .from("tenant_phone_numbers")
+            .select("id")
+            .eq("client_id", clientId)
+            .eq("status", "active");
+
+        if (activeNumbers && activeNumbers.length > 0) {
+            return {
+                success: false,
+                error: `Cannot disconnect: ${activeNumbers.length} active phone number${activeNumbers.length !== 1 ? "s" : ""} must be released first.`,
+            };
+        }
+
+        // Delete A2P registration if exists
+        await supabase
+            .from("tenant_a2p_registrations")
+            .delete()
+            .eq("client_id", clientId);
+
+        // Delete Twilio account record
+        const { error } = await supabase
+            .from("tenant_twilio_accounts")
+            .delete()
+            .eq("client_id", clientId);
+
+        if (error) {
+            console.error("disconnectTwilioAccount DB error:", error);
+            return { success: false, error: error.message };
+        }
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true };
+    } catch (err: any) {
+        console.error("disconnectTwilioAccount error:", err);
+        return { success: false, error: err.message || "Failed to disconnect" };
+    }
+}
+
 // ─── Get Twilio Account ─────────────────────────────────────────────────────
 
 export async function getTwilioAccount(clientId: string) {
@@ -118,8 +241,24 @@ export async function getPhoneNumbers(clientId: string) {
     return data || [];
 }
 
-export async function searchAvailableNumbers(areaCode?: string, country?: string) {
+export async function searchAvailableNumbers(areaCode?: string, country?: string, clientId?: string) {
     try {
+        // If clientId provided, check if BYOT account — search on their account
+        if (clientId) {
+            const account = await getTwilioAccount(clientId);
+            if (account && account.account_type === "type_a_byoa") {
+                const { sid, authToken } = getAccountCredentials(account);
+                const numbers = await listAvailableNumbersOnAccount(
+                    sid,
+                    authToken,
+                    areaCode,
+                    country || "US"
+                );
+                return { success: true, numbers };
+            }
+        }
+
+        // Default: search on main Omnify account (for subaccounts)
         const numbers = await listAvailableNumbers(areaCode, country || "US");
         return { success: true, numbers };
     } catch (err: any) {
@@ -132,27 +271,31 @@ const FREE_NUMBER_LIMIT = 2;
 
 export async function purchasePhoneNumberForClient(clientId: string, phoneNumber: string) {
     try {
-        // Get Twilio subaccount
+        // Get Twilio account
         const account = await getTwilioAccount(clientId);
         if (!account) {
-            return { success: false, error: "Twilio subaccount not provisioned. Please provision first." };
+            return { success: false, error: "Twilio account not connected. Please connect first." };
         }
 
-        // Check free number limit for umbrella tenants
-        const currentNumbers = await getPhoneNumbers(clientId);
-        const activeCount = currentNumbers.filter((n: any) => n.status === "active").length;
-        if (activeCount >= FREE_NUMBER_LIMIT) {
-            return {
-                success: false,
-                error: "PAYMENT_REQUIRED",
-                message: `You've used your ${FREE_NUMBER_LIMIT} free numbers. Additional numbers cost $10 each.`,
-            };
+        const { sid, authToken } = getAccountCredentials(account);
+
+        // Check free number limit for managed subaccounts only
+        if (account.account_type === "type_b_subaccount") {
+            const currentNumbers = await getPhoneNumbers(clientId);
+            const activeCount = currentNumbers.filter((n: any) => n.status === "active").length;
+            if (activeCount >= FREE_NUMBER_LIMIT) {
+                return {
+                    success: false,
+                    error: "PAYMENT_REQUIRED",
+                    message: `You've used your ${FREE_NUMBER_LIMIT} free numbers. Additional numbers cost $10 each.`,
+                };
+            }
         }
 
-        // Purchase number on subaccount
+        // Purchase number on account
         const purchased = await purchasePhoneNumber(
-            account.subaccount_sid,
-            account.auth_token_encrypted, // TODO: decrypt
+            sid,
+            authToken,
             phoneNumber,
             clientId
         );
@@ -176,8 +319,8 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
         if (account.messaging_service_sid) {
             try {
                 await addNumberToMessagingService(
-                    account.subaccount_sid,
-                    account.auth_token_encrypted,
+                    sid,
+                    authToken,
                     account.messaging_service_sid,
                     purchased.sid
                 );
@@ -196,10 +339,10 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
 
 export async function releasePhoneNumberForClient(clientId: string, phoneNumberId: string) {
     try {
-        // Get the phone number record
+        // Get the phone number record with Twilio account info
         const { data: phoneRecord } = await supabase
             .from("tenant_phone_numbers")
-            .select("*, tenant_twilio_accounts!inner(subaccount_sid, auth_token_encrypted)")
+            .select("*, tenant_twilio_accounts!inner(subaccount_sid, auth_token_encrypted, external_account_sid, account_type)")
             .eq("id", phoneNumberId)
             .eq("client_id", clientId)
             .single();
@@ -209,11 +352,11 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
         }
 
         const account = (phoneRecord as any).tenant_twilio_accounts;
+        const { sid, authToken } = getAccountCredentials(account);
 
         // Clean up VAPI phone number if imported
         if (phoneRecord.vapi_phone_number_id) {
             try {
-                // Get VAPI key for this client
                 const { data: client } = await supabase
                     .from("clients")
                     .select("vapi_key")
@@ -223,16 +366,11 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
                 await deleteVapiPhoneNumber(phoneRecord.vapi_phone_number_id, client?.vapi_key || undefined);
             } catch (err) {
                 console.error("Failed to delete VAPI phone number:", err);
-                // Continue with Twilio release even if VAPI cleanup fails
             }
         }
 
         // Release on Twilio
-        await releasePhoneNumber(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            phoneRecord.phone_number_sid
-        );
+        await releasePhoneNumber(sid, authToken, phoneRecord.phone_number_sid);
 
         // Delete from DB
         await supabase
@@ -286,7 +424,6 @@ export interface A2PBusinessInfo {
 // Step 1: Save business info for A2P to tenant_profiles and ensure a2p_registrations row exists
 export async function saveA2PBusinessInfo(clientId: string, info: A2PBusinessInfo) {
     try {
-        // Save business details to tenant_profiles
         const { error: profileError } = await supabase
             .from("tenant_profiles")
             .update({
@@ -310,7 +447,6 @@ export async function saveA2PBusinessInfo(clientId: string, info: A2PBusinessInf
             return { success: false, error: profileError.message };
         }
 
-        // Upsert a2p registration row
         const { data: existing } = await supabase
             .from("tenant_a2p_registrations")
             .select("id")
@@ -349,7 +485,9 @@ export async function saveA2PBusinessInfo(clientId: string, info: A2PBusinessInf
 export async function createA2PCustomerProfile(clientId: string) {
     try {
         const account = await getTwilioAccount(clientId);
-        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
+        if (!account) return { success: false, error: "Twilio account not connected." };
+
+        const { sid, authToken } = getAccountCredentials(account);
 
         const { data: profile } = await supabase
             .from("tenant_profiles")
@@ -374,102 +512,61 @@ export async function createA2PCustomerProfile(clientId: string) {
         const rep2 = profile.authorized_rep_2 || {};
 
         // 1. Create Secondary Customer Profile
-        const customerProfile = await createSecondaryCustomerProfile(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            businessName,
-            email
-        );
+        const customerProfile = await createSecondaryCustomerProfile(sid, authToken, businessName, email);
 
         // 2. Create EndUser for business info
-        const businessEndUser = await createEndUserBusinessInfo(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            {
-                businessName,
-                businessType: profile.business_type || "LLC",
-                businessIndustry: profile.business_industry || "ONLINE",
-                businessRegistrationNumber: profile.ein_tax_id || "",
-                businessRegistrationIdType: profile.business_registration_id_type || "EIN",
-                businessRegionsOfOperation: profile.business_regions_of_operation || "USA_AND_CANADA",
-                websiteUrl: profile.website || "",
-            }
-        );
+        const businessEndUser = await createEndUserBusinessInfo(sid, authToken, {
+            businessName,
+            businessType: profile.business_type || "LLC",
+            businessIndustry: profile.business_industry || "ONLINE",
+            businessRegistrationNumber: profile.ein_tax_id || "",
+            businessRegistrationIdType: profile.business_registration_id_type || "EIN",
+            businessRegionsOfOperation: profile.business_regions_of_operation || "USA_AND_CANADA",
+            websiteUrl: profile.website || "",
+        });
 
         // 3. Create EndUser for authorized rep 1
-        const rep1EndUser = await createEndUserAuthorizedRep(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            1,
-            {
-                firstName: rep1.first_name || "",
-                lastName: rep1.last_name || "",
-                email: rep1.email || email,
-                phone: rep1.phone || "",
-                businessTitle: rep1.job_title || "",
-                jobPosition: rep1.job_position || "Other",
-            }
-        );
+        const rep1EndUser = await createEndUserAuthorizedRep(sid, authToken, 1, {
+            firstName: rep1.first_name || "",
+            lastName: rep1.last_name || "",
+            email: rep1.email || email,
+            phone: rep1.phone || "",
+            businessTitle: rep1.job_title || "",
+            jobPosition: rep1.job_position || "Other",
+        });
 
         // 4. Create EndUser for authorized rep 2
-        const rep2EndUser = await createEndUserAuthorizedRep(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            2,
-            {
-                firstName: rep2.first_name || "",
-                lastName: rep2.last_name || "",
-                email: rep2.email || email,
-                phone: rep2.phone || "",
-                businessTitle: rep2.job_title || "",
-                jobPosition: rep2.job_position || "Other",
-            }
-        );
+        const rep2EndUser = await createEndUserAuthorizedRep(sid, authToken, 2, {
+            firstName: rep2.first_name || "",
+            lastName: rep2.last_name || "",
+            email: rep2.email || email,
+            phone: rep2.phone || "",
+            businessTitle: rep2.job_title || "",
+            jobPosition: rep2.job_position || "Other",
+        });
 
         // 5. Create Address
-        const addressResult = await createTrustHubAddress(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
-            {
-                customerName: businessName,
-                street: address.street || "",
-                city: address.city || "",
-                region: address.state || "",
-                postalCode: address.zip || "",
-                isoCountry: address.country || "US",
-            }
-        );
+        const addressResult = await createTrustHubAddress(sid, authToken, {
+            customerName: businessName,
+            street: address.street || "",
+            city: address.city || "",
+            region: address.state || "",
+            postalCode: address.zip || "",
+            isoCountry: address.country || "US",
+        });
 
         // 6. Attach all entities to customer profile
-        await attachEntityToCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid, businessEndUser.sid
-        );
-        await attachEntityToCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid, rep1EndUser.sid
-        );
-        await attachEntityToCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid, rep2EndUser.sid
-        );
-        await attachEntityToCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid, addressResult.sid
-        );
+        await attachEntityToCustomerProfile(sid, authToken, customerProfile.sid, businessEndUser.sid);
+        await attachEntityToCustomerProfile(sid, authToken, customerProfile.sid, rep1EndUser.sid);
+        await attachEntityToCustomerProfile(sid, authToken, customerProfile.sid, rep2EndUser.sid);
+        await attachEntityToCustomerProfile(sid, authToken, customerProfile.sid, addressResult.sid);
 
         // 7. Evaluate
-        const evaluation = await evaluateCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid
-        );
+        const evaluation = await evaluateCustomerProfile(sid, authToken, customerProfile.sid);
         console.log("[A2P] Customer Profile evaluation:", evaluation);
 
         // 8. Submit for review
-        await submitCustomerProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            customerProfile.sid
-        );
+        await submitCustomerProfile(sid, authToken, customerProfile.sid);
 
         // 9. Store all SIDs in DB
         await supabase
@@ -498,7 +595,9 @@ export async function createA2PCustomerProfile(clientId: string) {
 export async function createA2PTrustProductAction(clientId: string) {
     try {
         const account = await getTwilioAccount(clientId);
-        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
+        if (!account) return { success: false, error: "Twilio account not connected." };
+
+        const { sid, authToken } = getAccountCredentials(account);
 
         const { data: registration } = await supabase
             .from("tenant_a2p_registrations")
@@ -528,42 +627,33 @@ export async function createA2PTrustProductAction(clientId: string) {
 
         // 1. Create Trust Product
         const trustProduct = await createA2PTrustProduct(
-            account.subaccount_sid, account.auth_token_encrypted,
+            sid, authToken,
             `${businessName} - A2P Trust`,
             email
         );
 
         // 2. Create A2P Profile EndUser
-        const a2pEndUser = await createEndUserA2PProfile(
-            account.subaccount_sid, account.auth_token_encrypted,
-            {
-                businessName,
-                brandName: businessName,
-                businessType: profile?.business_type || "LLC",
-                businessIndustry: profile?.business_industry || "ONLINE",
-                businessRegistrationNumber: profile?.ein_tax_id || "",
-                businessRegionsOfOperation: profile?.business_regions_of_operation || "USA_AND_CANADA",
-                websiteUrl: profile?.website || "",
-            }
-        );
+        const a2pEndUser = await createEndUserA2PProfile(sid, authToken, {
+            businessName,
+            brandName: businessName,
+            businessType: profile?.business_type || "LLC",
+            businessIndustry: profile?.business_industry || "ONLINE",
+            businessRegistrationNumber: profile?.ein_tax_id || "",
+            businessRegionsOfOperation: profile?.business_regions_of_operation || "USA_AND_CANADA",
+            websiteUrl: profile?.website || "",
+        });
 
         // 3. Attach Secondary Customer Profile to Trust Product
         await attachEntityToTrustProduct(
-            account.subaccount_sid, account.auth_token_encrypted,
+            sid, authToken,
             trustProduct.sid, registration.secondary_customer_profile_sid
         );
 
         // 4. Attach A2P EndUser to Trust Product
-        await attachEntityToTrustProduct(
-            account.subaccount_sid, account.auth_token_encrypted,
-            trustProduct.sid, a2pEndUser.sid
-        );
+        await attachEntityToTrustProduct(sid, authToken, trustProduct.sid, a2pEndUser.sid);
 
         // 5. Evaluate and Submit
-        await evaluateAndSubmitTrustProduct(
-            account.subaccount_sid, account.auth_token_encrypted,
-            trustProduct.sid
-        );
+        await evaluateAndSubmitTrustProduct(sid, authToken, trustProduct.sid);
 
         // 6. Update DB
         await supabase
@@ -588,7 +678,9 @@ export async function createA2PTrustProductAction(clientId: string) {
 export async function registerBrandAction(clientId: string) {
     try {
         const account = await getTwilioAccount(clientId);
-        if (!account) return { success: false, error: "Twilio subaccount not provisioned." };
+        if (!account) return { success: false, error: "Twilio account not connected." };
+
+        const { sid, authToken } = getAccountCredentials(account);
 
         const { data: registration } = await supabase
             .from("tenant_a2p_registrations")
@@ -603,8 +695,7 @@ export async function registerBrandAction(clientId: string) {
 
         // Register brand
         const brandResult = await registerBrand(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
+            sid, authToken,
             registration.trust_product_sid,
             registration.secondary_customer_profile_sid
         );
@@ -625,8 +716,7 @@ export async function registerBrandAction(clientId: string) {
                 .single();
 
             const msgService = await createMessagingService(
-                account.subaccount_sid,
-                account.auth_token_encrypted,
+                sid, authToken,
                 profile?.legal_business_name || client?.name || "OMINIFY Tenant",
                 clientId
             );
@@ -687,12 +777,13 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
         }
 
         const account = await getTwilioAccount(clientId);
-        if (!account) return { success: false, error: "Twilio subaccount not found." };
+        if (!account) return { success: false, error: "Twilio account not found." };
         if (!account.messaging_service_sid) return { success: false, error: "Messaging service not configured." };
 
+        const { sid, authToken } = getAccountCredentials(account);
+
         const campaignResult = await registerCampaign(
-            account.subaccount_sid,
-            account.auth_token_encrypted,
+            sid, authToken,
             account.messaging_service_sid,
             registration.brand_sid,
             {
@@ -742,6 +833,8 @@ export async function checkA2PStatus(clientId: string) {
             return { success: true, data: registration };
         }
 
+        const { sid, authToken } = getAccountCredentials(account);
+
         let updated = false;
         const updates: Record<string, string> = {};
 
@@ -752,7 +845,7 @@ export async function checkA2PStatus(clientId: string) {
         ) {
             try {
                 const profileStatus = await checkCustomerProfileStatus(
-                    account.subaccount_sid, account.auth_token_encrypted,
+                    sid, authToken,
                     registration.secondary_customer_profile_sid
                 );
                 if (profileStatus.status !== registration.secondary_profile_status) {
@@ -775,7 +868,7 @@ export async function checkA2PStatus(clientId: string) {
         ) {
             try {
                 const trustStatus = await checkTrustProductStatus(
-                    account.subaccount_sid, account.auth_token_encrypted,
+                    sid, authToken,
                     registration.trust_product_sid
                 );
                 if (trustStatus.status !== registration.trust_product_status) {
@@ -794,10 +887,7 @@ export async function checkA2PStatus(clientId: string) {
         // Check brand status
         if (registration.brand_sid && registration.brand_status === "pending") {
             try {
-                const brandStatus = await checkBrandStatus(
-                    account.subaccount_sid, account.auth_token_encrypted,
-                    registration.brand_sid
-                );
+                const brandStatus = await checkBrandStatus(sid, authToken, registration.brand_sid);
                 if (brandStatus.status !== registration.brand_status) {
                     updates.brand_status = brandStatus.status;
                     registration.brand_status = brandStatus.status;
@@ -819,7 +909,7 @@ export async function checkA2PStatus(clientId: string) {
         ) {
             try {
                 const campaignStatus = await checkCampaignStatus(
-                    account.subaccount_sid, account.auth_token_encrypted,
+                    sid, authToken,
                     account.messaging_service_sid, registration.campaign_sid
                 );
                 if (campaignStatus.status !== registration.campaign_status) {

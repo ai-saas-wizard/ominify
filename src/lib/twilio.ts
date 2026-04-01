@@ -14,6 +14,61 @@ function getSubClient(subaccountSid: string, authToken: string) {
     return Twilio(subaccountSid, authToken);
 }
 
+// ─── Credential Validation ─────────────────────────────────────────────────
+
+export async function validateTwilioCredentials(
+    accountSid: string,
+    authToken: string
+): Promise<{ valid: boolean; friendlyName?: string; error?: string }> {
+    try {
+        const client = getSubClient(accountSid, authToken);
+        const account = await client.api.accounts(accountSid).fetch();
+        return { valid: true, friendlyName: account.friendlyName };
+    } catch (err: any) {
+        const code = err.code || err.status;
+        if (code === 20003 || code === 401) {
+            return { valid: false, error: "Invalid Account SID or Auth Token" };
+        }
+        return { valid: false, error: err.message || "Failed to validate credentials" };
+    }
+}
+
+// ─── Account-Scoped Number Search (for BYOT) ──────────────────────────────
+
+export async function listAvailableNumbersOnAccount(
+    accountSid: string,
+    authToken: string,
+    areaCode?: string,
+    country: string = "US",
+    limit: number = 10
+) {
+    const client = getSubClient(accountSid, authToken);
+    const options: any = {
+        smsEnabled: true,
+        voiceEnabled: true,
+        limit,
+    };
+    if (areaCode) {
+        options.areaCode = areaCode;
+    }
+
+    const numbers = await client
+        .availablePhoneNumbers(country)
+        .local.list(options);
+
+    return numbers.map((n) => ({
+        phoneNumber: n.phoneNumber,
+        friendlyName: n.friendlyName,
+        locality: n.locality,
+        region: n.region,
+        capabilities: {
+            sms: n.capabilities.sms,
+            voice: n.capabilities.voice,
+            mms: n.capabilities.mms,
+        },
+    }));
+}
+
 // ─── Subaccount Management ──────────────────────────────────────────────────
 
 export async function createSubaccount(friendlyName: string) {

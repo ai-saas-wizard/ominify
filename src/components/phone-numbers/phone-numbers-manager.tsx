@@ -1,25 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import {
-    Phone,
-    Plus,
-    Search,
-    Trash2,
-    CheckCircle2,
-    XCircle,
-    Server,
-    Shield,
-    Loader2,
-} from "lucide-react";
-import {
-    provisionTwilioSubaccount,
-    searchAvailableNumbers,
-    purchasePhoneNumberForClient,
-    releasePhoneNumberForClient,
-} from "@/app/actions/twilio-actions";
+import { motion, AnimatePresence } from "framer-motion";
+import { Phone } from "lucide-react";
+import { staggerContainer, staggerItem } from "@/lib/settings-animations";
+import { TwilioAccountSetup } from "./twilio-account-setup";
+import { TwilioAccountStatus } from "./twilio-account-status";
+import { PhoneNumbersList } from "./phone-numbers-list";
 import { A2PStatusCard } from "./a2p-status-card";
-import { useRouter } from "next/navigation";
 
 interface Props {
     clientId: string;
@@ -40,390 +27,84 @@ export function PhoneNumbersManager({
     tenantProfile,
     agentMap = {},
 }: Props) {
-    const router = useRouter();
-    const [phoneNumbers, setPhoneNumbers] = useState(initialPhoneNumbers);
-    const [provisioning, setProvisioning] = useState(false);
-    const [provisionError, setProvisionError] = useState("");
-
-    // Purchase flow
-    const [showSearch, setShowSearch] = useState(false);
-    const [areaCode, setAreaCode] = useState("");
-    const [searching, setSearching] = useState(false);
-    const [availableNumbers, setAvailableNumbers] = useState<any[]>([]);
-    const [purchasing, setPurchasing] = useState<string | null>(null);
-    const [releasing, setReleasing] = useState<string | null>(null);
-
-    async function handleProvision() {
-        setProvisioning(true);
-        setProvisionError("");
-        try {
-            const result = await provisionTwilioSubaccount(clientId);
-            if (!result.success) {
-                setProvisionError(result.error || "Failed to provision");
-            } else {
-                router.refresh();
-            }
-        } catch (err: any) {
-            setProvisionError(err.message);
-        } finally {
-            setProvisioning(false);
-        }
-    }
-
-    async function handleSearch() {
-        setSearching(true);
-        try {
-            const result = await searchAvailableNumbers(areaCode || undefined);
-            setAvailableNumbers(result.numbers || []);
-        } catch (err) {
-            console.error("Search error:", err);
-        } finally {
-            setSearching(false);
-        }
-    }
-
-    const [paymentRequired, setPaymentRequired] = useState(false);
-    const [paymentMessage, setPaymentMessage] = useState("");
-
-    const activeNumberCount = phoneNumbers.filter((n: any) => n.status === "active").length;
-    const freeNumbersRemaining = Math.max(0, 2 - activeNumberCount);
-
-    async function handlePurchase(phoneNumber: string) {
-        setPurchasing(phoneNumber);
-        try {
-            const result = await purchasePhoneNumberForClient(clientId, phoneNumber);
-            if (result.success) {
-                setAvailableNumbers((prev) =>
-                    prev.filter((n) => n.phoneNumber !== phoneNumber)
-                );
-                router.refresh();
-            } else if (result.error === "PAYMENT_REQUIRED") {
-                setPaymentRequired(true);
-                setPaymentMessage((result as any).message || "Additional numbers require payment.");
-                setShowSearch(false);
-            } else {
-                alert(result.error || "Failed to purchase number");
-            }
-        } catch (err: any) {
-            alert(err.message);
-        } finally {
-            setPurchasing(null);
-        }
-    }
-
-    async function handleRelease(phoneNumberId: string) {
-        if (!confirm("Are you sure you want to release this phone number? This cannot be undone.")) return;
-        setReleasing(phoneNumberId);
-        try {
-            const result = await releasePhoneNumberForClient(clientId, phoneNumberId);
-            if (result.success) {
-                setPhoneNumbers((prev) => prev.filter((n) => n.id !== phoneNumberId));
-            } else {
-                alert(result.error || "Failed to release number");
-            }
-        } catch (err: any) {
-            alert(err.message);
-        } finally {
-            setReleasing(null);
-        }
-    }
+    const hasAccount = !!twilioAccount;
+    const isBYOT = twilioAccount?.account_type === "type_a_byoa";
+    const activeNumberCount = initialPhoneNumbers.filter(
+        (n: any) => n.status === "active"
+    ).length;
 
     return (
-        <div className="space-y-6">
+        <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            className="space-y-6"
+        >
             {/* Header */}
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                    <Phone className="w-6 h-6 text-emerald-600" />
-                    Phone Numbers
-                </h1>
-                <p className="text-gray-500 text-sm mt-1">
-                    Manage your Twilio phone numbers and A2P 10DLC compliance
-                </p>
-            </div>
-
-            {/* Twilio Account Status */}
-            <div className="bg-white rounded-xl border shadow-sm p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-emerald-100 rounded-lg">
-                        <Server className="w-5 h-5 text-emerald-600" />
+            <motion.div variants={staggerItem}>
+                <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-100 rounded-xl">
+                        <Phone className="w-6 h-6 text-emerald-600" />
                     </div>
                     <div>
-                        <h2 className="font-semibold text-gray-900">Twilio Subaccount</h2>
-                        <p className="text-sm text-gray-500">
-                            Your isolated Twilio subaccount for SMS and voice
+                        <h1 className="text-2xl font-bold text-gray-900">Phone Numbers</h1>
+                        <p className="text-gray-500 text-sm">
+                            Manage your Twilio phone numbers and A2P 10DLC compliance
                         </p>
                     </div>
                 </div>
+            </motion.div>
 
-                {twilioAccount ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="bg-green-50 rounded-lg p-3">
-                            <p className="text-xs text-green-600 font-medium">Status</p>
-                            <p className="text-sm font-semibold text-green-700 flex items-center gap-1">
-                                <CheckCircle2 className="w-4 h-4" />
-                                Provisioned
-                            </p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-3">
-                            <p className="text-xs text-gray-500 font-medium">Subaccount SID</p>
-                            <p className="text-sm font-mono text-gray-700 truncate">
-                                {twilioAccount.subaccount_sid}
-                            </p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-3">
-                            <p className="text-xs text-gray-500 font-medium">Friendly Name</p>
-                            <p className="text-sm text-gray-700 truncate">
-                                {twilioAccount.friendly_name}
-                            </p>
-                        </div>
-                    </div>
+            {/* Account Setup or Status */}
+            <AnimatePresence mode="wait">
+                {!hasAccount ? (
+                    <motion.div
+                        key="setup"
+                        variants={staggerItem}
+                        initial="hidden"
+                        animate="show"
+                        exit={{ opacity: 0, y: -12, transition: { duration: 0.2 } }}
+                    >
+                        <TwilioAccountSetup clientId={clientId} />
+                    </motion.div>
                 ) : (
-                    <div className="text-center py-6">
-                        <Server className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                        <p className="text-gray-500 text-sm mb-4">
-                            No Twilio subaccount provisioned yet. Provision one to start using SMS and voice.
-                        </p>
-                        {provisionError && (
-                            <p className="text-red-600 text-sm mb-3">{provisionError}</p>
-                        )}
-                        <button
-                            onClick={handleProvision}
-                            disabled={provisioning}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                        >
-                            {provisioning ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Plus className="w-4 h-4" />
-                            )}
-                            {provisioning ? "Provisioning..." : "Provision Twilio Subaccount"}
-                        </button>
-                    </div>
+                    <motion.div
+                        key="connected"
+                        variants={staggerContainer}
+                        initial="hidden"
+                        animate="show"
+                        className="space-y-6"
+                    >
+                        {/* Account Status */}
+                        <motion.div variants={staggerItem}>
+                            <TwilioAccountStatus
+                                clientId={clientId}
+                                twilioAccount={twilioAccount}
+                                activeNumberCount={activeNumberCount}
+                            />
+                        </motion.div>
+
+                        {/* Phone Numbers List */}
+                        <motion.div variants={staggerItem}>
+                            <PhoneNumbersList
+                                clientId={clientId}
+                                initialPhoneNumbers={initialPhoneNumbers}
+                                agentMap={agentMap}
+                                isBYOT={isBYOT}
+                            />
+                        </motion.div>
+
+                        {/* A2P 10DLC Status */}
+                        <motion.div variants={staggerItem}>
+                            <A2PStatusCard
+                                clientId={clientId}
+                                a2pRegistration={a2pRegistration}
+                                tenantProfile={tenantProfile}
+                            />
+                        </motion.div>
+                    </motion.div>
                 )}
-            </div>
-
-            {/* Phone Numbers List */}
-            {twilioAccount && (
-                <div className="bg-white rounded-xl border shadow-sm p-6">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-emerald-100 rounded-lg">
-                                <Phone className="w-5 h-5 text-emerald-600" />
-                            </div>
-                            <div>
-                                <h2 className="font-semibold text-gray-900">Your Numbers</h2>
-                                <p className="text-sm text-gray-500">
-                                    {phoneNumbers.length} number{phoneNumbers.length !== 1 ? "s" : ""} active
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
-                                {freeNumbersRemaining > 0
-                                    ? `${freeNumbersRemaining} free number${freeNumbersRemaining !== 1 ? "s" : ""} remaining`
-                                    : "Free limit reached"}
-                            </span>
-                            <button
-                                onClick={() => {
-                                    if (activeNumberCount >= 2) {
-                                        setPaymentRequired(true);
-                                        setPaymentMessage("You've used your 2 free numbers. Additional numbers cost $10 each.");
-                                    } else {
-                                        setShowSearch(!showSearch);
-                                        setPaymentRequired(false);
-                                    }
-                                }}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm"
-                            >
-                                <Plus className="w-4 h-4" />
-                                Purchase Number
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Phone Numbers Table */}
-                    {phoneNumbers.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="text-left text-gray-500 border-b">
-                                        <th className="pb-2 pr-4 font-medium">Phone Number</th>
-                                        <th className="pb-2 pr-4 font-medium">Friendly Name</th>
-                                        <th className="pb-2 pr-4 font-medium">Agent</th>
-                                        <th className="pb-2 pr-4 font-medium">Status</th>
-                                        <th className="pb-2 pr-4 font-medium">Capabilities</th>
-                                        <th className="pb-2 pr-4 font-medium">Added</th>
-                                        <th className="pb-2 font-medium"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {phoneNumbers.map((number: any) => (
-                                        <tr key={number.id} className="text-gray-700">
-                                            <td className="py-3 pr-4 font-mono font-medium">
-                                                {number.phone_number}
-                                            </td>
-                                            <td className="py-3 pr-4 text-gray-500">
-                                                {number.friendly_name || "—"}
-                                            </td>
-                                            <td className="py-3 pr-4">
-                                                {number.agent_id && agentMap[number.agent_id] ? (
-                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
-                                                        {agentMap[number.agent_id]}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-xs text-gray-400">Unassigned</span>
-                                                )}
-                                            </td>
-                                            <td className="py-3 pr-4">
-                                                <span
-                                                    className={`text-xs px-2 py-0.5 rounded-full ${
-                                                        number.status === "active"
-                                                            ? "bg-green-100 text-green-700"
-                                                            : "bg-gray-100 text-gray-600"
-                                                    }`}
-                                                >
-                                                    {number.status}
-                                                </span>
-                                            </td>
-                                            <td className="py-3 pr-4">
-                                                <div className="flex items-center gap-1">
-                                                    {number.capabilities?.sms && (
-                                                        <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-600 rounded">
-                                                            SMS
-                                                        </span>
-                                                    )}
-                                                    {number.capabilities?.voice && (
-                                                        <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
-                                                            Voice
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="py-3 pr-4 text-xs text-gray-400">
-                                                {new Date(number.created_at).toLocaleDateString()}
-                                            </td>
-                                            <td className="py-3">
-                                                <button
-                                                    onClick={() => handleRelease(number.id)}
-                                                    disabled={releasing === number.id}
-                                                    className="p-1.5 text-gray-400 hover:text-red-600 rounded transition-colors disabled:opacity-50"
-                                                    title="Release number"
-                                                >
-                                                    {releasing === number.id ? (
-                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                    ) : (
-                                                        <Trash2 className="w-4 h-4" />
-                                                    )}
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="text-center py-6 text-gray-400">
-                            <Phone className="w-8 h-8 mx-auto mb-2" />
-                            <p className="text-sm">No phone numbers yet. Purchase one to get started.</p>
-                        </div>
-                    )}
-
-                    {/* Payment Required Banner */}
-                    {paymentRequired && (
-                        <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-4">
-                            <div className="flex items-start gap-3">
-                                <div className="p-1.5 bg-amber-100 rounded-lg shrink-0">
-                                    <Shield className="w-4 h-4 text-amber-600" />
-                                </div>
-                                <div className="flex-1">
-                                    <h4 className="font-medium text-amber-900 text-sm">Additional Numbers — $10 each</h4>
-                                    <p className="text-sm text-amber-700 mt-1">
-                                        {paymentMessage}
-                                    </p>
-                                    <p className="text-xs text-amber-600 mt-2">
-                                        Stripe payment integration coming soon. Contact support to purchase additional numbers.
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => setPaymentRequired(false)}
-                                    className="text-amber-400 hover:text-amber-600 text-sm"
-                                >
-                                    <XCircle className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Purchase Number Search */}
-                    {showSearch && (
-                        <div className="mt-4 border-t pt-4">
-                            <h3 className="font-medium text-gray-900 mb-3">Search Available Numbers</h3>
-                            <div className="flex items-center gap-3 mb-4">
-                                <input
-                                    type="text"
-                                    placeholder="Area code (e.g. 415)"
-                                    value={areaCode}
-                                    onChange={(e) => setAreaCode(e.target.value)}
-                                    className="flex-1 max-w-[200px] px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                                />
-                                <button
-                                    onClick={handleSearch}
-                                    disabled={searching}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm disabled:opacity-50"
-                                >
-                                    {searching ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                        <Search className="w-4 h-4" />
-                                    )}
-                                    {searching ? "Searching..." : "Search"}
-                                </button>
-                            </div>
-
-                            {availableNumbers.length > 0 && (
-                                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                                    {availableNumbers.map((number: any) => (
-                                        <div
-                                            key={number.phoneNumber}
-                                            className="flex items-center justify-between px-4 py-3 bg-gray-50 rounded-lg"
-                                        >
-                                            <div>
-                                                <p className="font-mono font-medium text-gray-900">
-                                                    {number.phoneNumber}
-                                                </p>
-                                                <p className="text-xs text-gray-500">
-                                                    {number.locality}, {number.region}
-                                                </p>
-                                            </div>
-                                            <button
-                                                onClick={() => handlePurchase(number.phoneNumber)}
-                                                disabled={purchasing === number.phoneNumber}
-                                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-xs disabled:opacity-50"
-                                            >
-                                                {purchasing === number.phoneNumber ? (
-                                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                                ) : (
-                                                    <Plus className="w-3 h-3" />
-                                                )}
-                                                {purchasing === number.phoneNumber ? "Purchasing..." : "Purchase"}
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* A2P 10DLC Status */}
-            {twilioAccount && (
-                <A2PStatusCard
-                    clientId={clientId}
-                    a2pRegistration={a2pRegistration}
-                    tenantProfile={tenantProfile}
-                />
-            )}
-        </div>
+            </AnimatePresence>
+        </motion.div>
     );
 }

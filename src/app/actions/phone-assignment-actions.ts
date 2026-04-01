@@ -27,16 +27,21 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
             return { success: true, vapiPhoneNumberId: phone.vapi_phone_number_id };
         }
 
-        // Get Twilio subaccount creds
+        // Get Twilio account creds (supports both subaccount and BYOT)
         const { data: twilioAccount } = await supabase
             .from("tenant_twilio_accounts")
-            .select("subaccount_sid, auth_token_encrypted")
+            .select("subaccount_sid, auth_token_encrypted, external_account_sid, account_type")
             .eq("client_id", clientId)
             .single();
 
         if (!twilioAccount) {
-            return { success: false, error: "Twilio subaccount not found" };
+            return { success: false, error: "Twilio account not found" };
         }
+
+        // Resolve correct SID based on account type
+        const resolvedSid = twilioAccount.account_type === "type_a_byoa"
+            ? twilioAccount.external_account_sid
+            : twilioAccount.subaccount_sid;
 
         // Resolve VAPI key
         const { data: client } = await supabase
@@ -52,7 +57,7 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
             {
                 provider: "twilio",
                 number: phone.phone_number,
-                twilioAccountSid: twilioAccount.subaccount_sid,
+                twilioAccountSid: resolvedSid,
                 twilioAuthToken: twilioAccount.auth_token_encrypted, // TODO: decrypt
                 name: phone.friendly_name || undefined,
                 serverUrl: `${APP_URL}/api/webhooks/vapi`,
