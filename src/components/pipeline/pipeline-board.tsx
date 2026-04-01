@@ -20,48 +20,24 @@ import {
     TrendingUp,
     Search,
     ArrowRight,
+    BarChart3,
+    CheckSquare,
+    X,
+    ArrowRightLeft,
+    ListPlus,
+    Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { moveContactToStage } from "@/app/actions/pipeline-actions";
+import { moveContactToStage, bulkMoveContactsToStage, bulkRemoveFromPipeline } from "@/app/actions/pipeline-actions";
+import { evaluateStageRules, fireAutomations } from "@/app/actions/pipeline-rule-actions";
 import { PipelineColumn } from "./pipeline-column";
 import { PipelineContactCard } from "./pipeline-contact-card";
 import { StageEditorDialog } from "./stage-editor-dialog";
+import { PipelineSelector } from "./pipeline-selector";
+import { CreatePipelineDialog } from "./create-pipeline-dialog";
+import { PipelineSettingsDialog } from "./pipeline-settings-dialog";
 import { ContactDetailModal } from "@/components/contacts/contact-detail-modal";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface PipelineStage {
-    id: string;
-    client_id: string;
-    name: string;
-    color: string;
-    position: number;
-    is_default: boolean;
-    is_terminal: boolean;
-    created_at: string;
-}
-
-export interface PipelineContact {
-    id: string;
-    name: string | null;
-    phone: string;
-    email: string | null;
-    pipeline_stage_id: string | null;
-    pipeline_stage_moved_by: string | null;
-    engagement_score: number | null;
-    sentiment_trend: string | null;
-    conversation_summary: string | null;
-    last_call_at: string | null;
-    total_calls: number;
-    custom_fields: Record<string, any>;
-    created_at: string;
-    enrollment: {
-        id: string;
-        status: string;
-        source: string;
-        sequence_name: string | null;
-    } | null;
-}
+import type { Pipeline, PipelineStage, PipelineContact } from "@/types/pipeline";
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
 
@@ -111,28 +87,20 @@ const emptyVariants = {
     },
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function getSourceLabel(source: string | null): string {
-    if (!source) return "Unknown";
-    const map: Record<string, string> = {
-        csv_upload: "CSV",
-        manual: "Manual",
-        api: "API",
-        form: "Form",
-        import: "Import",
-    };
-    return map[source] || source;
-}
-
 // ─── Board Component ────────────────────────────────────────────────────────
 
 export function PipelineBoard({
     clientId,
+    pipelineId,
+    currentPipeline,
+    pipelines,
     initialStages,
     initialContacts,
 }: {
     clientId: string;
+    pipelineId: string;
+    currentPipeline: Pipeline & { contact_count: number };
+    pipelines: (Pipeline & { contact_count: number })[];
     initialStages: PipelineStage[];
     initialContacts: PipelineContact[];
 }) {
@@ -143,12 +111,19 @@ export function PipelineBoard({
     const [editorOpen, setEditorOpen] = useState(false);
     const [selectedContact, setSelectedContact] = useState<PipelineContact | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+
+    // Bulk selection state
+    const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+    const [bulkMode, setBulkMode] = useState(false);
+    const [bulkStageTarget, setBulkStageTarget] = useState<string | null>(null);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
     );
 
-    // Default stage for contacts with null pipeline_stage_id
+    // Default stage for contacts with null stage_id
     const defaultStage = stages.find((s) => s.is_default);
 
     // Group contacts by stage
@@ -166,7 +141,7 @@ export function PipelineBoard({
             )
             : contacts;
         for (const contact of filtered) {
-            const stageId = contact.pipeline_stage_id || defaultStage?.id;
+            const stageId = contact.stage_id || defaultStage?.id;
             if (stageId && map[stageId]) {
                 map[stageId].push(contact);
             } else if (defaultStage && map[defaultStage.id]) {
@@ -178,13 +153,14 @@ export function PipelineBoard({
 
     // Stats
     const totalContacts = contacts.length;
-    const contactsWithStage = contacts.filter((c) => c.pipeline_stage_id).length;
+    const contactsWithStage = contacts.filter((c) => c.stage_id).length;
     const terminalContacts = contacts.filter((c) => {
-        const stage = stages.find((s) => s.id === c.pipeline_stage_id);
+        const stage = stages.find((s) => s.id === c.stage_id);
         return stage?.is_terminal;
     }).length;
 
-    // DnD handlers
+    // ─── DnD handlers ──────────────────────────────────────────────────────
+
     const handleDragStart = useCallback((event: DragStartEvent) => {
         setActiveId(event.active.id as string);
     }, []);
@@ -204,49 +180,66 @@ export function PipelineBoard({
             const contactId = active.id as string;
             const targetStageId = over.id as string;
 
-            // Find the contact
             const contact = contacts.find((c) => c.id === contactId);
             if (!contact) return;
 
-            const currentStageId = contact.pipeline_stage_id || defaultStage?.id;
+            const currentStageId = contact.stage_id || defaultStage?.id;
             if (currentStageId === targetStageId) return;
 
             // Optimistic update
             setContacts((prev) =>
                 prev.map((c) =>
                     c.id === contactId
-                        ? { ...c, pipeline_stage_id: targetStageId, pipeline_stage_moved_by: "user" }
+                        ? { ...c, stage_id: targetStageId, moved_by: "user" }
                         : c
                 )
             );
 
             // Server call
-            const result = await moveContactToStage(contactId, targetStageId, "user");
+            const result = await moveContactToStage(contactId, pipelineId, targetStageId, "user");
             if (!result.success) {
                 // Revert
                 setContacts((prev) =>
                     prev.map((c) =>
                         c.id === contactId
-                            ? { ...c, pipeline_stage_id: currentStageId || null, pipeline_stage_moved_by: contact.pipeline_stage_moved_by }
+                            ? { ...c, stage_id: currentStageId || null, moved_by: contact.moved_by }
                             : c
                     )
                 );
+            } else {
+                // Fire stage rules + automations in background
+                evaluateStageRules(contactId, targetStageId, clientId).catch(() => {});
+                fireAutomations(contactId, targetStageId).catch(() => {});
             }
         },
-        [contacts, defaultStage]
+        [contacts, defaultStage, pipelineId, clientId]
     );
 
     const activeContact = activeId ? contacts.find((c) => c.id === activeId) : null;
 
-    // Handle stage editor updates
+    // ─── Stage editor ──────────────────────────────────────────────────────
+
     const handleStagesUpdated = useCallback((newStages: PipelineStage[]) => {
         setStages(newStages);
     }, []);
 
-    // Handle contact detail
+    // ─── Contact detail ────────────────────────────────────────────────────
+
     const handleContactClick = useCallback((contact: PipelineContact) => {
+        if (bulkMode) {
+            setSelectedContactIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(contact.id)) {
+                    next.delete(contact.id);
+                } else {
+                    next.add(contact.id);
+                }
+                return next;
+            });
+            return;
+        }
         setSelectedContact(contact);
-    }, []);
+    }, [bulkMode]);
 
     const handleContactUpdate = useCallback((updated: any) => {
         setContacts((prev) =>
@@ -254,6 +247,42 @@ export function PipelineBoard({
         );
         setSelectedContact(null);
     }, []);
+
+    // ─── Bulk actions ──────────────────────────────────────────────────────
+
+    const handleBulkMoveToStage = async (stageId: string) => {
+        const ids = Array.from(selectedContactIds);
+        // Optimistic update
+        setContacts((prev) =>
+            prev.map((c) =>
+                selectedContactIds.has(c.id)
+                    ? { ...c, stage_id: stageId, moved_by: "user" }
+                    : c
+            )
+        );
+        setSelectedContactIds(new Set());
+        setBulkMode(false);
+        await bulkMoveContactsToStage(ids, pipelineId, stageId);
+    };
+
+    const handleBulkRemove = async () => {
+        const ids = Array.from(selectedContactIds);
+        setContacts((prev) => prev.filter((c) => !selectedContactIds.has(c.id)));
+        setSelectedContactIds(new Set());
+        setBulkMode(false);
+        await bulkRemoveFromPipeline(ids, pipelineId);
+    };
+
+    const handleSelectAllInColumn = (stageId: string) => {
+        const columnContacts = contactsByStage[stageId] || [];
+        setSelectedContactIds((prev) => {
+            const next = new Set(prev);
+            for (const c of columnContacts) {
+                next.add(c.id);
+            }
+            return next;
+        });
+    };
 
     // Empty state
     if (contacts.length === 0) {
@@ -265,7 +294,15 @@ export function PipelineBoard({
                     variants={headerVariants}
                     className="px-8 pt-8 pb-4"
                 >
-                    <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Pipeline</h1>
+                    <div className="flex items-center gap-3">
+                        <PipelineSelector
+                            currentPipeline={currentPipeline}
+                            pipelines={pipelines}
+                            clientId={clientId}
+                            onCreateClick={() => setCreateDialogOpen(true)}
+                            onSettingsClick={() => setSettingsOpen(true)}
+                        />
+                    </div>
                     <p className="text-sm text-gray-500 mt-1">Track your leads through every stage</p>
                 </motion.div>
                 <motion.div
@@ -278,9 +315,9 @@ export function PipelineBoard({
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-100 flex items-center justify-center mx-auto mb-4">
                             <KanbanSquare className="w-8 h-8 text-emerald-500" />
                         </div>
-                        <h2 className="text-lg font-semibold text-gray-900 mb-2">No leads in your pipeline yet</h2>
+                        <h2 className="text-lg font-semibold text-gray-900 mb-2">No leads in this pipeline yet</h2>
                         <p className="text-sm text-gray-500 mb-6">
-                            Import contacts or enroll them in sequences to start tracking your sales pipeline.
+                            Import contacts or enroll them in sequences to start tracking your pipeline.
                         </p>
                         <a
                             href={`/client/${clientId}/contacts`}
@@ -291,6 +328,21 @@ export function PipelineBoard({
                         </a>
                     </div>
                 </motion.div>
+
+                <CreatePipelineDialog
+                    open={createDialogOpen}
+                    onOpenChange={setCreateDialogOpen}
+                    clientId={clientId}
+                    pipelines={pipelines}
+                />
+                <PipelineSettingsDialog
+                    open={settingsOpen}
+                    onOpenChange={setSettingsOpen}
+                    pipeline={currentPipeline}
+                    clientId={clientId}
+                    stages={stages}
+                    pipelines={pipelines}
+                />
             </div>
         );
     }
@@ -305,20 +357,52 @@ export function PipelineBoard({
                 className="px-8 pt-8 pb-2 flex-shrink-0"
             >
                 <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Pipeline</h1>
-                        <p className="text-sm text-gray-500 mt-0.5">Track your leads through every stage</p>
+                    <div className="flex items-center gap-3">
+                        <PipelineSelector
+                            currentPipeline={currentPipeline}
+                            pipelines={pipelines}
+                            clientId={clientId}
+                            onCreateClick={() => setCreateDialogOpen(true)}
+                            onSettingsClick={() => setSettingsOpen(true)}
+                        />
                     </div>
-                    <button
-                        onClick={() => setEditorOpen(true)}
-                        className={cn(
-                            "inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-all",
-                            "text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm"
-                        )}
-                    >
-                        <Settings2 className="w-4 h-4" />
-                        Edit Pipeline
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => {
+                                setBulkMode(!bulkMode);
+                                if (bulkMode) setSelectedContactIds(new Set());
+                            }}
+                            className={cn(
+                                "inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-all",
+                                bulkMode
+                                    ? "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                                    : "text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                            )}
+                        >
+                            <CheckSquare className="w-4 h-4" />
+                            {bulkMode ? "Cancel Selection" : "Select"}
+                        </button>
+                        <a
+                            href={`/client/${clientId}/pipeline/analytics?pipeline=${pipelineId}`}
+                            className={cn(
+                                "inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-all",
+                                "text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                            )}
+                        >
+                            <BarChart3 className="w-4 h-4" />
+                            Analytics
+                        </a>
+                        <button
+                            onClick={() => setEditorOpen(true)}
+                            className={cn(
+                                "inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-all",
+                                "text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                            )}
+                        >
+                            <Settings2 className="w-4 h-4" />
+                            Edit Stages
+                        </button>
+                    </div>
                 </div>
 
                 {/* Stats row */}
@@ -382,6 +466,9 @@ export function PipelineBoard({
                                     contacts={contactsByStage[stage.id] || []}
                                     isOver={overId === stage.id}
                                     onContactClick={handleContactClick}
+                                    bulkMode={bulkMode}
+                                    selectedContactIds={selectedContactIds}
+                                    onSelectAllInColumn={() => handleSelectAllInColumn(stage.id)}
                                 />
                             </motion.div>
                         ))}
@@ -398,14 +485,81 @@ export function PipelineBoard({
                 </DragOverlay>
             </DndContext>
 
+            {/* Bulk Action Bar */}
+            <AnimatePresence>
+                {bulkMode && selectedContactIds.size > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 20 }}
+                        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4"
+                    >
+                        <span className="text-sm font-medium tabular-nums">
+                            {selectedContactIds.size} selected
+                        </span>
+                        <div className="w-px h-5 bg-gray-700" />
+                        <div className="relative">
+                            <select
+                                value={bulkStageTarget || ""}
+                                onChange={(e) => {
+                                    if (e.target.value) handleBulkMoveToStage(e.target.value);
+                                }}
+                                className="appearance-none bg-gray-800 text-white text-sm px-3 py-1.5 pr-8 rounded-lg border border-gray-700 cursor-pointer hover:bg-gray-700"
+                            >
+                                <option value="">Move to stage...</option>
+                                {stages.map((s) => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                            <ArrowRightLeft className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+                        <button
+                            onClick={handleBulkRemove}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Remove
+                        </button>
+                        <button
+                            onClick={() => {
+                                setSelectedContactIds(new Set());
+                                setBulkMode(false);
+                            }}
+                            className="p-1.5 hover:bg-gray-800 rounded-lg transition-colors"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Stage Editor */}
             <StageEditorDialog
                 open={editorOpen}
                 onOpenChange={setEditorOpen}
+                pipelineId={pipelineId}
                 clientId={clientId}
                 stages={stages}
                 contactsByStage={contactsByStage}
                 onStagesUpdated={handleStagesUpdated}
+            />
+
+            {/* Create Pipeline Dialog */}
+            <CreatePipelineDialog
+                open={createDialogOpen}
+                onOpenChange={setCreateDialogOpen}
+                clientId={clientId}
+                pipelines={pipelines}
+            />
+
+            {/* Pipeline Settings */}
+            <PipelineSettingsDialog
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
+                pipeline={currentPipeline}
+                clientId={clientId}
+                stages={stages}
+                pipelines={pipelines}
             />
 
             {/* Contact Detail */}

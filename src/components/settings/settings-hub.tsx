@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, User, Users, ChevronRight, Webhook, Plug, Mail } from "lucide-react";
+import { Shield, User, Users, ChevronRight, Webhook, Plug, Mail, Key } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { staggerContainer, staggerItem } from "@/lib/settings-animations";
@@ -67,6 +67,16 @@ const navLinks = [
         title: "Webhooks",
         description: (count: number) =>
             `${count} webhook${count !== 1 ? "s" : ""} \u00B7 Receive real-time call notifications`,
+    },
+    {
+        key: "api-keys",
+        path: "settings/api-keys",
+        icon: Key,
+        iconBg: "bg-amber-100",
+        iconColor: "text-amber-600",
+        gradient: "from-amber-500 via-orange-500 to-amber-600",
+        title: "API Keys",
+        description: () => "Manage keys for the Lead Creation API and integrations",
     },
 ];
 

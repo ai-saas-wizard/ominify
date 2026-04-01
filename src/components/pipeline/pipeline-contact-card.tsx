@@ -2,9 +2,9 @@
 
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Phone, Mail, MessageSquare, TrendingUp, TrendingDown, Minus, Flame, Calendar } from "lucide-react";
+import { Phone, Mail, MessageSquare, TrendingUp, TrendingDown, Minus, Flame, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { PipelineContact } from "./pipeline-board";
+import type { PipelineContact } from "@/types/pipeline";
 
 // ─── Source badge colors ────────────────────────────────────────────────────
 
@@ -23,13 +23,6 @@ function getEngagementColor(score: number): string {
     if (score >= 50) return "bg-blue-500";
     if (score >= 25) return "bg-amber-500";
     return "bg-gray-300";
-}
-
-function getEngagementLabel(score: number): string {
-    if (score >= 75) return "Hot";
-    if (score >= 50) return "Warm";
-    if (score >= 25) return "Cool";
-    return "Cold";
 }
 
 function getSentimentIcon(trend: string | null) {
@@ -92,13 +85,18 @@ export function PipelineContactCard({
     contact,
     isGhost,
     onClick,
+    bulkMode,
+    isSelected,
 }: {
     contact: PipelineContact;
     isGhost?: boolean;
     onClick?: () => void;
+    bulkMode?: boolean;
+    isSelected?: boolean;
 }) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: contact.id,
+        disabled: bulkMode,
     });
 
     const style = transform
@@ -115,17 +113,33 @@ export function PipelineContactCard({
         <div
             ref={setNodeRef}
             style={style}
-            {...listeners}
-            {...attributes}
+            {...(bulkMode ? {} : listeners)}
+            {...(bulkMode ? {} : attributes)}
             onClick={onClick}
             className={cn(
-                "group relative bg-white rounded-lg border border-gray-200/80 p-3 cursor-grab active:cursor-grabbing",
-                "hover:border-gray-300 hover:shadow-md transition-all duration-150",
+                "group relative bg-white rounded-lg border p-3",
+                bulkMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
+                "hover:shadow-md transition-all duration-150",
                 "select-none",
                 isDragging && "opacity-30 shadow-none",
-                isGhost && "shadow-xl border-emerald-300 bg-white/95 backdrop-blur-sm"
+                isGhost && "shadow-xl border-emerald-300 bg-white/95 backdrop-blur-sm",
+                isSelected
+                    ? "border-emerald-400 ring-2 ring-emerald-200/60 bg-emerald-50/30"
+                    : "border-gray-200/80 hover:border-gray-300"
             )}
         >
+            {/* Bulk checkbox */}
+            {bulkMode && (
+                <div className={cn(
+                    "absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center z-10 transition-colors",
+                    isSelected
+                        ? "bg-emerald-600 border-emerald-600"
+                        : "bg-white border-gray-300"
+                )}>
+                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                </div>
+            )}
+
             {/* Top: Avatar + Name + Source badge */}
             <div className="flex items-start gap-2.5 mb-2">
                 <div

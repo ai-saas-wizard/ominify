@@ -19,7 +19,7 @@ import {
     deletePipelineStage,
     reorderPipelineStages,
 } from "@/app/actions/pipeline-actions";
-import type { PipelineStage, PipelineContact } from "./pipeline-board";
+import type { PipelineStage, PipelineContact } from "@/types/pipeline";
 
 // ─── Preset colors ──────────────────────────────────────────────────────────
 
@@ -60,22 +60,6 @@ const panelVariants = {
     },
 };
 
-const itemVariants = {
-    initial: { opacity: 0, height: 0, marginBottom: 0 },
-    animate: {
-        opacity: 1,
-        height: "auto",
-        marginBottom: 8,
-        transition: { type: "spring" as const, stiffness: 300, damping: 25 },
-    },
-    exit: {
-        opacity: 0,
-        height: 0,
-        marginBottom: 0,
-        transition: { duration: 0.15 },
-    },
-};
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 interface EditableStage extends PipelineStage {
@@ -87,6 +71,7 @@ interface EditableStage extends PipelineStage {
 export function StageEditorDialog({
     open,
     onOpenChange,
+    pipelineId,
     clientId,
     stages: initialStages,
     contactsByStage,
@@ -94,6 +79,7 @@ export function StageEditorDialog({
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    pipelineId: string;
     clientId: string;
     stages: PipelineStage[];
     contactsByStage: Record<string, PipelineContact[]>;
@@ -107,7 +93,6 @@ export function StageEditorDialog({
     const [saving, setSaving] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-    // Sync when dialog opens
     const handleOpenChange = (value: boolean) => {
         if (value) {
             setEditableStages(initialStages.map((s) => ({ ...s })));
@@ -116,21 +101,18 @@ export function StageEditorDialog({
         onOpenChange(value);
     };
 
-    // Rename
     const handleRename = (id: string, name: string) => {
         setEditableStages((prev) =>
             prev.map((s) => (s.id === id ? { ...s, name } : s))
         );
     };
 
-    // Change color
     const handleColorChange = (id: string, color: string) => {
         setEditableStages((prev) =>
             prev.map((s) => (s.id === id ? { ...s, color } : s))
         );
     };
 
-    // Add stage
     const handleAdd = () => {
         if (!newName.trim()) return;
         const tempId = `new-${Date.now()}`;
@@ -139,6 +121,7 @@ export function StageEditorDialog({
             {
                 id: tempId,
                 client_id: clientId,
+                pipeline_id: pipelineId,
                 name: newName.trim(),
                 color: newColor,
                 position: prev.length,
@@ -152,7 +135,6 @@ export function StageEditorDialog({
         setNewColor(PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]);
     };
 
-    // Delete stage
     const handleDelete = (id: string) => {
         const stage = editableStages.find((s) => s.id === id);
         if (stage?.is_default) return;
@@ -166,32 +148,30 @@ export function StageEditorDialog({
         setDeleteConfirm(null);
     };
 
-    // Reorder
     const handleReorder = (reordered: EditableStage[]) => {
         setEditableStages(reordered);
     };
 
-    // Save all changes
     const handleSave = async () => {
         setSaving(true);
         try {
             // 1. Delete removed stages
             const deletedStages = editableStages.filter((s) => s.isDeleted && !s.isNew);
             for (const stage of deletedStages) {
-                await deletePipelineStage(stage.id, clientId);
+                await deletePipelineStage(stage.id, pipelineId);
             }
 
             // 2. Create new stages
             const newStages = editableStages.filter((s) => s.isNew && !s.isDeleted);
             const createdMap: Record<string, string> = {};
             for (const stage of newStages) {
-                const result = await createPipelineStage(clientId, stage.name, stage.color);
+                const result = await createPipelineStage(pipelineId, stage.name, stage.color);
                 if (result.success && result.data) {
                     createdMap[stage.id] = result.data.id;
                 }
             }
 
-            // 3. Update existing stages (name, color)
+            // 3. Update existing stages
             const existingStages = editableStages.filter((s) => !s.isNew && !s.isDeleted);
             for (const stage of existingStages) {
                 const original = initialStages.find((s) => s.id === stage.id);
@@ -200,22 +180,23 @@ export function StageEditorDialog({
                 }
             }
 
-            // 4. Reorder all surviving stages
+            // 4. Reorder
             const survivingStages = editableStages
                 .filter((s) => !s.isDeleted)
                 .map((s) => (s.isNew ? createdMap[s.id] || s.id : s.id))
                 .filter(Boolean);
 
             if (survivingStages.length > 0) {
-                await reorderPipelineStages(clientId, survivingStages);
+                await reorderPipelineStages(pipelineId, survivingStages);
             }
 
-            // 5. Refresh data — build the new stages list
+            // 5. Build final stages list
             const finalStages: PipelineStage[] = editableStages
                 .filter((s) => !s.isDeleted)
                 .map((s, i) => ({
                     id: s.isNew ? (createdMap[s.id] || s.id) : s.id,
                     client_id: clientId,
+                    pipeline_id: pipelineId,
                     name: s.name,
                     color: s.color,
                     position: i,
@@ -256,7 +237,7 @@ export function StageEditorDialog({
                         {/* Header */}
                         <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
                             <div>
-                                <h2 className="text-lg font-semibold text-gray-900">Edit Pipeline</h2>
+                                <h2 className="text-lg font-semibold text-gray-900">Edit Stages</h2>
                                 <p className="text-sm text-gray-500 mt-0.5">
                                     Customize stages, colors, and order
                                 </p>
@@ -294,7 +275,6 @@ export function StageEditorDialog({
                                                     "bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm"
                                                 )}
                                             >
-                                                {/* Drag handle */}
                                                 <GripVertical className="w-4 h-4 text-gray-300 cursor-grab active:cursor-grabbing flex-shrink-0" />
 
                                                 {/* Color swatch */}
@@ -313,7 +293,6 @@ export function StageEditorDialog({
                                                             );
                                                         }}
                                                     />
-                                                    {/* Color picker popover */}
                                                     {stage.isEditing && (
                                                         <div className="absolute top-8 left-0 z-10 bg-white rounded-lg shadow-xl border border-gray-200 p-2 flex flex-wrap gap-1.5 w-[140px]">
                                                             {PRESET_COLORS.map((c) => (
@@ -341,7 +320,6 @@ export function StageEditorDialog({
                                                     )}
                                                 </div>
 
-                                                {/* Name input */}
                                                 <input
                                                     type="text"
                                                     value={stage.name}
@@ -350,7 +328,6 @@ export function StageEditorDialog({
                                                     placeholder="Stage name"
                                                 />
 
-                                                {/* Contact count + badges */}
                                                 <div className="flex items-center gap-2 flex-shrink-0">
                                                     {stage.is_default && (
                                                         <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
@@ -368,7 +345,6 @@ export function StageEditorDialog({
                                                         </span>
                                                     )}
 
-                                                    {/* Delete button */}
                                                     {stage.is_default ? (
                                                         <div className="p-1.5" title="Cannot delete default stage">
                                                             <Lock className="w-3.5 h-3.5 text-gray-300" />
@@ -419,7 +395,7 @@ export function StageEditorDialog({
                                     >
                                         <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                                         <span>
-                                            {count} contact{count !== 1 ? "s" : ""} will be moved to "New Lead"
+                                            {count} contact{count !== 1 ? "s" : ""} will be moved to the default stage
                                         </span>
                                     </motion.div>
                                 );
@@ -429,7 +405,6 @@ export function StageEditorDialog({
                             <div className="pt-4 border-t border-gray-100">
                                 <p className="text-xs font-medium text-gray-500 mb-2">Add Stage</p>
                                 <div className="flex items-center gap-2">
-                                    {/* Color selector for new stage */}
                                     <div
                                         className="w-8 h-8 rounded-full cursor-pointer ring-2 ring-offset-1 ring-transparent hover:ring-gray-300 transition-all flex-shrink-0 relative group"
                                         style={{ backgroundColor: newColor }}

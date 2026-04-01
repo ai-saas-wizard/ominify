@@ -2,9 +2,10 @@
 
 import { useDroppable } from "@dnd-kit/core";
 import { motion, AnimatePresence } from "framer-motion";
+import { CheckSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PipelineContactCard } from "./pipeline-contact-card";
-import type { PipelineStage, PipelineContact } from "./pipeline-board";
+import type { PipelineStage, PipelineContact } from "@/types/pipeline";
 
 const cardListVariants = {
     hidden: { opacity: 0 },
@@ -29,11 +30,17 @@ export function PipelineColumn({
     contacts,
     isOver,
     onContactClick,
+    bulkMode,
+    selectedContactIds,
+    onSelectAllInColumn,
 }: {
     stage: PipelineStage;
     contacts: PipelineContact[];
     isOver: boolean;
     onContactClick: (contact: PipelineContact) => void;
+    bulkMode?: boolean;
+    selectedContactIds?: Set<string>;
+    onSelectAllInColumn?: () => void;
 }) {
     const { setNodeRef, isOver: isDirectlyOver } = useDroppable({
         id: stage.id,
@@ -69,6 +76,15 @@ export function PipelineColumn({
                     >
                         {contacts.length}
                     </span>
+                    {bulkMode && contacts.length > 0 && (
+                        <button
+                            onClick={onSelectAllInColumn}
+                            className="p-1 hover:bg-gray-200/80 rounded transition-colors"
+                            title="Select all"
+                        >
+                            <CheckSquare className="w-3.5 h-3.5 text-gray-500" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Thin color bar */}
@@ -103,6 +119,8 @@ export function PipelineColumn({
                                     <PipelineContactCard
                                         contact={contact}
                                         onClick={() => onContactClick(contact)}
+                                        bulkMode={bulkMode}
+                                        isSelected={selectedContactIds?.has(contact.id)}
                                     />
                                 </motion.div>
                             ))}
