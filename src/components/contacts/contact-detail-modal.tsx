@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Phone, Mail, User, Calendar, MessageSquare, Clock, Save, Plus, Loader2, Activity, Brain } from "lucide-react";
+import { X, Phone, Mail, User, Calendar, MessageSquare, Clock, Save, Plus, Loader2, Activity, Brain, KanbanSquare, ChevronRight, Trash2 } from "lucide-react";
 import { InteractionTimeline } from "./interaction-timeline";
 import { EngagementMeter } from "./engagement-meter";
 import { EmotionBadge } from "./emotion-badge";
+import { getPipelines, assignContactToPipeline, removeContactFromPipeline } from "@/app/actions/pipeline-actions";
 
 interface Contact {
     id: string;
@@ -66,8 +67,16 @@ export function ContactDetailModal({
         custom_fields: { ...contact.custom_fields }
     });
 
+    // Pipeline assignment state
+    const [pipelines, setPipelines] = useState<any[]>([]);
+    const [contactPipelines, setContactPipelines] = useState<any[]>([]);
+    const [pipelinesLoading, setPipelinesLoading] = useState(true);
+    const [addPipelineId, setAddPipelineId] = useState("");
+    const [addingPipeline, setAddingPipeline] = useState(false);
+
     useEffect(() => {
         fetchFullContact();
+        fetchPipelineData();
     }, [contact.id]);
 
     const fetchFullContact = async () => {
@@ -86,6 +95,47 @@ export function ContactDetailModal({
             console.error('Error fetching contact:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchPipelineData = async () => {
+        setPipelinesLoading(true);
+        try {
+            const { pipelines: allPipelines } = await getPipelines(clientId);
+            setPipelines(allPipelines);
+
+            // Fetch which pipelines this contact is in via Supabase
+            const res = await fetch(`/api/client/${clientId}/contacts/${contact.id}/pipelines`);
+            if (res.ok) {
+                const data = await res.json();
+                setContactPipelines(data.pipelines || []);
+            }
+        } catch (error) {
+            console.error("Error fetching pipeline data:", error);
+        } finally {
+            setPipelinesLoading(false);
+        }
+    };
+
+    const handleAddToPipeline = async () => {
+        if (!addPipelineId) return;
+        setAddingPipeline(true);
+        try {
+            const result = await assignContactToPipeline(contact.id, addPipelineId);
+            if (result.success) {
+                // Refresh pipeline data
+                await fetchPipelineData();
+                setAddPipelineId("");
+            }
+        } finally {
+            setAddingPipeline(false);
+        }
+    };
+
+    const handleRemoveFromPipeline = async (pipelineId: string) => {
+        const result = await removeContactFromPipeline(contact.id, pipelineId);
+        if (result.success) {
+            setContactPipelines((prev) => prev.filter((p: any) => p.pipeline_id !== pipelineId));
         }
     };
 
@@ -234,6 +284,100 @@ export function ContactDetailModal({
                             ))}
                         </div>
                     )}
+
+                    {/* Pipeline Assignment */}
+                    <div>
+                        <h4 className="text-sm font-medium text-gray-900 flex items-center gap-2 mb-3">
+                            <KanbanSquare className="w-4 h-4" />
+                            Pipelines
+                        </h4>
+                        {pipelinesLoading ? (
+                            <div className="flex items-center gap-2 text-xs text-gray-400 py-3">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                Loading pipelines...
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {/* Current pipelines */}
+                                {contactPipelines.length > 0 ? (
+                                    contactPipelines.map((cp: any) => (
+                                        <div
+                                            key={cp.pipeline_id}
+                                            className="flex items-center gap-2.5 p-2.5 bg-gray-50 rounded-lg border border-gray-200 group"
+                                        >
+                                            <div
+                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                style={{ backgroundColor: cp.pipeline_color || '#059669' }}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-800 truncate">
+                                                    {cp.pipeline_name}
+                                                </p>
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                    <span className="text-[10px] text-gray-500">Stage:</span>
+                                                    <span
+                                                        className="text-[10px] font-medium px-1.5 py-px rounded"
+                                                        style={{
+                                                            backgroundColor: cp.stage_color ? `${cp.stage_color}20` : '#f3f4f6',
+                                                            color: cp.stage_color || '#6b7280',
+                                                        }}
+                                                    >
+                                                        {cp.stage_name || 'Unassigned'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => handleRemoveFromPipeline(cp.pipeline_id)}
+                                                className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 transition-all"
+                                                title="Remove from pipeline"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-xs text-gray-400 italic py-1">
+                                        Not assigned to any pipeline
+                                    </p>
+                                )}
+
+                                {/* Add to pipeline */}
+                                {pipelines.filter((p) => !contactPipelines.some((cp: any) => cp.pipeline_id === p.id)).length > 0 && (
+                                    <div className="flex items-center gap-2 pt-1">
+                                        <select
+                                            value={addPipelineId}
+                                            onChange={(e) => setAddPipelineId(e.target.value)}
+                                            className="flex-1 px-2.5 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-300"
+                                        >
+                                            <option value="">Add to pipeline...</option>
+                                            {pipelines
+                                                .filter((p) => !contactPipelines.some((cp: any) => cp.pipeline_id === p.id))
+                                                .map((p) => (
+                                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                                ))
+                                            }
+                                        </select>
+                                        <button
+                                            onClick={handleAddToPipeline}
+                                            disabled={!addPipelineId || addingPipeline}
+                                            className={`inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded-lg transition-all ${
+                                                addPipelineId
+                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm'
+                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            {addingPipeline ? (
+                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                                <Plus className="w-3.5 h-3.5" />
+                                            )}
+                                            Add
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
                     {/* Conversation Summary */}
                     {fullContact.conversation_summary && (
