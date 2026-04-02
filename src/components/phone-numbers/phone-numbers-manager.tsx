@@ -16,6 +16,7 @@ interface Props {
     a2pRegistration: any;
     tenantProfile: any;
     agentMap?: Record<string, string>;
+    agents?: { id: string; name: string }[];
 }
 
 export function PhoneNumbersManager({
@@ -26,6 +27,7 @@ export function PhoneNumbersManager({
     a2pRegistration,
     tenantProfile,
     agentMap = {},
+    agents = [],
 }: Props) {
     const hasAccount = !!twilioAccount;
     const isBYOT = twilioAccount?.account_type === "type_a_byoa";
@@ -90,6 +92,7 @@ export function PhoneNumbersManager({
                                 clientId={clientId}
                                 initialPhoneNumbers={initialPhoneNumbers}
                                 agentMap={agentMap}
+                                agents={agents}
                                 isBYOT={isBYOT}
                             />
                         </motion.div>

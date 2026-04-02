@@ -31,12 +31,24 @@ import {
     purchasePhoneNumberForClient,
     releasePhoneNumberForClient,
 } from "@/app/actions/twilio-actions";
+import {
+    assignPhoneNumberToAgent,
+    unassignPhoneNumberFromAgent,
+} from "@/app/actions/phone-assignment-actions";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 
 interface Props {
     clientId: string;
     initialPhoneNumbers: any[];
     agentMap: Record<string, string>;
+    agents: { id: string; name: string }[];
     isBYOT: boolean;
 }
 
@@ -44,6 +56,7 @@ export function PhoneNumbersList({
     clientId,
     initialPhoneNumbers,
     agentMap,
+    agents,
     isBYOT,
 }: Props) {
     const router = useRouter();
@@ -56,6 +69,9 @@ export function PhoneNumbersList({
     const [availableNumbers, setAvailableNumbers] = useState<any[]>([]);
     const [purchasing, setPurchasing] = useState<string | null>(null);
     const [releasing, setReleasing] = useState<string | null>(null);
+
+    // Agent assignment
+    const [assigning, setAssigning] = useState<string | null>(null); // phone number id being assigned
 
     // Payment
     const [paymentRequired, setPaymentRequired] = useState(false);
@@ -115,6 +131,45 @@ export function PhoneNumbersList({
             setReleasing(null);
         }
     }, [clientId]);
+
+    const handleAssignAgent = useCallback(async (phoneNumberId: string, agentId: string) => {
+        setAssigning(phoneNumberId);
+        try {
+            const result = await assignPhoneNumberToAgent(clientId, phoneNumberId, agentId);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to assign agent");
+            }
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setAssigning(null);
+        }
+    }, [clientId, router]);
+
+    const handleUnassignAgent = useCallback(async (phoneNumberId: string) => {
+        setAssigning(phoneNumberId);
+        try {
+            const result = await unassignPhoneNumberFromAgent(clientId, phoneNumberId);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to unassign agent");
+            }
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setAssigning(null);
+        }
+    }, [clientId, router]);
+
+    // Agents already assigned to a phone number (so they're unavailable for others)
+    const assignedAgentIds = new Set(
+        phoneNumbers
+            .filter((n: any) => n.agent_id)
+            .map((n: any) => n.agent_id)
+    );
 
     return (
         <Card>
@@ -183,10 +238,46 @@ export function PhoneNumbersList({
                                         {number.friendly_name || "\u2014"}
                                     </TableCell>
                                     <TableCell>
-                                        {number.agent_id && agentMap[number.agent_id] ? (
-                                            <Badge>{agentMap[number.agent_id]}</Badge>
+                                        {assigning === number.id ? (
+                                            <div className="flex items-center gap-2 text-xs text-gray-400">
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                Updating...
+                                            </div>
+                                        ) : number.agent_id && agentMap[number.agent_id] ? (
+                                            <div className="flex items-center gap-1.5">
+                                                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                                                    {agentMap[number.agent_id]}
+                                                </Badge>
+                                                <button
+                                                    onClick={() => handleUnassignAgent(number.id)}
+                                                    className="text-gray-300 hover:text-red-500 transition-colors"
+                                                    title="Unassign agent"
+                                                >
+                                                    <XCircle className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                         ) : (
-                                            <span className="text-xs text-gray-400">Unassigned</span>
+                                            <Select
+                                                onValueChange={(agentId) => handleAssignAgent(number.id, agentId)}
+                                            >
+                                                <SelectTrigger className="h-8 w-[160px] text-xs border-dashed">
+                                                    <SelectValue placeholder="Assign agent..." />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {agents
+                                                        .filter((a) => !assignedAgentIds.has(a.id))
+                                                        .map((agent) => (
+                                                            <SelectItem key={agent.id} value={agent.id}>
+                                                                {agent.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    {agents.filter((a) => !assignedAgentIds.has(a.id)).length === 0 && (
+                                                        <div className="px-2 py-1.5 text-xs text-gray-400">
+                                                            No available agents
+                                                        </div>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
                                         )}
                                     </TableCell>
                                     <TableCell>

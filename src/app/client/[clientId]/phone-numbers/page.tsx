@@ -36,18 +36,16 @@ export default async function PhoneNumbersPage(props: {
     const a2pResult = await checkA2PStatus(clientId);
     const tenantProfile = await getTenantProfile(clientId);
 
-    // Fetch agent names for phone numbers that have agent_id
-    const agentIds = phoneNumbers.filter((n: any) => n.agent_id).map((n: any) => n.agent_id);
-    let agentMap: Record<string, string> = {};
-    if (agentIds.length > 0) {
-        const { data: agents } = await supabase
-            .from("agents")
-            .select("id, name")
-            .in("id", agentIds);
-        if (agents) {
-            agentMap = Object.fromEntries(agents.map((a: any) => [a.id, a.name]));
-        }
-    }
+    // Fetch all agents for this client (for assignment dropdown + name display)
+    const { data: allAgents } = await supabase
+        .from("agents")
+        .select("id, name")
+        .eq("client_id", clientId);
+
+    const agents: { id: string; name: string }[] = allAgents || [];
+    const agentMap: Record<string, string> = Object.fromEntries(
+        agents.map((a) => [a.id, a.name])
+    );
 
     return (
         <div className="p-4 lg:p-8">
@@ -59,6 +57,7 @@ export default async function PhoneNumbersPage(props: {
                 a2pRegistration={a2pResult?.data || null}
                 tenantProfile={tenantProfile}
                 agentMap={agentMap}
+                agents={agents}
             />
         </div>
     );
