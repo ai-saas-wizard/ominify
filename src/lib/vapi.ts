@@ -320,8 +320,7 @@ export interface VapiPhoneNumber {
 // ─── IMPORT PHONE NUMBER ───
 
 export interface ImportPhoneNumberPayload {
-    provider: 'twilio';
-    number: string;
+    twilioPhoneNumber: string;
     twilioAccountSid: string;
     twilioAuthToken: string;
     name?: string;

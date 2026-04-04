@@ -65,8 +65,7 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
         // Import to VAPI
         const importResult = await importPhoneNumber(
             {
-                provider: "twilio",
-                number: phone.phone_number,
+                twilioPhoneNumber: phone.phone_number,
                 twilioAccountSid: resolvedSid,
                 twilioAuthToken: authToken,
                 name: phone.friendly_name || undefined,
