@@ -1701,3 +1701,167 @@ export async function bulkEnrollFromCSV(
         return { success: false, error: error?.message || "Internal error" };
     }
 }
+
+// ─── Create sequence from Goal-First Wizard ──────────────────────────────────
+
+const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string; trigger_type: string; urgency_tier: string }> = {
+    missed_call_followup: {
+        name: "Missed Call Follow-up",
+        description: "AI-powered follow-up for leads who called but didn't connect",
+        trigger_type: "missed_call",
+        urgency_tier: "high",
+    },
+    dormant_reengagement: {
+        name: "Dormant Lead Re-engagement",
+        description: "Win back leads who went cold with adaptive AI outreach",
+        trigger_type: "manual",
+        urgency_tier: "medium",
+    },
+    new_lead_nurture: {
+        name: "New Lead Nurture",
+        description: "Build relationships with fresh inbound leads through multi-channel outreach",
+        trigger_type: "new_lead",
+        urgency_tier: "medium",
+    },
+    post_appointment: {
+        name: "Post-Appointment Follow-up",
+        description: "Stay top-of-mind after visits and estimates",
+        trigger_type: "status_change",
+        urgency_tier: "low",
+    },
+    win_back_quotes: {
+        name: "Win Back Lost Quotes",
+        description: "Re-engage leads who received a quote but haven't converted",
+        trigger_type: "manual",
+        urgency_tier: "medium",
+    },
+};
+
+interface WizardInput {
+    goal: string;
+    customGoalDescription?: string;
+    channels: { sms: boolean; email: boolean; voice: boolean };
+    cadence: number;
+    duration: number;
+    handoffRules: {
+        success_conditions: string[];
+        handoff_triggers: Array<{ type: string; label: string; id?: string; description?: string }>;
+        no_response: { max_touchpoints: number; after_sequence: string; reengage_weeks?: number };
+        notification: { sms: string; email: string; push: boolean; urgent_call: boolean };
+    };
+    stepBriefs: Array<{ channel: string; intent: string; cta: string }>;
+}
+
+export async function createSequenceFromWizard(
+    clientId: string,
+    input: WizardInput
+): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
+    try {
+        const meta = GOAL_TO_SEQUENCE_META[input.goal] || {
+            name: input.customGoalDescription?.slice(0, 50) || "Custom Sequence",
+            description: input.customGoalDescription || "AI-powered custom outreach sequence",
+            trigger_type: "manual",
+            urgency_tier: "medium",
+        };
+
+        const enabledChannels = Object.entries(input.channels)
+            .filter(([, v]) => v)
+            .map(([k]) => k);
+
+        const totalSteps = input.cadence * input.duration;
+
+        // Build the sequence strategy (used by dynamic step generation)
+        const sequenceStrategy = {
+            goal: input.goal,
+            custom_goal_description: input.customGoalDescription || null,
+            available_channels: enabledChannels,
+            cadence_per_week: input.cadence,
+            duration_weeks: input.duration,
+            max_steps: totalSteps,
+            generation_mode: "dynamic",
+        };
+
+        const handoffRulesData = {
+            success_conditions: input.handoffRules.success_conditions,
+            handoff_triggers: input.handoffRules.handoff_triggers,
+            no_response: input.handoffRules.no_response,
+            notification: input.handoffRules.notification,
+        };
+
+        // Insert the sequence
+        const { data: seq, error: seqError } = await supabase
+            .from("sequences")
+            .insert({
+                client_id: clientId,
+                name: meta.name,
+                description: meta.description,
+                trigger_type: meta.trigger_type,
+                urgency_tier: meta.urgency_tier,
+                generation_mode: "dynamic",
+                sequence_strategy: sequenceStrategy,
+                max_attempts: totalSteps,
+                ai_generated: true,
+                is_active: true,
+                handoff_rules: handoffRulesData,
+                metadata: {
+                    wizard_created: true,
+                },
+            })
+            .select("id")
+            .single();
+
+        if (seqError || !seq) {
+            console.error("createSequenceFromWizard insert error:", seqError);
+            return { success: false, error: seqError?.message || "Failed to create sequence" };
+        }
+
+        // Insert step briefs as sequence_steps
+        if (input.stepBriefs.length > 0) {
+            const steps = input.stepBriefs.map((brief, idx) => {
+                const delayMinutes = idx === 0 ? 0 : Math.round((7 * 24 * 60) / input.cadence);
+
+                const content: Record<string, any> = {};
+                if (brief.channel === "sms") {
+                    content.body = `[AI-generated at dispatch] Intent: ${brief.intent}`;
+                } else if (brief.channel === "email") {
+                    content.subject = `[AI-generated at dispatch]`;
+                    content.body_html = `<p>Intent: ${brief.intent}</p>`;
+                    content.body_text = `Intent: ${brief.intent}`;
+                } else if (brief.channel === "voice") {
+                    content.first_message = `[AI-generated at dispatch]`;
+                    content.system_prompt = `Intent: ${brief.intent}. CTA: ${brief.cta}`;
+                }
+
+                return {
+                    sequence_id: seq.id,
+                    step_order: idx + 1,
+                    channel: brief.channel,
+                    delay_minutes: delayMinutes,
+                    delay_type: idx === 0 ? "immediate" : "fixed_delay",
+                    content,
+                    enable_ai_mutation: true,
+                    mutation_instructions: `Goal: ${brief.intent}. CTA: ${brief.cta}. Generate fresh content at dispatch time using real conversation context.`,
+                    generated_dynamically: true,
+                    on_success: { action: "continue" },
+                    on_failure: { action: "skip" },
+                };
+            });
+
+            const { error: stepsError } = await supabase
+                .from("sequence_steps")
+                .insert(steps);
+
+            if (stepsError) {
+                console.error("createSequenceFromWizard steps error:", stepsError);
+                // Sequence still created, steps failed — non-fatal for dynamic mode
+            }
+        }
+
+        revalidatePath(`/client/${clientId}/sequences`);
+
+        return { success: true, sequenceId: seq.id };
+    } catch (error: any) {
+        console.error("createSequenceFromWizard error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}

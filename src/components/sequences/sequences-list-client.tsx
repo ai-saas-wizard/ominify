@@ -36,6 +36,7 @@ import {
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
 import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
 import { TaskDialog } from "@/components/sequences/task-dialog";
+import { SequenceWizard } from "@/components/sequences/wizard";
 import { getChannelReadiness, type ChannelReadiness } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
@@ -67,6 +68,13 @@ export interface SequenceCardData {
 interface SequencesListClientProps {
     clientId: string;
     sequences: SequenceCardData[];
+    hasAgent?: boolean;
+    tenantProfile?: {
+        industry: string;
+        phone: string;
+        email: string;
+        business_name: string;
+    };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -420,7 +428,7 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export function SequencesListClient({ clientId, sequences }: SequencesListClientProps) {
+export function SequencesListClient({ clientId, sequences, hasAgent, tenantProfile }: SequencesListClientProps) {
     const router = useRouter();
     const totalSequences = sequences.length;
     const activeSequences = sequences.filter((s) => s.is_active).length;
@@ -428,6 +436,7 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
     const totalCompleted = sequences.reduce((sum, s) => sum + s.completed_count, 0);
 
     const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+    const [wizardOpen, setWizardOpen] = useState(false);
     const [channelReadiness, setChannelReadiness] = useState<ChannelReadiness>({
         sms: { ready: false },
         email: { ready: false },
@@ -482,13 +491,19 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                     </div>
                     <div className="flex items-center gap-3">
                         <button
+                            onClick={() => setWizardOpen(true)}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow transition-all"
+                        >
+                            <Sparkles className="w-4 h-4" />
+                            New Sequence
+                        </button>
+                        <button
                             onClick={() => setTaskDialogOpen(true)}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-sky-600 hover:to-blue-700 shadow-sm hover:shadow transition-all"
                         >
                             <Rocket className="w-4 h-4" />
                             New Task
                         </button>
-                        <AIGenerateSequenceDialog clientId={clientId} />
                         <CreateSequenceDialog clientId={clientId} variant="secondary" />
                     </div>
                     <TaskDialog
@@ -499,6 +514,14 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                         onLaunch={handleTaskLaunch}
                         onTestMode={handleTestMode}
                     />
+                    {wizardOpen && (
+                        <SequenceWizard
+                            clientId={clientId}
+                            hasAgent={hasAgent ?? false}
+                            tenantProfile={tenantProfile ?? { industry: "general", phone: "", email: "", business_name: "" }}
+                            onClose={() => setWizardOpen(false)}
+                        />
+                    )}
                 </motion.div>
 
                 {/* Summary Stat Cards */}
@@ -557,14 +580,20 @@ export function SequencesListClient({ clientId, sequences }: SequencesListClient
                                     <Sparkles className="w-8 h-8 text-emerald-600" />
                                 </motion.div>
                                 <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                                    Describe your first sequence
+                                    Create your first AI sequence
                                 </h3>
                                 <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
-                                    Tell our AI what you need and it will build a complete multi-channel
-                                    outreach sequence for you.
+                                    Pick a goal, choose your channels, and watch your AI in action —
+                                    all in under 90 seconds.
                                 </p>
                                 <div className="flex flex-col items-center gap-3">
-                                    <AIGenerateSequenceDialog clientId={clientId} variant="hero" />
+                                    <button
+                                        onClick={() => setWizardOpen(true)}
+                                        className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
+                                    >
+                                        <Sparkles className="w-4 h-4" />
+                                        Create AI Sequence
+                                    </button>
                                     <CreateSequenceDialog clientId={clientId} variant="link" />
                                 </div>
                             </CardContent>

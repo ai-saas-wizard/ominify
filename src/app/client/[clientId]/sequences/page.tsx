@@ -57,13 +57,55 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
     });
 }
 
+async function getTenantWizardContext(clientId: string) {
+    const [profileResult, agentResult] = await Promise.all([
+        supabase
+            .from("tenant_profiles")
+            .select("industry, emergency_phone, business_name")
+            .eq("client_id", clientId)
+            .single(),
+        supabase
+            .from("agents")
+            .select("id")
+            .eq("client_id", clientId)
+            .limit(1),
+    ]);
+
+    // Also get the client email from clients table
+    const { data: client } = await supabase
+        .from("clients")
+        .select("email")
+        .eq("id", clientId)
+        .single();
+
+    return {
+        hasAgent: (agentResult.data?.length ?? 0) > 0,
+        tenantProfile: {
+            industry: profileResult.data?.industry || "general",
+            phone: profileResult.data?.emergency_phone || "",
+            email: client?.email || "",
+            business_name: profileResult.data?.business_name || "",
+        },
+    };
+}
+
 export default async function SequencesPage({
     params,
 }: {
     params: Promise<{ clientId: string }>;
 }) {
     const { clientId } = await params;
-    const sequences = await getSequencesData(clientId);
+    const [sequences, wizardContext] = await Promise.all([
+        getSequencesData(clientId),
+        getTenantWizardContext(clientId),
+    ]);
 
-    return <SequencesListClient clientId={clientId} sequences={sequences} />;
+    return (
+        <SequencesListClient
+            clientId={clientId}
+            sequences={sequences}
+            hasAgent={wizardContext.hasAgent}
+            tenantProfile={wizardContext.tenantProfile}
+        />
+    );
 }
