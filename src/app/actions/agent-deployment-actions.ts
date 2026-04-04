@@ -13,6 +13,7 @@ import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import { revalidatePath } from "next/cache";
 import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import type { CreateAssistantPayload } from "@/lib/vapi";
+import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 
 // ═══════════════════════════════════════════════════════════
 // AGENT FLEET DEPLOYMENT
@@ -211,6 +212,34 @@ export async function deployAgentFleet(
                 };
             }
 
+            // Build blueprint for sequencer dispatch
+            const blueprint = buildAgentBlueprint({
+                systemPrompt: promptResult.systemPrompt,
+                firstMessage: promptResult.firstMessage || "",
+                model: {
+                    provider: vapiPayload.model?.provider || "openai",
+                    model: vapiPayload.model?.model || "gpt-4o-mini",
+                    temperature: vapiPayload.model?.temperature || 0.7,
+                },
+                voice: {
+                    provider: vapiPayload.voice?.provider || "11labs",
+                    voiceId: suggestedAgent.voice_id,
+                    voiceName: suggestedAgent.voice_name,
+                },
+                transcriber: {
+                    provider: vapiPayload.transcriber?.provider || "deepgram",
+                    model: vapiPayload.transcriber?.model || "nova-2",
+                    language: vapiPayload.transcriber?.language || "en",
+                },
+                tools: vapiPayload.model?.tools || [],
+                settings: {
+                    maxDurationSeconds: vapiPayload.maxDurationSeconds || 300,
+                    backgroundSound: vapiPayload.backgroundSound || "office",
+                    voicemailDetection: vapiPayload.voicemailDetection,
+                    serverUrl: `${APP_URL}/api/webhooks/vapi`,
+                },
+            });
+
             // Save to agents table
             const { data: agent } = await supabase
                 .from("agents")
@@ -226,6 +255,7 @@ export async function deployAgentFleet(
                         voice_name: suggestedAgent.voice_name,
                         custom_instructions: suggestedAgent.custom_instructions,
                     },
+                    agent_blueprint: blueprint,
                     auto_created: true,
                     template_version: TEMPLATE_VERSION,
                 })
@@ -502,6 +532,34 @@ export async function deployAgentFleetV2(
                 };
             }
 
+            // Build blueprint for sequencer dispatch
+            const blueprintV2 = buildAgentBlueprint({
+                systemPrompt: promptResult.systemPrompt,
+                firstMessage: promptResult.firstMessage || "",
+                model: {
+                    provider: vapiPayload.model?.provider || "openai",
+                    model: vapiPayload.model?.model || "gpt-4o-mini",
+                    temperature: vapiPayload.model?.temperature || 0.7,
+                },
+                voice: {
+                    provider: vapiPayload.voice?.provider || "11labs",
+                    voiceId: suggestedAgent.voice_id,
+                    voiceName: suggestedAgent.voice_name,
+                },
+                transcriber: {
+                    provider: vapiPayload.transcriber?.provider || "deepgram",
+                    model: vapiPayload.transcriber?.model || "nova-2",
+                    language: vapiPayload.transcriber?.language || "en",
+                },
+                tools: vapiPayload.model?.tools || [],
+                settings: {
+                    maxDurationSeconds: vapiPayload.maxDurationSeconds || 300,
+                    backgroundSound: vapiPayload.backgroundSound || "office",
+                    voicemailDetection: vapiPayload.voicemailDetection,
+                    serverUrl: `${APP_URL}/api/webhooks/vapi`,
+                },
+            });
+
             // Save to agents table
             const { data: agent } = await supabase
                 .from("agents")
@@ -519,6 +577,7 @@ export async function deployAgentFleetV2(
                         purpose: suggestedAgent.purpose,
                         direction: suggestedAgent.direction,
                     },
+                    agent_blueprint: blueprintV2,
                     auto_created: true,
                     template_version: "v2-dynamic",
                 })

@@ -52,6 +52,10 @@ import {
     endDynamicSequence,
     activateEnrollmentForNextStep,
 } from '../lib/dynamic-step-generator.js';
+import {
+    assembleInlineAgent,
+    isValidBlueprint,
+} from '../lib/blueprint-assembler.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -68,6 +72,8 @@ import type {
     RecommendedTone,
     ChannelType,
     OutcomeContext,
+    AgentBlueprint,
+    InlineVapiAgent,
 } from '../lib/types.js';
 import { format, addSeconds, isWithinInterval, setHours, setMinutes } from 'date-fns';
 import { utcToZonedTime } from 'date-fns-tz';
@@ -504,14 +510,15 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             break;
 
         case 'voice': {
-            // Inject conversation history into voice agent's system prompt
             const voiceContent = renderedContent as VoiceContent;
+
+            // Build conversation history injection
+            let conversationHistoryInjection = '';
             if (conversationCtx && conversationCtx.interaction_count.total > 0) {
-                const agentContext = buildVoiceAgentContext(conversationCtx);
-                voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${agentContext}`;
+                conversationHistoryInjection = buildVoiceAgentContext(conversationCtx);
             }
 
-            // Inject tone directive from EI layer
+            // Build tone directive injection
             const toneDirective = buildVoiceAgentToneDirective({
                 recommendedTone: enrollmentEI.recommended_tone || 'professional',
                 sentimentTrend: enrollmentEI.sentiment_trend || 'stable',
@@ -520,9 +527,8 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 isAtRisk: enrollmentEI.is_at_risk || false,
                 needsHuman: enrollmentEI.needs_human_intervention || false,
             });
-            voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${toneDirective}`;
 
-            // Pack enrollment custom_variables as override_variables for VAPI assistantOverrides
+            // Pack enrollment custom_variables as override_variables
             if (enrollment.custom_variables && Object.keys(enrollment.custom_variables).length > 0) {
                 const overrides: Record<string, string> = {};
                 for (const [key, val] of Object.entries(enrollment.custom_variables)) {
@@ -544,6 +550,52 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 phoneNumberId = phoneRow?.vapi_phone_number_id || null;
             }
 
+            // ── Blueprint-based dispatch: load blueprint and assemble inline agent
+            let inlineAgent: InlineVapiAgent | undefined;
+
+            if (stepWithAgent.voice_agent_id) {
+                const { data: agentRow } = await supabase
+                    .from('agents')
+                    .select('agent_blueprint')
+                    .eq('id', stepWithAgent.voice_agent_id)
+                    .single();
+
+                const blueprint = agentRow?.agent_blueprint as AgentBlueprint | null;
+
+                if (blueprint && isValidBlueprint(blueprint)) {
+                    // Build runtime injections
+                    const promptInjections: Record<string, string> = {};
+                    if (conversationHistoryInjection) {
+                        promptInjections.conversation_history = conversationHistoryInjection;
+                    }
+                    if (toneDirective) {
+                        promptInjections.tone_directive = toneDirective;
+                    }
+
+                    inlineAgent = assembleInlineAgent({
+                        blueprint,
+                        promptSectionOverrides: voiceContent.prompt_section_overrides,
+                        promptInjections,
+                        toolOverrides: voiceContent.tool_overrides,
+                        firstMessageOverride: voiceContent.first_message !== blueprint.first_message
+                            ? voiceContent.first_message
+                            : undefined,
+                    });
+
+                    console.log(`[SCHEDULER] Blueprint assembled for enrollment ${enrollment.id} (model: ${blueprint.model.model}, voice: ${blueprint.voice.voiceId})`);
+                } else {
+                    console.log(`[SCHEDULER] No valid blueprint for agent ${stepWithAgent.voice_agent_id}, falling back to legacy dispatch`);
+                }
+            }
+
+            // Fallback: if no blueprint, inject context into system_prompt the legacy way
+            if (!inlineAgent) {
+                if (conversationHistoryInjection) {
+                    voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${conversationHistoryInjection}`;
+                }
+                voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${toneDirective}`;
+            }
+
             await vapiQueue.add('vapi:call', {
                 tenantId: enrollment.tenant_id,
                 contactPhone: contact.phone,
@@ -552,10 +604,11 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 stepId: step.id,
                 urgencyPriority: getCallPriority(sequence.urgency_tier),
                 ...(phoneNumberId ? { phoneNumberId } : {}),
+                ...(inlineAgent ? { inlineAgent } : {}),
             }, {
                 priority: getCallPriority(sequence.urgency_tier),
             });
-            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId})` : ''}`);
+            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId})` : ''}${inlineAgent ? ' (blueprint inline)' : ' (legacy)'}`);
             break;
         }
     }

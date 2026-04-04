@@ -18,7 +18,7 @@ import { redisConnection, vapiQueue } from '../lib/redis.js';
 import { umbrellaResolver } from '../lib/umbrella-resolver.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
-import type { VapiJobPayload, VoiceContent } from '../lib/types.js';
+import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 const MAX_RETRIES = 3;
@@ -56,6 +56,11 @@ async function logExecution(params: {
 
 /**
  * Make a VAPI call
+ *
+ * Dispatch priority:
+ * 1. inlineAgent (from blueprint) — tenant's real voice/model + dynamic prompt
+ * 2. Legacy assistantId path — fixed VAPI agent (only override_variables survive)
+ * 3. Legacy inline fallback — hardcoded voice/model (old behavior)
  */
 async function makeVapiCall(
     vapiApiKey: string,
@@ -64,15 +69,78 @@ async function makeVapiCall(
     tenantId: string,
     umbrellaId: string,
     enrollmentId: string,
-    outboundPhoneNumberId?: string
+    outboundPhoneNumberId?: string,
+    inlineAgent?: InlineVapiAgent
 ): Promise<{ callId: string }> {
-    // Build request body for VAPI
     const requestBody: any = {
-        phoneNumberId: outboundPhoneNumberId || null, // Use agent's assigned number or let VAPI pick
+        phoneNumberId: outboundPhoneNumberId || null,
         customer: {
             number: phoneNumber,
         },
-        assistant: {
+        serverUrl: `${WEBHOOK_BASE_URL}/webhooks/vapi/call-events`,
+        serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET || 'ominify-secret',
+        metadata: {
+            tenantId,
+            umbrellaId,
+            enrollmentId,
+        },
+    };
+
+    if (inlineAgent) {
+        // ── PATH 1: Blueprint inline agent (preferred)
+        // Uses tenant's real voice, model, and dynamic prompt from the blueprint
+        requestBody.assistant = {
+            firstMessage: inlineAgent.firstMessage,
+            model: {
+                provider: inlineAgent.model.provider,
+                model: inlineAgent.model.model,
+                systemPrompt: inlineAgent.model.systemPrompt,
+                temperature: inlineAgent.model.temperature,
+                tools: inlineAgent.tools,
+            },
+            voice: {
+                provider: inlineAgent.voice.provider,
+                voiceId: inlineAgent.voice.voiceId,
+            },
+            ...(inlineAgent.transcriber ? {
+                transcriber: {
+                    provider: inlineAgent.transcriber.provider,
+                    model: inlineAgent.transcriber.model,
+                    language: inlineAgent.transcriber.language,
+                },
+            } : {}),
+            maxDurationSeconds: inlineAgent.maxDurationSeconds,
+            backgroundSound: inlineAgent.backgroundSound,
+            endCallMessage: inlineAgent.endCallMessage,
+            voicemailMessage: inlineAgent.voicemailMessage,
+            ...(inlineAgent.voicemailDetection ? {
+                voicemailDetection: inlineAgent.voicemailDetection,
+            } : {}),
+        };
+
+        // Override server URL if blueprint specifies one
+        if (inlineAgent.serverUrl) {
+            requestBody.assistant.server = { url: inlineAgent.serverUrl };
+        }
+
+        console.log(`[VAPI] Using blueprint inline agent (model: ${inlineAgent.model.model}, voice: ${inlineAgent.voice.voiceId})`);
+
+    } else if (assistantConfig.vapi_assistant_id) {
+        // ── PATH 2: Legacy assistantId (dynamic prompt is lost — only overrides survive)
+        requestBody.assistantId = assistantConfig.vapi_assistant_id;
+
+        const overrides = assistantConfig.override_variables;
+        if (overrides && Object.keys(overrides).length > 0) {
+            requestBody.assistantOverrides = {
+                variableValues: overrides,
+            };
+        }
+
+        console.log(`[VAPI] Using legacy assistantId: ${assistantConfig.vapi_assistant_id}`);
+
+    } else {
+        // ── PATH 3: Legacy inline fallback (hardcoded voice/model)
+        requestBody.assistant = {
             firstMessage: assistantConfig.first_message,
             model: {
                 provider: 'openai',
@@ -81,32 +149,11 @@ async function makeVapiCall(
             },
             voice: {
                 provider: 'playht',
-                voiceId: 'jennifer', // Default voice
+                voiceId: 'jennifer',
             },
-        },
-        // Webhook URL to receive call events
-        serverUrl: `${WEBHOOK_BASE_URL}/webhooks/vapi/call-events`,
-        serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET || 'ominify-secret',
-        // Metadata for our webhook handler
-        metadata: {
-            tenantId,
-            umbrellaId,
-            enrollmentId,
-        },
-    };
+        };
 
-    // If a specific assistant ID is provided, use that instead
-    if (assistantConfig.vapi_assistant_id) {
-        requestBody.assistantId = assistantConfig.vapi_assistant_id;
-        delete requestBody.assistant;
-
-        // Inject override variables for dynamic per-call data (e.g. lead name, campaign)
-        const overrides = assistantConfig.override_variables;
-        if (overrides && Object.keys(overrides).length > 0) {
-            requestBody.assistantOverrides = {
-                variableValues: overrides,
-            };
-        }
+        console.log('[VAPI] Using legacy inline fallback (hardcoded voice/model)');
     }
 
     const response = await fetch('https://api.vapi.ai/call/phone', {
@@ -131,7 +178,7 @@ async function makeVapiCall(
  * VAPI Worker processor
  */
 async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: string; status: string }> {
-    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId } = job.data;
+    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId, inlineAgent } = job.data;
 
     console.log(`[VAPI] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}, priority ${urgencyPriority}`);
 
@@ -184,7 +231,8 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             tenantId,
             umbrella.umbrellaId,
             enrollmentId,
-            phoneNumberId
+            phoneNumberId,
+            inlineAgent
         );
 
         console.log(`[VAPI] Call initiated: ${result.callId}`);

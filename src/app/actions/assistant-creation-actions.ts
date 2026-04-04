@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
 import { buildInboundPrompt, buildOutboundPrompt, TenantProfileData } from "@/lib/prompt-templates";
+import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 
 // ═══════════════════════════════════════════════════════════
 // AUTO-CREATE VAPI ASSISTANTS ON ONBOARDING COMPLETION
@@ -168,6 +169,23 @@ export async function createTenantAssistants(clientId: string): Promise<{
         );
 
         if (inboundAssistant) {
+            // Build blueprint for sequencer dispatch
+            const inboundBlueprint = buildAgentBlueprint({
+                systemPrompt: inboundPrompt.systemPrompt,
+                firstMessage: inboundPrompt.firstMessage,
+                model: { provider: "openai", model: "gpt-4o-mini", temperature: 0.7 },
+                voice: { provider: "11labs", voiceId: "EXAVITQu4vr4xnSDxMaL", voiceName: "Sarah" },
+                transcriber: { provider: "deepgram", model: "nova-2", language: "en" },
+                tools: [...calendarTools, { type: "endCall" }],
+                settings: {
+                    maxDurationSeconds: 600,
+                    backgroundSound: "office",
+                    endCallMessage: "Thank you for calling. Have a great day!",
+                    voicemailMessage: `You've reached ${client.name}. Please leave a message and we will get back to you as soon as possible.`,
+                    serverUrl: `${APP_URL}/api/webhooks/vapi`,
+                },
+            });
+
             const { data: agent } = await supabase
                 .from("agents")
                 .insert({
@@ -177,12 +195,13 @@ export async function createTenantAssistants(clientId: string): Promise<{
                     agent_type: "inbound",
                     auto_created: true,
                     template_version: TEMPLATE_VERSION,
+                    agent_blueprint: inboundBlueprint,
                 })
                 .select("id")
                 .single();
 
             agentIds.inbound = agent?.id;
-            console.log(`[ASSISTANT CREATION] Inbound agent created: ${inboundAssistant.id}`);
+            console.log(`[ASSISTANT CREATION] Inbound agent created: ${inboundAssistant.id} (blueprint saved)`);
         }
     } catch (error) {
         console.error("[ASSISTANT CREATION] Inbound agent error:", error);
@@ -227,6 +246,26 @@ export async function createTenantAssistants(clientId: string): Promise<{
         );
 
         if (outboundAssistant) {
+            // Build blueprint for sequencer dispatch
+            const outboundBlueprint = buildAgentBlueprint({
+                systemPrompt: outboundPrompt.systemPrompt,
+                firstMessage: outboundPrompt.firstMessage,
+                model: { provider: "openai", model: "gpt-4o-mini", temperature: 0.7 },
+                voice: { provider: "11labs", voiceId: "EXAVITQu4vr4xnSDxMaL", voiceName: "Sarah" },
+                transcriber: { provider: "deepgram", model: "nova-2", language: "en" },
+                tools: [...calendarTools, { type: "endCall" }],
+                settings: {
+                    maxDurationSeconds: 300,
+                    backgroundSound: "office",
+                    voicemailDetection: {
+                        provider: "twilio",
+                        enabled: true,
+                        voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                    },
+                    serverUrl: `${APP_URL}/api/webhooks/vapi`,
+                },
+            });
+
             const { data: agent } = await supabase
                 .from("agents")
                 .insert({
@@ -236,12 +275,13 @@ export async function createTenantAssistants(clientId: string): Promise<{
                     agent_type: "outbound",
                     auto_created: true,
                     template_version: TEMPLATE_VERSION,
+                    agent_blueprint: outboundBlueprint,
                 })
                 .select("id")
                 .single();
 
             agentIds.outbound = agent?.id;
-            console.log(`[ASSISTANT CREATION] Outbound agent created: ${outboundAssistant.id}`);
+            console.log(`[ASSISTANT CREATION] Outbound agent created: ${outboundAssistant.id} (blueprint saved)`);
         }
     } catch (error) {
         console.error("[ASSISTANT CREATION] Outbound agent error:", error);

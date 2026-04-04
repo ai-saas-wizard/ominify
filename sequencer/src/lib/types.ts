@@ -193,6 +193,84 @@ export interface VoiceContent {
     system_prompt: string;
     transfer_number?: string;
     override_variables?: Record<string, string>;
+    // Blueprint-based dispatch: when present, the sequencer uses these to build
+    // a full inline VAPI agent instead of using vapi_assistant_id
+    prompt_section_overrides?: Record<string, string>;
+    tool_overrides?: { add?: string[]; remove?: string[] };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Agent Blueprint Types (Transient Dispatch)
+// ═══════════════════════════════════════════════════════════════════
+
+/** Named sections of the system prompt, enabling surgical per-section overrides */
+export interface PromptSections {
+    identity: string;
+    business_context: string;
+    conversation_flow: string;
+    qualification: string;
+    brand_voice: string;
+    closing: string;
+    [key: string]: string; // allow injected sections (conversation_history, tone_directive)
+}
+
+/** Full agent config stored in our DB — the sequencer's source of truth */
+export interface AgentBlueprint {
+    version: '1.0';
+    prompt_sections: PromptSections;
+    first_message: string;
+    model: {
+        provider: string;
+        model: string;
+        temperature: number;
+    };
+    voice: {
+        provider: string;
+        voiceId: string;
+        voiceName?: string;
+    };
+    transcriber: {
+        provider: string;
+        model: string;
+        language: string;
+    };
+    tools: any[]; // Full tool schemas (function defs, endCall, transferCall, etc.)
+    tool_names: string[]; // Short names for step-level add/remove overrides
+    settings: {
+        maxDurationSeconds: number;
+        backgroundSound?: string;
+        voicemailMessage?: string;
+        endCallMessage?: string;
+        voicemailDetection?: any;
+        serverUrl?: string;
+    };
+}
+
+/** The assembled payload the scheduler passes to the VAPI worker for inline dispatch */
+export interface InlineVapiAgent {
+    firstMessage: string;
+    model: {
+        provider: string;
+        model: string;
+        systemPrompt: string;
+        temperature: number;
+    };
+    voice: {
+        provider: string;
+        voiceId: string;
+    };
+    transcriber?: {
+        provider: string;
+        model: string;
+        language: string;
+    };
+    tools: any[];
+    maxDurationSeconds?: number;
+    backgroundSound?: string;
+    endCallMessage?: string;
+    voicemailMessage?: string;
+    voicemailDetection?: any;
+    serverUrl?: string;
 }
 
 export interface SequenceEnrollment {
@@ -254,6 +332,9 @@ export interface VapiJobPayload {
     retryCount?: number;
     overrideVariables?: Record<string, string>;
     phoneNumberId?: string;  // VAPI phone number ID for outbound caller ID
+    // Blueprint-based inline agent: when present, vapi-worker uses this directly
+    // instead of assistantConfig.vapi_assistant_id or hardcoded inline defaults
+    inlineAgent?: InlineVapiAgent;
 }
 
 export interface EventJobPayload {

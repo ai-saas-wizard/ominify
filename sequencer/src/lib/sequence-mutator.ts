@@ -314,7 +314,13 @@ function getContentSchema(channel: ChannelType): string {
         case 'email':
             return '"subject": "email subject", "body_html": "HTML body", "body_text": "plain text body"';
         case 'voice':
-            return '"first_message": "opening line", "system_prompt": "agent instructions"';
+            return `"first_message": "opening line",
+    "section_overrides": {
+        "conversation_flow": "rewritten conversation flow section (optional)",
+        "closing": "rewritten closing/tool instructions section (optional)"
+    }
+NOTE: Only include sections you want to change. Available sections: identity, brand_voice, business_context, qualification, conversation_flow, closing.
+Do NOT rewrite the entire system prompt — only override specific sections that need to change based on conversation context.`;
         default:
             return '"body": "message text"';
     }
@@ -350,11 +356,34 @@ function validateMutatedContent(
         }
         case 'voice': {
             const orig = original as VoiceContent;
-            return {
+            const result: VoiceContent = {
                 ...orig, // Preserve vapi_assistant_id, transfer_number, etc.
                 first_message: typeof mutated.first_message === 'string' ? mutated.first_message : orig.first_message,
-                system_prompt: typeof mutated.system_prompt === 'string' ? mutated.system_prompt : orig.system_prompt,
-            } as VoiceContent;
+                system_prompt: orig.system_prompt, // Keep original — overrides go in prompt_section_overrides
+            };
+
+            // Section-based mutations: if the mutator returned section_overrides,
+            // store them in prompt_section_overrides for the blueprint assembler
+            if (mutated.section_overrides && typeof mutated.section_overrides === 'object') {
+                const sectionOverrides: Record<string, string> = {};
+                for (const [key, value] of Object.entries(mutated.section_overrides)) {
+                    if (typeof value === 'string' && value.length > 0) {
+                        sectionOverrides[key] = value;
+                    }
+                }
+                if (Object.keys(sectionOverrides).length > 0) {
+                    result.prompt_section_overrides = {
+                        ...orig.prompt_section_overrides,
+                        ...sectionOverrides,
+                    };
+                }
+            } else if (typeof mutated.system_prompt === 'string') {
+                // Fallback: if the mutator returned a full system_prompt (no section_overrides),
+                // use it directly (legacy behavior for non-blueprint agents)
+                result.system_prompt = mutated.system_prompt;
+            }
+
+            return result;
         }
         default:
             return original;
