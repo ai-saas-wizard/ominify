@@ -7,8 +7,12 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Elevate With Ai",
+  title: "Omnify",
   description: "Voice Agent Management Platform",
+  icons: {
+    icon: "/omnify-logo.png",
+    apple: "/omnify-logo.png",
+  },
 };
 
 export default function RootLayout({
