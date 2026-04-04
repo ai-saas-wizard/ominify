@@ -18,6 +18,7 @@ import { SimulationEntryComponent } from "./simulation-entry";
 interface SimulationViewProps {
     scenario: SimulationScenario | null;
     isLoading: boolean;
+    error?: string | null;
     onRegenerateScenario: (type?: string) => void;
 }
 
@@ -31,6 +32,7 @@ const SCENARIO_TYPES = [
 export function SimulationView({
     scenario,
     isLoading,
+    error,
     onRegenerateScenario,
 }: SimulationViewProps) {
     const [visibleCount, setVisibleCount] = useState(0);
@@ -133,9 +135,21 @@ export function SimulationView({
                     </p>
                 </div>
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
-                    <p className="text-sm text-gray-500">
-                        No simulation generated yet. Go back and check your settings.
-                    </p>
+                    {error ? (
+                        <>
+                            <p className="text-sm text-red-600">{error}</p>
+                            <button
+                                onClick={() => onRegenerateScenario("positive")}
+                                className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                            >
+                                Try again
+                            </button>
+                        </>
+                    ) : (
+                        <p className="text-sm text-gray-500">
+                            No simulation generated yet. Go back and check your settings.
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -151,6 +165,19 @@ export function SimulationView({
                     This is what your leads will experience. The AI adapts in real-time.
                 </p>
             </div>
+
+            {/* Error Banner */}
+            {error && scenario && (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                    <span>Failed to generate new scenario. Showing previous result.</span>
+                    <button
+                        onClick={() => onRegenerateScenario("positive")}
+                        className="ml-auto text-xs font-medium text-red-600 hover:text-red-800 underline"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
 
             {/* Scenario Header */}
             <div className="flex items-center justify-between bg-gray-50 rounded-xl p-4 border border-gray-200">

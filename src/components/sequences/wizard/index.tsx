@@ -180,9 +180,12 @@ export function SequenceWizard({
                 });
                 if (result.success && result.scenario) {
                     setSimulation(result.scenario as SimulationScenario);
+                } else {
+                    setSimError(result.error || "Failed to generate simulation. Try again.");
                 }
-            } catch {
-                // Simulation generation failed, user can retry
+            } catch (err: any) {
+                console.error("Simulation generation error:", err);
+                setSimError("Something went wrong. Try again.");
             } finally {
                 setSimLoading(false);
             }
@@ -198,11 +201,15 @@ export function SequenceWizard({
     }, []);
 
     // Regenerate scenario
+    const [simError, setSimError] = useState<string | null>(null);
+
     const handleRegenerateScenario = useCallback(
         async (type?: string) => {
             setSimLoading(true);
-            setSimulation(null);
+            setSimError(null);
+            // Keep the current simulation visible until new one is ready
             try {
+                const scenarioType = (type || "positive") as "positive" | "neutral" | "negative" | "opt_out" | "handoff";
                 const result = await generateSimulation({
                     clientId,
                     goal: state.goal!,
@@ -214,13 +221,16 @@ export function SequenceWizard({
                         success_conditions: state.handoffRules.success_conditions,
                         handoff_triggers: state.handoffRules.handoff_triggers,
                     },
-                    scenarioType: (type as any) || "positive",
+                    scenarioType,
                 });
                 if (result.success && result.scenario) {
                     setSimulation(result.scenario as SimulationScenario);
+                } else {
+                    setSimError(result.error || "Failed to generate scenario. Try again.");
                 }
-            } catch {
-                // Failed
+            } catch (err: any) {
+                console.error("Simulation regeneration error:", err);
+                setSimError("Something went wrong. Try again.");
             } finally {
                 setSimLoading(false);
             }
@@ -407,6 +417,7 @@ export function SequenceWizard({
                                 <SimulationView
                                     scenario={simulation}
                                     isLoading={simLoading}
+                                    error={simError}
                                     onRegenerateScenario={handleRegenerateScenario}
                                 />
                             )}
