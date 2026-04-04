@@ -63,7 +63,7 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
         }
 
         // Import to VAPI
-        const result = await importPhoneNumber(
+        const importResult = await importPhoneNumber(
             {
                 provider: "twilio",
                 number: phone.phone_number,
@@ -75,18 +75,19 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
             vapiKey
         );
 
-        if (!result) {
-            return { success: false, error: "Failed to import phone number to VAPI" };
+        if (!importResult.data) {
+            console.error("VAPI import failed:", importResult.error);
+            return { success: false, error: importResult.error || "Failed to import phone number to VAPI" };
         }
 
         // Store VAPI phone number ID
         await supabase
             .from("tenant_phone_numbers")
-            .update({ vapi_phone_number_id: result.id })
+            .update({ vapi_phone_number_id: importResult.data.id })
             .eq("id", phoneNumberDbId);
 
         revalidatePath(`/client/${clientId}/phone-numbers`);
-        return { success: true, vapiPhoneNumberId: result.id };
+        return { success: true, vapiPhoneNumberId: importResult.data.id };
     } catch (err: any) {
         console.error("importPhoneNumberToVapi error:", err);
         return { success: false, error: err.message || "Failed to import phone number" };

@@ -332,9 +332,9 @@ export interface ImportPhoneNumberPayload {
 export async function importPhoneNumber(
     payload: ImportPhoneNumberPayload,
     apiKey?: string
-): Promise<VapiPhoneNumber | null> {
+): Promise<{ data: VapiPhoneNumber | null; error?: string }> {
     const token = apiKey || DEFAULT_KEY;
-    if (!token) return null;
+    if (!token) return { data: null, error: "No VAPI API key available" };
 
     try {
         const res = await fetch(`${VAPI_BASE_URL}/phone-number/import`, {
@@ -347,14 +347,15 @@ export async function importPhoneNumber(
         });
 
         if (!res.ok) {
-            console.error("Failed to import phone number:", await res.text());
-            return null;
+            const errorBody = await res.text();
+            console.error("Failed to import phone number:", res.status, errorBody);
+            return { data: null, error: `VAPI error (${res.status}): ${errorBody}` };
         }
 
-        return await res.json();
-    } catch (error) {
+        return { data: await res.json() };
+    } catch (error: any) {
         console.error("Vapi Client Error (importPhoneNumber):", error);
-        return null;
+        return { data: null, error: error.message || "Network error calling VAPI" };
     }
 }
 
