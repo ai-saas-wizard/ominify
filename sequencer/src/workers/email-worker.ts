@@ -95,15 +95,47 @@ async function getTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig
     };
 }
 
+const TRACKING_BASE_URL = process.env.TRACKING_BASE_URL || process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
+const REPLY_DOMAIN = process.env.REPLY_DOMAIN || 'replies.ominify.io';
+
 /**
- * Send email via SMTP
+ * Inject tracking pixel into HTML email body.
+ * Adds a 1x1 transparent GIF that triggers an open event.
+ */
+function injectTrackingPixel(html: string, enrollmentId: string, stepId: string): string {
+    const pixelUrl = `${TRACKING_BASE_URL}/webhooks/email/track/open/${stepId}`;
+    const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
+
+    // Insert before </body> if present, otherwise append
+    if (html.includes('</body>')) {
+        return html.replace('</body>', `${pixel}</body>`);
+    }
+    return html + pixel;
+}
+
+/**
+ * Rewrite URLs in HTML body for click tracking.
+ * Wraps each href in a redirect through our click tracker.
+ */
+function rewriteLinksForTracking(html: string, stepId: string): string {
+    // Match href="..." but skip mailto: and tel: links
+    return html.replace(/href="(https?:\/\/[^"]+)"/gi, (match, url) => {
+        const encodedUrl = encodeURIComponent(url);
+        return `href="${TRACKING_BASE_URL}/webhooks/email/track/click/${stepId}?url=${encodedUrl}"`;
+    });
+}
+
+/**
+ * Send email via SMTP with Reply-To routing and tracking
  */
 async function sendViaSMTP(
     config: TenantEmailConfig,
     to: string,
     subject: string,
     html: string,
-    text: string
+    text: string,
+    enrollmentId?: string,
+    stepId?: string
 ): Promise<{ messageId: string }> {
     const transporter = nodemailer.createTransport({
         host: config.smtpHost,
@@ -115,12 +147,25 @@ async function sendViaSMTP(
         } : undefined,
     });
 
+    // Inject tracking pixel and rewrite links if we have step tracking info
+    let trackedHtml = html;
+    if (stepId) {
+        trackedHtml = injectTrackingPixel(trackedHtml, enrollmentId || '', stepId);
+        trackedHtml = rewriteLinksForTracking(trackedHtml, stepId);
+    }
+
+    // Set Reply-To header for reply routing
+    const replyTo = enrollmentId
+        ? `reply+${enrollmentId}@${REPLY_DOMAIN}`
+        : undefined;
+
     const result = await transporter.sendMail({
         from: `"${config.fromName}" <${config.fromEmail}>`,
         to,
         subject,
-        html,
+        html: trackedHtml,
         text,
+        ...(replyTo ? { replyTo } : {}),
     });
 
     return { messageId: result.messageId };
@@ -136,14 +181,16 @@ async function sendViaGmailAPI(
     to: string,
     subject: string,
     html: string,
-    text: string
+    text: string,
+    enrollmentId?: string,
+    stepId?: string
 ): Promise<{ messageId: string }> {
     console.warn('[EMAIL] Gmail API is not yet implemented. Attempting SMTP fallback.');
 
     // Fall back to SMTP if credentials are available
     if (config.smtpHost && config.smtpUser) {
         console.log('[EMAIL] SMTP config available, falling back to SMTP.');
-        return sendViaSMTP(config, to, subject, html, text);
+        return sendViaSMTP(config, to, subject, html, text, enrollmentId, stepId);
     }
 
     throw new Error(
@@ -198,9 +245,9 @@ async function processEmailJob(job: Job<EmailJobPayload>): Promise<{ messageId: 
     let result: { messageId: string };
 
     if (config.provider === 'gmail' && config.gmailAccessToken) {
-        result = await sendViaGmailAPI(config, contactEmail, subject, bodyHtml, bodyText);
+        result = await sendViaGmailAPI(config, contactEmail, subject, bodyHtml, bodyText, enrollmentId, stepId);
     } else {
-        result = await sendViaSMTP(config, contactEmail, subject, bodyHtml, bodyText);
+        result = await sendViaSMTP(config, contactEmail, subject, bodyHtml, bodyText, enrollmentId, stepId);
     }
 
     console.log(`[EMAIL] Sent to ${contactEmail}, MessageId: ${result.messageId}`);

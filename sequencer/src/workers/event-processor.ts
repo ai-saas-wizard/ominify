@@ -43,8 +43,9 @@ import {
     activateEnrollmentForNextStep,
 } from '../lib/dynamic-step-generator.js';
 import { handleInboundSMS } from '../lib/sms-responder.js';
+import { handleInboundEmail } from '../lib/email-responder.js';
 import { autoAdvancePipelineStage } from '../lib/pipeline-advance.js';
-import { smsQueue } from '../lib/redis.js';
+import { smsQueue, emailQueue } from '../lib/redis.js';
 import type {
     EventJobPayload,
     EnrollmentStatus,
@@ -59,6 +60,8 @@ import type {
     OutcomeContext,
     ChannelType,
     ConversationContext,
+    TriggeringStepContext,
+    EmailReplyMode,
 } from '../lib/types.js';
 
 /**
@@ -705,7 +708,10 @@ async function maybeTriggerChatbotReply(
 
         console.log(`[EVENT] Chatbot mode active for enrollment ${enrollmentId} — generating AI reply`);
 
-        // 6. Call SMS responder
+        // 6. Fetch triggering step context for the SMS responder
+        const triggeringStep = await getTriggeringStepContext(enrollmentId);
+
+        // 7. Call SMS responder
         const fromPhone = event.fromPhone || contact?.phone || '';
         const result = await handleInboundSMS({
             enrollmentId,
@@ -714,6 +720,7 @@ async function maybeTriggerChatbotReply(
             clientId: enrollment.tenant_id,
             inboundMessage: event.messageBody || '',
             fromPhone,
+            triggeringStep,
         });
 
         // 7. Act on the chatbot's decision
@@ -1016,6 +1023,353 @@ async function handleEmailBounced(event: EventJobPayload): Promise<void> {
 }
 
 /**
+ * Fetch the triggering step context — the last outbound step executed for this enrollment.
+ * Used to give SMS/email responders context about what message the customer is replying to.
+ */
+async function getTriggeringStepContext(enrollmentId: string): Promise<TriggeringStepContext | undefined> {
+    try {
+        const { data: logEntry } = await supabase
+            .from('sequence_execution_log')
+            .select('step_id, channel, executed_at')
+            .eq('enrollment_id', enrollmentId)
+            .in('action', ['sent', 'call_initiated'])
+            .order('executed_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (!logEntry?.step_id) return undefined;
+
+        const { data: step } = await supabase
+            .from('sequence_steps')
+            .select('step_order, channel, content, step_brief')
+            .eq('id', logEntry.step_id)
+            .single();
+
+        if (!step) return undefined;
+
+        // Build content summary
+        let contentSummary = '';
+        const content = step.content as any;
+        if (step.channel === 'sms') {
+            contentSummary = content?.body?.substring(0, 200) || '';
+        } else if (step.channel === 'email') {
+            contentSummary = `Subject: ${content?.subject || ''} — ${(content?.body_text || '').substring(0, 150)}`;
+        } else if (step.channel === 'voice') {
+            contentSummary = content?.first_message?.substring(0, 200) || '';
+        }
+
+        return {
+            step_order: step.step_order,
+            channel: step.channel,
+            content_summary: contentSummary,
+            step_brief: step.step_brief || null,
+            sent_at: logEntry.executed_at,
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Handle email reply event — mirrors handleSmsReply with email-specific behavior
+ */
+async function handleEmailReply(event: EventJobPayload): Promise<void> {
+    const { enrollmentId, emailSubject, emailBodyText, emailBodyHtml, fromEmail } = event;
+    const messageBody = emailBodyText || '';
+
+    if (!messageBody && !emailBodyHtml) {
+        console.log('[EVENT] No body in email reply');
+        return;
+    }
+
+    console.log(`[EVENT] Email reply received: "${(emailSubject || '').substring(0, 60)}"`);
+
+    // Resolve tenantId from enrollment if not provided
+    let tenantId = event.tenantId;
+
+    if (enrollmentId) {
+        const { data: enroll } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id, tenant_id, sequence_id, contacts(name)')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enroll) {
+            tenantId = enroll.tenant_id;
+
+            // 1. EI Analysis on the reply
+            let eiAnalysis: EmotionalAnalysis | null = null;
+            const conversationHistory = await buildConversationHistoryString(enroll.contact_id);
+
+            try {
+                eiAnalysis = await analyzeMessage(messageBody, 'email', conversationHistory);
+                console.log(`[EVENT] Email EI: emotion=${eiAnalysis.primary_emotion}, intent=${eiAnalysis.intent}`);
+            } catch (err) {
+                console.error('[EVENT] Email EI analysis failed:', err);
+            }
+
+            const emotionToSentiment: Record<string, 'positive' | 'negative' | 'neutral' | 'interested' | 'objection' | 'confused'> = {
+                excited: 'positive', interested: 'interested', neutral: 'neutral',
+                hesitant: 'neutral', frustrated: 'negative', confused: 'confused',
+                angry: 'negative', dismissive: 'negative',
+            };
+
+            const sentiment = eiAnalysis
+                ? (emotionToSentiment[eiAnalysis.primary_emotion] || 'neutral')
+                : 'neutral';
+            const intent = eiAnalysis?.intent || 'unknown';
+
+            // 2. Record inbound email interaction
+            const interactionId = await recordInteraction({
+                clientId: enroll.tenant_id,
+                contactId: enroll.contact_id,
+                enrollmentId,
+                channel: 'email',
+                direction: 'inbound',
+                contentBody: messageBody,
+                contentSubject: emailSubject,
+                outcome: 'replied',
+                sentiment,
+                intent: intent as any,
+            });
+
+            if (interactionId && eiAnalysis) {
+                await supabase
+                    .from('contact_interactions')
+                    .update({
+                        emotional_analysis: eiAnalysis,
+                        engagement_score: eiAnalysis.is_hot_lead ? 80 : eiAnalysis.is_at_risk ? 25 : 50,
+                    })
+                    .eq('id', interactionId);
+            }
+
+            // 3. Update conversation summary
+            await updateContactConversationSummary(enroll.contact_id);
+
+            // 4. Update enrollment EI + notifications
+            if (eiAnalysis) {
+                const interactions = await getRecentInteractions(enroll.contact_id);
+                await updateEnrollmentEI(enrollmentId, eiAnalysis, interactions);
+
+                const contactName = (enroll as any).contacts?.name || undefined;
+                await generateEINotifications(enroll.tenant_id, enroll.contact_id, enrollmentId, eiAnalysis, contactName);
+            }
+
+            // 5. Update enrollment status
+            await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+
+            if (intent === 'stop') {
+                await updateEnrollmentStatus(enrollmentId, { status: 'manual_stop', contact_replied: true });
+            } else if (intent === 'interested' || intent === 'ready_to_buy') {
+                try { await computeStepAttribution(enrollmentId, 'replied'); } catch {}
+            }
+
+            // 6. Pipeline auto-advance
+            const { data: enrollForPipeline } = await supabase
+                .from('sequence_enrollments')
+                .select('contact_id, tenant_id, is_hot_lead')
+                .eq('id', enrollmentId)
+                .single();
+
+            if (enrollForPipeline?.contact_id && enrollForPipeline?.tenant_id) {
+                await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Engaged');
+                if (eiAnalysis?.is_hot_lead || enrollForPipeline.is_hot_lead) {
+                    await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Qualified');
+                }
+            }
+
+            // 7. Email responder chatbot — check email_reply_mode
+            const emailChatbotHandled = await maybeTriggerEmailReply(event, enrollmentId, enroll, eiAnalysis);
+
+            // 8. Dynamic JIT generation
+            if (!emailChatbotHandled) {
+                await maybeTriggerDynamicGeneration(enrollmentId, {
+                    type: 'sms_reply', // reuse type — email reply is similar
+                    details: `Email reply: "${(messageBody).substring(0, 100)}"`,
+                    channel: 'email',
+                    eiAnalysis: eiAnalysis || undefined,
+                });
+            }
+        }
+    }
+}
+
+/**
+ * Maybe trigger email chatbot reply for an inbound email on an active enrollment.
+ */
+async function maybeTriggerEmailReply(
+    event: EventJobPayload,
+    enrollmentId: string,
+    enroll: any,
+    eiAnalysis: EmotionalAnalysis | null
+): Promise<boolean> {
+    try {
+        // Check email_reply_mode from tenant_email_accounts
+        const { data: emailAccount } = await supabase
+            .from('tenant_email_accounts')
+            .select('email_reply_mode')
+            .eq('client_id', enroll.tenant_id)
+            .eq('is_active', true)
+            .single();
+
+        const replyMode: EmailReplyMode = emailAccount?.email_reply_mode || 'notify_only';
+
+        if (replyMode === 'notify_only') {
+            // Just notify — don't generate a response
+            await createNotification({
+                clientId: enroll.tenant_id,
+                enrollmentId,
+                contactId: enroll.contact_id,
+                type: 'needs_human',
+                title: 'Email reply received',
+                body: `Subject: "${(event.emailSubject || '').substring(0, 100)}" — ${(event.emailBodyText || '').substring(0, 150)}`,
+                priority: 'normal',
+                metadata: { source: 'email_reply', from: event.fromEmail },
+            });
+            return false;
+        }
+
+        // Fetch full enrollment with sequence
+        const { data: enrollment } = await supabase
+            .from('sequence_enrollments')
+            .select('*, sequences(*), contacts(*)')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (!enrollment) return false;
+
+        const sequence = (enrollment as any).sequences as any;
+        const contact = (enrollment as any).contacts as any;
+
+        // Guard: active status
+        const activeStatuses: EnrollmentStatus[] = ['active', 'awaiting_outcome', 'generating_next_step'];
+        if (!activeStatuses.includes(enrollment.status)) return false;
+
+        if (eiAnalysis?.intent === 'stop') return false;
+        if ((enrollment as any).needs_human_intervention) return false;
+
+        // Fetch triggering step context
+        const triggeringStep = await getTriggeringStepContext(enrollmentId);
+
+        // Call email responder
+        const result = await handleInboundEmail({
+            enrollmentId,
+            sequenceId: enrollment.sequence_id,
+            contactId: enrollment.contact_id,
+            clientId: enrollment.tenant_id,
+            inboundSubject: event.emailSubject || '',
+            inboundBody: event.emailBodyText || '',
+            fromEmail: event.fromEmail || '',
+            triggeringStep,
+        });
+
+        switch (result.action) {
+            case 'reply': {
+                if (!result.message) return false;
+
+                if (replyMode === 'auto') {
+                    // Send the reply email via the email queue
+                    await emailQueue.add('email:chatbot-reply', {
+                        tenantId: enrollment.tenant_id,
+                        contactEmail: contact?.email || event.fromEmail || '',
+                        subject: result.subject || `Re: ${event.emailSubject || ''}`,
+                        bodyHtml: result.message,
+                        bodyText: result.message,
+                        enrollmentId,
+                        stepId: '',
+                    });
+
+                    await recordInteraction({
+                        clientId: enrollment.tenant_id,
+                        contactId: enrollment.contact_id,
+                        enrollmentId,
+                        channel: 'email',
+                        direction: 'outbound',
+                        contentBody: result.message,
+                        contentSubject: result.subject,
+                        outcome: 'delivered',
+                        metadata: { source: 'chatbot', turn: result.metadata?.turn || 1 },
+                    });
+
+                    console.log(`[EVENT] Email chatbot reply sent for ${enrollmentId}`);
+                } else if (replyMode === 'draft') {
+                    // Save as draft + notify
+                    await createNotification({
+                        clientId: enrollment.tenant_id,
+                        enrollmentId,
+                        contactId: enrollment.contact_id,
+                        type: 'needs_human',
+                        title: 'Email draft ready for review',
+                        body: `AI generated a reply to "${(event.emailSubject || '').substring(0, 60)}". Review and send.`,
+                        priority: 'normal',
+                        metadata: {
+                            source: 'email_chatbot_draft',
+                            draft_subject: result.subject,
+                            draft_body: result.message,
+                            from: event.fromEmail,
+                        },
+                    });
+                    console.log(`[EVENT] Email chatbot draft saved for ${enrollmentId}`);
+                }
+                return true;
+            }
+
+            case 'goal_achieved': {
+                await updateEnrollmentStatus(enrollmentId, {
+                    status: 'completed' as EnrollmentStatus,
+                    contact_replied: true,
+                    completed_at: new Date().toISOString(),
+                });
+                try { await computeStepAttribution(enrollmentId, (result.conversion_type || 'replied') as any); } catch {}
+                await createNotification({
+                    clientId: enrollment.tenant_id,
+                    enrollmentId,
+                    contactId: enrollment.contact_id,
+                    type: 'sequence_completed',
+                    title: `Email goal achieved: ${result.conversion_type}`,
+                    body: `Email conversation resulted in conversion for ${contact?.name || contact?.email || 'contact'}`,
+                    priority: 'high',
+                    metadata: { conversion_type: result.conversion_type, source: 'email_chatbot' },
+                });
+                return true;
+            }
+
+            case 'escalate': {
+                await supabase
+                    .from('sequence_enrollments')
+                    .update({ needs_human_intervention: true, updated_at: new Date().toISOString() })
+                    .eq('id', enrollmentId);
+                await createNotification({
+                    clientId: enrollment.tenant_id,
+                    enrollmentId,
+                    contactId: enrollment.contact_id,
+                    type: 'escalation',
+                    title: 'Email escalation — human needed',
+                    body: `Reason: ${result.escalation_reason}`,
+                    priority: 'urgent',
+                    metadata: { escalation_reason: result.escalation_reason, source: 'email_chatbot' },
+                });
+                return true;
+            }
+
+            case 'opt_out': {
+                await updateEnrollmentStatus(enrollmentId, {
+                    status: 'manual_stop' as EnrollmentStatus,
+                    contact_replied: true,
+                });
+                return true;
+            }
+
+            default:
+                return false;
+        }
+    } catch (err) {
+        console.error(`[EVENT] Email chatbot failed for ${enrollmentId}:`, err);
+        return false;
+    }
+}
+
+/**
  * Event Processor processor
  */
 async function processEvent(job: Job<EventJobPayload>): Promise<void> {
@@ -1046,6 +1400,10 @@ async function processEvent(job: Job<EventJobPayload>): Promise<void> {
 
         case 'email-bounced':
             await handleEmailBounced(event);
+            break;
+
+        case 'email-reply':
+            await handleEmailReply(event);
             break;
 
         default:

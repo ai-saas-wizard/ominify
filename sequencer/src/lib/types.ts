@@ -153,6 +153,17 @@ export interface Sequence {
     updated_at: string;
 }
 
+export interface StepBrief {
+    intent: string;
+    key_points: string[];
+    cta: string;
+    constraints: string[];
+    channel_hints?: {
+        sms?: { max_length?: number };
+        email?: { tone?: string; include_subject?: boolean };
+    };
+}
+
 export interface SequenceStep {
     id: string;
     sequence_id: string;
@@ -162,6 +173,7 @@ export interface SequenceStep {
     delay_type: 'after_previous' | 'after_enrollment' | 'specific_time';
     specific_time: string | null;
     content: SmsContent | EmailContent | VoiceContent;
+    step_brief: StepBrief | null;
     skip_conditions: {
         skip_if?: string[];
         only_if?: string[];
@@ -337,8 +349,10 @@ export interface VapiJobPayload {
     inlineAgent?: InlineVapiAgent;
 }
 
+export type EmailReplyMode = 'auto' | 'draft' | 'notify_only';
+
 export interface EventJobPayload {
-    type: 'call-outcome' | 'sms-reply' | 'sms-delivery' | 'email-opened' | 'email-clicked' | 'email-bounced';
+    type: 'call-outcome' | 'sms-reply' | 'sms-delivery' | 'email-opened' | 'email-clicked' | 'email-bounced' | 'email-reply';
     tenantId: string;
     umbrellaId?: string;
     enrollmentId?: string;
@@ -353,6 +367,19 @@ export interface EventJobPayload {
     deliveryStatus?: string;
     // Phase 7: SMS Chatbot — inbound phone number for reply routing
     fromPhone?: string;
+    // Email reply fields
+    emailSubject?: string;
+    emailBodyText?: string;
+    emailBodyHtml?: string;
+    fromEmail?: string;
+}
+
+export interface TriggeringStepContext {
+    step_order: number;
+    channel: ChannelType;
+    content_summary: string;
+    step_brief: StepBrief | null;
+    sent_at: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════

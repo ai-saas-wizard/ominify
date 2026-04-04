@@ -56,6 +56,9 @@ import {
     assembleInlineAgent,
     isValidBlueprint,
 } from '../lib/blueprint-assembler.js';
+import {
+    generateOutboundContent,
+} from '../lib/outbound-generator.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -74,6 +77,7 @@ import type {
     OutcomeContext,
     AgentBlueprint,
     InlineVapiAgent,
+    StepBrief,
 } from '../lib/types.js';
 import { format, addSeconds, isWithinInterval, setHours, setMinutes } from 'date-fns';
 import { utcToZonedTime } from 'date-fns-tz';
@@ -475,6 +479,35 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
         }
         return;
+    }
+
+    // 7b. Intent-guided generation — if step has a brief, generate content from it
+    // This bypasses the template+mutation path for brief-based steps
+    if (step.step_brief && (dispatchChannel === 'sms' || dispatchChannel === 'email')) {
+        try {
+            console.log(`[SCHEDULER] Brief-based generation for step ${step.step_order} (${dispatchChannel}): "${step.step_brief.intent}"`);
+            const generated = await generateOutboundContent({
+                channel: dispatchChannel as 'sms' | 'email',
+                brief: step.step_brief,
+                conversationContext: conversationCtx,
+                tenantProfile,
+                contact,
+                enrollment,
+                sequence,
+                step,
+                emotionalState: {
+                    sentimentTrend: enrollmentEI.sentiment_trend || 'stable',
+                    lastEmotion: enrollmentEI.last_emotion || null,
+                    recommendedTone: enrollmentEI.recommended_tone || 'professional',
+                    isHotLead: enrollmentEI.is_hot_lead || false,
+                    isAtRisk: enrollmentEI.is_at_risk || false,
+                },
+            });
+            renderedContent = generated.content;
+            console.log(`[SCHEDULER] Brief generation succeeded: ${generated.reasoning}`);
+        } catch (err) {
+            console.log(`[SCHEDULER] Brief generation failed, using template fallback:`, err);
+        }
     }
 
     // 8. Dispatch to channel queue

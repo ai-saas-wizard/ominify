@@ -13,6 +13,7 @@ import cors from '@fastify/cors';
 import { twilioWebhooks } from './routes/twilio-webhooks.js';
 import { vapiWebhooks } from './routes/vapi-webhooks.js';
 import { leadIngestion } from './routes/lead-ingestion.js';
+import { emailWebhooks } from './routes/email-webhooks.js';
 import { healthRoutes } from './routes/health.js';
 
 const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3000');
@@ -32,6 +33,7 @@ fastify.register(cors, {
 fastify.register(twilioWebhooks, { prefix: '/webhooks/twilio' });
 fastify.register(vapiWebhooks, { prefix: '/webhooks/vapi' });
 fastify.register(leadIngestion, { prefix: '/webhooks/leads' });
+fastify.register(emailWebhooks, { prefix: '/webhooks/email' });
 fastify.register(healthRoutes, { prefix: '' });
 
 // Start server
