@@ -263,6 +263,25 @@ export async function deleteSequence(sequenceId: string) {
             .eq("id", sequenceId)
             .single();
 
+        // 1. Deactivate the sequence so the scheduler stops picking up new work
+        await supabase
+            .from("sequences")
+            .update({ is_active: false })
+            .eq("id", sequenceId);
+
+        // 2. Mark all active enrollments as unenrolled so in-flight dispatches are halted
+        await supabase
+            .from("sequence_enrollments")
+            .update({
+                status: "unenrolled",
+                completed_at: new Date().toISOString(),
+                completed_reason: "sequence_deleted",
+                next_step_at: null,
+            })
+            .eq("sequence_id", sequenceId)
+            .in("status", ["active", "paused"]);
+
+        // 3. Delete the sequence (cascade removes steps + enrollments from DB)
         const { error } = await supabase
             .from("sequences")
             .delete()

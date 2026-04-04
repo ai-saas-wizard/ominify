@@ -23,6 +23,9 @@ import {
     CalendarCheck,
     XCircle,
     Rocket,
+    Trash2,
+    MoreVertical,
+    Power,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +40,7 @@ import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dia
 import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
 import { TaskDialog } from "@/components/sequences/task-dialog";
 import { SequenceWizard } from "@/components/sequences/wizard";
-import { getChannelReadiness, type ChannelReadiness } from "@/app/actions/sequence-actions";
+import { getChannelReadiness, deleteSequence, toggleSequenceActive, type ChannelReadiness } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 
@@ -251,14 +254,25 @@ function ChannelPills({ channels }: { channels: string[] }) {
 
 // ── Sequence Card ────────────────────────────────────────────────────────────
 
-function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clientId: string }) {
+function SequenceCard({
+    sequence,
+    clientId,
+    onDelete,
+    onToggleActive,
+}: {
+    sequence: SequenceCardData;
+    clientId: string;
+    onDelete: (id: string) => void;
+    onToggleActive: (id: string, active: boolean) => void;
+}) {
     const rate = completionRate(sequence.completed_count, sequence.total_enrolled);
     const urgency = URGENCY_CONFIG[sequence.urgency_tier] || URGENCY_CONFIG.medium;
+    const [menuOpen, setMenuOpen] = useState(false);
 
     return (
         <motion.div variants={cardVariants} layout>
             <Link href={`/client/${clientId}/sequences/${sequence.id}`} className="block h-full">
-                <Card className="h-full overflow-hidden border-gray-200/60 hover:border-emerald-300 hover:shadow-lg transition-all duration-200 group cursor-pointer">
+                <Card className="h-full overflow-hidden border-gray-200/60 hover:border-emerald-300 hover:shadow-lg transition-all duration-200 group cursor-pointer relative">
                     {/* Active indicator bar */}
                     <div
                         className={`h-1 w-full ${
@@ -267,6 +281,49 @@ function SequenceCard({ sequence, clientId }: { sequence: SequenceCardData; clie
                                 : "bg-gray-200"
                         }`}
                     />
+
+                    {/* Context menu */}
+                    <div className="absolute top-3 right-3 z-10">
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setMenuOpen(!menuOpen);
+                            }}
+                            className="p-1 rounded-md hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                            <MoreVertical className="w-4 h-4 text-gray-400" />
+                        </button>
+                        {menuOpen && (
+                            <div
+                                className="absolute right-0 top-8 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                            >
+                                <button
+                                    onClick={() => {
+                                        onToggleActive(sequence.id, !sequence.is_active);
+                                        setMenuOpen(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                    <Power className="w-3.5 h-3.5" />
+                                    {sequence.is_active ? "Deactivate" : "Activate"}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (confirm("Delete this sequence? Active enrollments will be stopped and all data removed. This cannot be undone.")) {
+                                            onDelete(sequence.id);
+                                        }
+                                        setMenuOpen(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Delete
+                                </button>
+                            </div>
+                        )}
+                    </div>
 
                     <CardContent className="p-5 flex flex-col gap-3.5">
                         {/* Row 1: Title + Status */}
@@ -463,6 +520,30 @@ export function SequencesListClient({ clientId, sequences, hasAgent, tenantProfi
         [clientId, router]
     );
 
+    const handleDeleteSequence = useCallback(
+        async (sequenceId: string) => {
+            const result = await deleteSequence(sequenceId);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to delete sequence");
+            }
+        },
+        [router]
+    );
+
+    const handleToggleActive = useCallback(
+        async (sequenceId: string, active: boolean) => {
+            const result = await toggleSequenceActive(sequenceId, active);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to update sequence");
+            }
+        },
+        [router]
+    );
+
     return (
         <TooltipProvider delayDuration={200}>
             <motion.div
@@ -607,7 +688,13 @@ export function SequencesListClient({ clientId, sequences, hasAgent, tenantProfi
                         className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
                     >
                         {sequences.map((sequence) => (
-                            <SequenceCard key={sequence.id} sequence={sequence} clientId={clientId} />
+                            <SequenceCard
+                                key={sequence.id}
+                                sequence={sequence}
+                                clientId={clientId}
+                                onDelete={handleDeleteSequence}
+                                onToggleActive={handleToggleActive}
+                            />
                         ))}
                     </motion.div>
                 )}
