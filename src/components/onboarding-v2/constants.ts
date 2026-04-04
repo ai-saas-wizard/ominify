@@ -71,16 +71,14 @@ export const CONFIDENCE_CONFIG = {
 
 // ─── VOICE DISPLAY NAMES ───
 
-export const VOICE_NAMES: Record<string, string> = {
-    EXAVITQu4vr4xnSDxMaL: "Sarah",
-    jsCqWAovK2LkecY7zXl4: "Freya",
-    TxGEqnHWrfWFTfGW9XjX: "Josh",
-    flq6f7yk4E4fJM5XTYuZ: "Nova",
-    ZRwrL4id6j1HPGFkeCzO: "Sam (RE)",
-};
+import { VOICES, RE_DEFAULT_VOICE } from "@/lib/voices";
+
+export const VOICE_NAMES: Record<string, string> = Object.fromEntries(
+    VOICES.map((v) => [v.voiceId, v.name])
+);
 
 // ─── VERTICAL VOICE IDS ───
-export const RE_DEFAULT_VOICE_ID = "ZRwrL4id6j1HPGFkeCzO";
+export const RE_DEFAULT_VOICE_ID = RE_DEFAULT_VOICE.voiceId;
 
 // ─── ICON MAP ───
 // Maps agent icon string names to lucide-react icon component names.

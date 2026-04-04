@@ -26,6 +26,7 @@ import type {
     DeploymentProgress,
 } from "./types";
 import type { REInvestorFormData } from "@/lib/verticals/types";
+import { DEFAULT_VOICE } from "@/lib/voices";
 
 export function OnboardingV2Wizard({
     clientId,
@@ -395,8 +396,8 @@ export function OnboardingV2Wizard({
                             confidence: 0.7,
                             confidence_label: "recommended",
                             icon: "Bot",
-                            voice_id: "EXAVITQu4vr4xnSDxMaL",
-                            voice_name: "Sarah",
+                            voice_id: DEFAULT_VOICE.voiceId,
+                            voice_name: DEFAULT_VOICE.name,
                             sequence_summary: null,
                             override_variables: [],
                             custom_instructions: (changes.purpose as string) || null,

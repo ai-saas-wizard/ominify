@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getVertical } from "@/lib/verticals/registry";
 import { VOICE_NAMES } from "../constants";
+import { VoicePlayButton } from "@/components/ui/voice-selector";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 
 interface VerticalReviewProps {
@@ -151,11 +152,14 @@ export function VerticalReview({
                                     label="Persona"
                                     value={formData.agentPersonaName}
                                 />
-                                <DetailItem
-                                    icon={Volume2}
-                                    label="Voice"
-                                    value={voiceName}
-                                />
+                                <div className="flex items-center gap-2">
+                                    <Volume2 className="h-3.5 w-3.5 text-gray-400" />
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-gray-400">Voice: </span>
+                                        <span className="text-gray-700">{voiceName}</span>
+                                        <VoicePlayButton voiceId={agentDef.voiceId} />
+                                    </div>
+                                </div>
                                 <DetailItem
                                     icon={Calendar}
                                     label="Calendar"

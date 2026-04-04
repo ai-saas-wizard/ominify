@@ -8,6 +8,7 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
     const name = formData.get("name") as string;
     const systemPrompt = formData.get("systemPrompt") as string;
     const modelId = formData.get("model") as string;
+    const voiceId = formData.get("voiceId") as string;
 
     // 1. Get the client's VAPI key
     let vapiKey: string | undefined;
@@ -50,6 +51,14 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
         }
 
         payload.model = newModel;
+    }
+
+    // Update Voice
+    if (voiceId) {
+        payload.voice = {
+            provider: "11labs",
+            voiceId: voiceId,
+        };
     }
 
     const result = await updateAgent(agentId, payload, vapiKey);

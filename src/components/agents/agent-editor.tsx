@@ -1,6 +1,8 @@
 "use client";
 
-import { VapiAgent, VapiVoice } from "@/lib/vapi";
+import { VapiAgent } from "@/lib/vapi";
+import { VoiceSelector } from "@/components/ui/voice-selector";
+import { DEFAULT_VOICE } from "@/lib/voices";
 import { updateAgentAction } from "@/app/actions/agent-actions";
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -52,7 +54,7 @@ function SubmitButton() {
 
 interface AgentEditorProps {
   agent: VapiAgent;
-  voices: VapiVoice[];
+  voices?: unknown[];
   clientId: string;
 }
 
@@ -100,11 +102,14 @@ const tabVariants = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
+export const AgentEditor = ({ agent, clientId }: AgentEditorProps) => {
   const [activeTab, setActiveTab] = useState<string>("profile");
   const [showCopilot, setShowCopilot] = useState(false);
   const [saved, setSaved] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedVoiceId, setSelectedVoiceId] = useState(
+    agent.voice?.voiceId || DEFAULT_VOICE.voiceId
+  );
 
   const initialSystemPrompt =
     agent.model?.systemPrompt ||
@@ -272,27 +277,15 @@ export const AgentEditor = ({ agent, voices, clientId }: AgentEditorProps) => {
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="col-span-2 space-y-2">
                           <label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
                             Voice
                           </label>
-                          <div className="relative">
-                            <Mic className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                            <select
-                              name="voiceId"
-                              defaultValue={agent.voice?.voiceId}
-                              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 appearance-none transition-all"
-                            >
-                              {voices.map((voice) => (
-                                <option
-                                  key={voice.voiceId}
-                                  value={voice.voiceId}
-                                >
-                                  {voice.name} ({voice.provider})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          <VoiceSelector
+                            value={selectedVoiceId}
+                            onChange={setSelectedVoiceId}
+                            name="voiceId"
+                          />
                         </div>
                       </div>
                     </div>

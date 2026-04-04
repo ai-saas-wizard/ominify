@@ -10,6 +10,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { CATEGORY_CONFIG, CONFIDENCE_CONFIG } from "../constants";
+import { VoicePlayButton } from "@/components/ui/voice-selector";
 import type { SuggestedAgent } from "../types";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -134,9 +135,12 @@ export function AgentCard({ agent, onToggle, onCustomize }: AgentCardProps) {
             <AnimatedExpand expanded={expanded}>
                 <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
                     <div className="space-y-2">
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                             <span className="text-gray-400">Voice</span>
-                            <span>{agent.voice_name}</span>
+                            <span className="flex items-center gap-1.5">
+                                {agent.voice_name}
+                                <VoicePlayButton voiceId={agent.voice_id} />
+                            </span>
                         </div>
                         {agent.override_variables.length > 0 && (
                             <div>

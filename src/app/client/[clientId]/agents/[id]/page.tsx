@@ -1,4 +1,4 @@
-import { getAgent, listVoices } from "@/lib/vapi";
+import { getAgent } from "@/lib/vapi";
 import { AgentEditor } from "@/components/agents/agent-editor";
 import { PhoneNumberAssignment } from "@/components/agents/phone-number-assignment";
 import { AgentDetailHeader } from "@/components/agents/agent-detail-header";
@@ -24,10 +24,7 @@ export default async function AgentEditorPage(props: {
         if (data) vapiKey = data.vapi_key;
     }
 
-    const [agent, voices] = await Promise.all([
-        getAgent(params.id, vapiKey),
-        listVoices(vapiKey),
-    ]);
+    const agent = await getAgent(params.id, vapiKey);
 
     if (!agent) {
         notFound();
@@ -133,7 +130,7 @@ export default async function AgentEditorPage(props: {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Editor (main) */}
                         <div className="lg:col-span-2">
-                            <AgentEditor agent={agent} voices={voices} clientId={params.clientId} />
+                            <AgentEditor agent={agent} clientId={params.clientId} />
                         </div>
 
                         {/* Sidebar */}

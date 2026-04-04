@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import type { AIFieldMeta } from "@/components/onboarding/types";
 import type { AIAnalysisV2Result } from "@/components/onboarding-v2/types";
 import type { SuggestedAgent, AgentCategory } from "@/lib/agent-catalog";
+import { DEFAULT_VOICE } from "@/lib/voices";
 
 // ═══════════════════════════════════════════════════════════
 // V2 AI ANALYSIS — Website analysis + Dynamic Agent Fleet
@@ -357,8 +358,8 @@ function mapAIResponseToV2Result(ai: Record<string, unknown>): AIAnalysisV2Resul
             confidence: suggestion.confidence,
             confidence_label: confidenceLabel,
             icon,
-            voice_id: "EXAVITQu4vr4xnSDxMaL",
-            voice_name: "Sarah",
+            voice_id: DEFAULT_VOICE.voiceId,
+            voice_name: DEFAULT_VOICE.name,
             sequence_summary: suggestion.direction === "outbound" ? "Dynamic sequence" : null,
             override_variables: (suggestion.suggested_override_variables || []).map((name) => ({
                 name,
@@ -387,8 +388,8 @@ function mapAIResponseToV2Result(ai: Record<string, unknown>): AIAnalysisV2Resul
             confidence: 1.0,
             confidence_label: "highly_recommended",
             icon: "Phone",
-            voice_id: "EXAVITQu4vr4xnSDxMaL",
-            voice_name: "Sarah",
+            voice_id: DEFAULT_VOICE.voiceId,
+            voice_name: DEFAULT_VOICE.name,
             sequence_summary: null,
             override_variables: [
                 { name: "customer_name", description: "Caller's name if known", default_value: "", example: "" },
