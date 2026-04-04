@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { importPhoneNumber, updatePhoneNumber } from "@/lib/vapi";
+import { decrypt } from "@/lib/encryption";
 import { revalidatePath } from "next/cache";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.ominify.com";
@@ -52,13 +53,22 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
 
         const vapiKey = client?.vapi_key || undefined;
 
+        // Decrypt the auth token before sending to VAPI
+        let authToken: string;
+        try {
+            authToken = decrypt(twilioAccount.auth_token_encrypted);
+        } catch {
+            // Fallback: token may have been stored unencrypted before encryption was implemented
+            authToken = twilioAccount.auth_token_encrypted;
+        }
+
         // Import to VAPI
         const result = await importPhoneNumber(
             {
                 provider: "twilio",
                 number: phone.phone_number,
                 twilioAccountSid: resolvedSid,
-                twilioAuthToken: twilioAccount.auth_token_encrypted, // TODO: decrypt
+                twilioAuthToken: authToken,
                 name: phone.friendly_name || undefined,
                 serverUrl: `${APP_URL}/api/webhooks/vapi`,
             },

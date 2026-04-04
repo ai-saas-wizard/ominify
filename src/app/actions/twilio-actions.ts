@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { encrypt, decrypt } from "@/lib/encryption";
 import {
     createSubaccount,
     purchasePhoneNumber,
@@ -39,15 +40,25 @@ import { revalidatePath } from "next/cache";
 // Abstracts the difference between BYOT (type_a_byoa) and subaccount (type_b_subaccount)
 
 function getAccountCredentials(account: any): { sid: string; authToken: string } {
+    let authToken = "";
+    if (account.auth_token_encrypted) {
+        try {
+            authToken = decrypt(account.auth_token_encrypted);
+        } catch {
+            // Fallback: token may have been stored unencrypted before encryption was implemented
+            authToken = account.auth_token_encrypted;
+        }
+    }
+
     if (account.account_type === "type_a_byoa") {
         return {
             sid: account.external_account_sid,
-            authToken: account.auth_token_encrypted, // TODO: decrypt
+            authToken,
         };
     }
     return {
         sid: account.subaccount_sid,
-        authToken: account.auth_token_encrypted, // TODO: decrypt
+        authToken,
     };
 }
 
@@ -85,7 +96,7 @@ export async function provisionTwilioSubaccount(clientId: string) {
             client_id: clientId,
             account_type: "type_b_subaccount",
             subaccount_sid: subaccount.sid,
-            auth_token_encrypted: subaccount.authToken, // TODO: encrypt with AES-256-GCM
+            auth_token_encrypted: encrypt(subaccount.authToken),
             friendly_name: subaccount.friendlyName,
             status: "active",
         });
@@ -133,7 +144,7 @@ export async function connectExternalTwilioAccount(
             client_id: clientId,
             account_type: "type_a_byoa",
             external_account_sid: accountSid,
-            auth_token_encrypted: authToken, // TODO: encrypt with AES-256-GCM
+            auth_token_encrypted: encrypt(authToken),
             friendly_name: validation.friendlyName || `BYOT - ${accountSid.slice(-4)}`,
             status: "active",
         });
