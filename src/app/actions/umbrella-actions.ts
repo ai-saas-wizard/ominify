@@ -96,11 +96,13 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
     const name = formData.get("name") as string;
     const concurrencyLimit = parseInt(formData.get("concurrency_limit") as string);
     const notes = formData.get("notes") as string;
+    const vapiApiKey = formData.get("vapi_api_key") as string;
 
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (name) updateData.name = name;
     if (concurrencyLimit) updateData.concurrency_limit = concurrencyLimit;
     if (notes !== undefined) updateData.notes = notes;
+    if (vapiApiKey) updateData.vapi_api_key_encrypted = vapiApiKey;
 
     const { error } = await supabase
         .from("vapi_umbrellas")
@@ -109,6 +111,23 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
 
     if (error) {
         return { success: false, error: error.message };
+    }
+
+    // If VAPI key changed, propagate to all UMBRELLA clients using this umbrella
+    if (vapiApiKey) {
+        const { data: assignments } = await supabase
+            .from("tenant_vapi_assignments")
+            .select("client_id")
+            .eq("umbrella_id", umbrellaId)
+            .eq("is_active", true);
+
+        if (assignments && assignments.length > 0) {
+            const clientIds = assignments.map((a) => a.client_id);
+            await supabase
+                .from("clients")
+                .update({ vapi_key: vapiApiKey })
+                .in("id", clientIds);
+        }
     }
 
     revalidatePath("/admin/settings");

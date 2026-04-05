@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Eye, EyeOff, Key } from "lucide-react";
 import { updateUmbrella } from "@/app/actions/umbrella-actions";
 
 type UmbrellaData = {
@@ -10,12 +10,17 @@ type UmbrellaData = {
     concurrency_limit: number;
     current_concurrency: number;
     tenant_count: number;
+    vapi_api_key_encrypted?: string;
 };
 
 export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
     const [editing, setEditing] = useState(false);
+    const [editingKey, setEditingKey] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [keyLoading, setKeyLoading] = useState(false);
     const [concurrency, setConcurrency] = useState(umbrella.concurrency_limit);
+    const [vapiKey, setVapiKey] = useState(umbrella.vapi_api_key_encrypted || "");
+    const [showKey, setShowKey] = useState(false);
 
     const costEstimate = concurrency * 10;
     const usagePercent = umbrella.concurrency_limit > 0
@@ -37,6 +42,27 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
         }
     };
 
+    const handleKeySave = async () => {
+        if (!vapiKey.trim()) return;
+        setKeyLoading(true);
+        const formData = new FormData();
+        formData.set("vapi_api_key", vapiKey.trim());
+
+        const res = await updateUmbrella(umbrella.id, formData);
+        setKeyLoading(false);
+
+        if (res.success) {
+            setEditingKey(false);
+            setShowKey(false);
+        } else {
+            alert(res.error || "Failed to update VAPI key");
+        }
+    };
+
+    const maskedKey = vapiKey
+        ? `${vapiKey.slice(0, 8)}${"•".repeat(Math.max(vapiKey.length - 12, 4))}${vapiKey.slice(-4)}`
+        : "Not set";
+
     return (
         <div className="space-y-4">
             {/* Umbrella Info */}
@@ -48,6 +74,66 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                     Active
                 </span>
+            </div>
+
+            {/* VAPI API Key */}
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Key className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm font-medium text-gray-700">VAPI API Key</span>
+                    </div>
+                    {!editingKey && (
+                        <button
+                            onClick={() => setEditingKey(true)}
+                            className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                        >
+                            Edit
+                        </button>
+                    )}
+                </div>
+
+                {editingKey ? (
+                    <div className="space-y-2">
+                        <div className="relative">
+                            <input
+                                type={showKey ? "text" : "password"}
+                                value={vapiKey}
+                                onChange={(e) => setVapiKey(e.target.value)}
+                                placeholder="Enter VAPI API key..."
+                                className="w-full p-2 pr-10 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowKey(!showKey)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            >
+                                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                        </div>
+                        <div className="flex items-center gap-2 justify-end">
+                            <button
+                                onClick={() => { setEditingKey(false); setVapiKey(umbrella.vapi_api_key_encrypted || ""); setShowKey(false); }}
+                                className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleKeySave}
+                                disabled={keyLoading || !vapiKey.trim() || vapiKey === umbrella.vapi_api_key_encrypted}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                {keyLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                Save & Propagate
+                            </button>
+                        </div>
+                        <p className="text-xs text-amber-600">
+                            Saving will update the key for all {umbrella.tenant_count} active tenant{umbrella.tenant_count !== 1 ? "s" : ""}.
+                        </p>
+                    </div>
+                ) : (
+                    <p className="text-sm font-mono text-gray-500">{maskedKey}</p>
+                )}
             </div>
 
             {/* Concurrency Usage */}
