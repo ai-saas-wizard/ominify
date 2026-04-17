@@ -164,6 +164,32 @@ export async function backfillMissingCallTimestamps(clientId: string): Promise<n
         const vapiCalls = await listCalls(vapiKey);
         if (!vapiCalls.length) return 0;
 
+        // TEMPORARY diagnostic: dump the first call's shape so we can verify
+        // exactly which timestamp fields VAPI's list endpoint returns.
+        // Remove once we've seen the output in Vercel logs.
+        console.log(
+            '[VAPI BACKFILL] Sample call from listCalls (keys):',
+            Object.keys(vapiCalls[0] as any).sort()
+        );
+        console.log(
+            '[VAPI BACKFILL] Sample call timestamps:',
+            {
+                id: (vapiCalls[0] as any).id,
+                createdAt: (vapiCalls[0] as any).createdAt ?? null,
+                updatedAt: (vapiCalls[0] as any).updatedAt ?? null,
+                startedAt: (vapiCalls[0] as any).startedAt ?? null,
+                endedAt: (vapiCalls[0] as any).endedAt ?? null,
+                status: (vapiCalls[0] as any).status ?? null,
+                endedReason: (vapiCalls[0] as any).endedReason ?? null,
+            }
+        );
+        const withStartedAt = vapiCalls.filter(c => (c as any).startedAt).length;
+        const withCreatedAt = vapiCalls.filter(c => (c as any).createdAt).length;
+        console.log(
+            `[VAPI BACKFILL] Of ${vapiCalls.length} VAPI records: ` +
+            `${withStartedAt} have startedAt, ${withCreatedAt} have createdAt`
+        );
+
         const vapiById = new Map(
             vapiCalls.filter(c => c.startedAt).map(c => [c.id, c])
         );
