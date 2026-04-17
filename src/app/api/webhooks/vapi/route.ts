@@ -32,6 +32,10 @@ interface VapiWebhookPayload {
         type: string;
         status?: string;  // For status-update events: "ended", "in-progress", "ringing", etc.
         endedReason?: string;
+        // VAPI puts call timestamps at the message level on end-of-call-report
+        // and status-update events; they are NOT reliably present on message.call.
+        startedAt?: string;
+        endedAt?: string;
         artifact?: {
             messages?: Array<{
                 role: string;
@@ -285,7 +289,9 @@ async function persistCallRecord(
     assistant?: VapiWebhookPayload['message']['assistant'],
     endedReason?: string,
     rawPayload?: any,
-    actualStatus?: string  // NEW: The real status from message.status (not call.status)
+    actualStatus?: string,  // NEW: The real status from message.status (not call.status)
+    messageStartedAt?: string,  // message-level timestamp (preferred when present)
+    messageEndedAt?: string,
 ) {
     console.log('[VAPI WEBHOOK] persistCallRecord called for:', call.id);
     try {
@@ -316,12 +322,24 @@ async function persistCallRecord(
             }
         }
 
-        // Calculate duration
-        const startedAt = call.startedAt ? new Date(call.startedAt) : null;
-        const endedAt = call.endedAt ? new Date(call.endedAt) : null;
+        // Prefer message-level timestamps (VAPI puts them there on
+        // end-of-call-report / status-update); fall back to anything on
+        // the nested call object.
+        const resolvedStartedAt = messageStartedAt || call.startedAt || null;
+        const resolvedEndedAt = messageEndedAt || call.endedAt || null;
+
+        const startedAt = resolvedStartedAt ? new Date(resolvedStartedAt) : null;
+        const endedAt = resolvedEndedAt ? new Date(resolvedEndedAt) : null;
         const durationSeconds = startedAt && endedAt
             ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
             : 0;
+
+        if (!resolvedStartedAt) {
+            console.warn(
+                '[VAPI WEBHOOK] persistCallRecord: no startedAt anywhere in payload',
+                { callId: call.id, callKeys: Object.keys(call) }
+            );
+        }
 
         // Build transcript from artifact.messages if needed
         let transcript = call.transcript || artifact?.transcript || '';
@@ -353,8 +371,8 @@ async function persistCallRecord(
             // CRITICAL FIX: Use actualStatus (from message.status) if provided, not call.status
             // call.status often contains stale value like 'ringing' even when call has ended
             status: actualStatus || call.status || 'ended',
-            started_at: call.startedAt || null,
-            ended_at: call.endedAt || null,
+            started_at: resolvedStartedAt,
+            ended_at: resolvedEndedAt,
             // New columns (added via migration)
             customer_number: call.customer?.number || null,
             type: call.type || 'inboundPhoneCall',
@@ -446,7 +464,9 @@ async function handleEndOfCall(
     assistant?: VapiWebhookPayload['message']['assistant'],
     endedReason?: string,
     rawPayload?: any,
-    actualStatus?: string  // NEW: The real status from message.status
+    actualStatus?: string,  // NEW: The real status from message.status
+    messageStartedAt?: string,
+    messageEndedAt?: string,
 ) {
     console.log('[VAPI WEBHOOK] handleEndOfCall called for:', call.id);
     try {
@@ -455,7 +475,7 @@ async function handleEndOfCall(
         console.log('[VAPI WEBHOOK] Delete result:', deleteResult);
 
         // 2. Persist call record to Supabase (pass actualStatus = 'ended')
-        await persistCallRecord(call, artifact, assistant, endedReason, rawPayload, actualStatus || 'ended');
+        await persistCallRecord(call, artifact, assistant, endedReason, rawPayload, actualStatus || 'ended', messageStartedAt, messageEndedAt);
 
         // 3. Update Contact History (CRM)
         await updateContactAfterCall(call, artifact);
@@ -464,9 +484,13 @@ async function handleEndOfCall(
         if (call.orgId) {
             const clientId = await getClientIdByOrgId(call.orgId, call._assistantId);
             if (clientId) {
-                // Calculate duration
-                const startedAt = call.startedAt ? new Date(call.startedAt) : null;
-                const endedAt = call.endedAt ? new Date(call.endedAt) : null;
+                // Calculate duration — prefer message-level timestamps
+                const startedAt = messageStartedAt || call.startedAt
+                    ? new Date(messageStartedAt || call.startedAt!)
+                    : null;
+                const endedAt = messageEndedAt || call.endedAt
+                    ? new Date(messageEndedAt || call.endedAt!)
+                    : null;
                 const durationSeconds = startedAt && endedAt
                     ? Math.round((endedAt.getTime() - startedAt.getTime()) / 1000)
                     : 0;
@@ -773,6 +797,15 @@ export async function POST(request: Request) {
 
         console.log('[VAPI WEBHOOK] Processing call:', call.id, 'type:', messageType, 'message.status:', messageStatus, 'call.status:', call.status);
 
+        // One-time timestamp diagnostics: log where VAPI actually puts startedAt/endedAt
+        // so we can spot regressions if the payload shape shifts.
+        console.log('[VAPI WEBHOOK] Timestamp sources:', {
+            'message.startedAt': (message as any)?.startedAt || null,
+            'message.endedAt': (message as any)?.endedAt || null,
+            'call.startedAt': call.startedAt || null,
+            'call.endedAt': call.endedAt || null,
+        });
+
         // --- ACTIVE CALL TRACKING ---
         // Handle any event that has call data - insert if new, update if exists
 
@@ -793,7 +826,7 @@ export async function POST(request: Request) {
             if (messageStatus === 'ended') {
                 console.log('[VAPI WEBHOOK] Call ended via status-update:', call.id, 'reason:', messageEndedReason);
                 // CRITICAL: Pass messageStatus ('ended') so it gets persisted correctly
-                await handleEndOfCall(call, message?.artifact, message?.assistant, messageEndedReason || message?.endedReason, rawPayload, messageStatus);
+                await handleEndOfCall(call, message?.artifact, message?.assistant, messageEndedReason || message?.endedReason, rawPayload, messageStatus, message?.startedAt, message?.endedAt);
             } else if (messageStatus === 'in-progress') {
                 // Only track when call actually starts (not every status update)
                 await handleCallStarted(call);
@@ -806,7 +839,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ received: true });
         } else if (messageType === 'end-of-call-report') {
             // end-of-call-report is definitive - call has ended
-            await handleEndOfCall(call, message?.artifact, message?.assistant, message?.endedReason, rawPayload, 'ended');
+            await handleEndOfCall(call, message?.artifact, message?.assistant, message?.endedReason, rawPayload, 'ended', message?.startedAt, message?.endedAt);
         }
         // Skip other event types - we only care about start/end
 
