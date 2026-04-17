@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { buildInboundPrompt, buildOutboundPrompt, TenantProfileData } from "@/lib/prompt-templates";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 
@@ -87,10 +88,10 @@ export async function createTenantAssistants(clientId: string): Promise<{
     agents?: { inbound?: string; outbound?: string };
     error?: string;
 }> {
-    // 1. Fetch client + profile
+    // 1. Fetch client + profile (vapi_key is fetched separately via getClientVapiKey)
     const { data: client } = await supabase
         .from("clients")
-        .select("id, name, vapi_key, account_type")
+        .select("id, name, account_type")
         .eq("id", clientId)
         .single();
 
@@ -104,9 +105,8 @@ export async function createTenantAssistants(clientId: string): Promise<{
 
     if (!profile) return { success: false, error: "Tenant profile not found" };
 
-    // 2. Resolve VAPI API key
-    // For UMBRELLA clients, vapi_key is already set from the umbrella at creation time
-    const vapiKey = client.vapi_key;
+    // 2. Resolve VAPI API key (decrypted)
+    const vapiKey = await getClientVapiKey(clientId);
     if (!vapiKey) return { success: false, error: "No VAPI API key available" };
 
     const APP_URL = process.env.NEXT_PUBLIC_APP_URL

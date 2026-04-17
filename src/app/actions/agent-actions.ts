@@ -1,8 +1,8 @@
 "use server";
 
 import { updateAgent, getAgent, VapiAgent } from "@/lib/vapi";
-import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { getClientVapiKey } from "@/lib/client-secrets";
 
 export async function updateAgentAction(agentId: string, clientId: string, formData: FormData) {
     const name = formData.get("name") as string;
@@ -10,16 +10,8 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
     const modelId = formData.get("model") as string;
     const voiceId = formData.get("voiceId") as string;
 
-    // 1. Get the client's VAPI key
-    let vapiKey: string | undefined;
-    if (clientId) {
-        const { data } = await supabase
-            .from("clients")
-            .select("vapi_key")
-            .eq("id", clientId)
-            .single();
-        vapiKey = data?.vapi_key || undefined;
-    }
+    // 1. Resolve the client's VAPI key (decrypted)
+    const vapiKey = clientId ? await getClientVapiKey(clientId) : null;
     if (!vapiKey) {
         return { success: false, error: "No VAPI API key found for this client" };
     }

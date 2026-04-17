@@ -2,6 +2,45 @@
 
 import OpenAI from "openai";
 import type { AIAnalysisResult, AIFieldMeta } from "@/components/onboarding/types";
+import { auth } from "@clerk/nextjs/server";
+import { requireRateLimit, RATE_POLICIES, userActionKey } from "@/lib/rate-limit";
+
+// ─── SSRF GUARD ───
+// Block URLs pointing at the machine or the local network so an attacker
+// can't use this action to have OpenAI (or any downstream fetcher) retrieve
+// internal metadata endpoints, cloud provider metadata services, or intranet
+// apps and reflect the contents back through the analysis response.
+const BLOCKED_HOSTNAMES = new Set([
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "169.254.169.254",   // AWS / GCP / Azure metadata
+    "metadata.google.internal",
+    "metadata",
+]);
+
+const BLOCKED_IP_PATTERNS: RegExp[] = [
+    /^10\./,                          // 10.0.0.0/8
+    /^192\.168\./,                    // 192.168.0.0/16
+    /^172\.(1[6-9]|2\d|3[01])\./,     // 172.16.0.0/12
+    /^169\.254\./,                    // link-local
+    /^127\./,                         // loopback
+    /^0\./,                           // 0.0.0.0/8
+    /^fc00:/i,                        // IPv6 unique-local
+    /^fd[0-9a-f]{2}:/i,               // IPv6 unique-local
+    /^fe80:/i,                        // IPv6 link-local
+    /^::1$/,                          // IPv6 loopback
+];
+
+function isPrivateOrInternalHost(hostname: string): boolean {
+    const h = hostname.toLowerCase().trim();
+    if (BLOCKED_HOSTNAMES.has(h)) return true;
+    // Reject ".local" mDNS names and bare hostnames with no TLD.
+    if (h.endsWith(".local") || h.endsWith(".internal")) return true;
+    if (!h.includes(".")) return true;
+    return BLOCKED_IP_PATTERNS.some(re => re.test(h));
+}
 
 // ─── AI ANALYSIS USING RESPONSES API + WEB SEARCH ───
 
@@ -141,15 +180,33 @@ const RESPONSE_SCHEMA = {
  * bypassing 403/bot-blocking issues that affect server-side scraping.
  */
 export async function analyzeBusinessWebsite(websiteUrl: string): Promise<AIAnalysisResult> {
-    // Validate URL
+    // Rate limit per-user: AI onboarding is expensive (web search + GPT-4o).
+    const { userId } = await auth();
+    try {
+        requireRateLimit(userActionKey(userId, "analyzeBusinessWebsite"), RATE_POLICIES.aiOnboarding);
+    } catch (err: any) {
+        return { success: false, profile: null, fieldMeta: {}, error: err.message };
+    }
+
+    // Validate URL shape + block private/internal hostnames to prevent SSRF-style
+    // data exfil (e.g. http://169.254.169.254/ on AWS, http://localhost/admin, etc.)
+    let safeUrl: string;
     try {
         const parsed = new URL(websiteUrl);
-        if (!parsed.protocol.startsWith("http")) {
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
             return { success: false, profile: null, fieldMeta: {}, error: "Please enter a valid URL starting with http:// or https://" };
         }
+        if (isPrivateOrInternalHost(parsed.hostname)) {
+            return { success: false, profile: null, fieldMeta: {}, error: "Private, internal, or link-local URLs are not allowed" };
+        }
+        // Strip credentials, query, and fragment before passing to the LLM —
+        // avoids leaking auth info or query params to a third-party service.
+        safeUrl = `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
     } catch {
         return { success: false, profile: null, fieldMeta: {}, error: "Please enter a valid website URL" };
     }
+    // Use the sanitized URL for the rest of the flow.
+    websiteUrl = safeUrl;
 
     try {
         const openai = new OpenAI({

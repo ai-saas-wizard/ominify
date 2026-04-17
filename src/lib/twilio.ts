@@ -1,3 +1,4 @@
+import "server-only";
 import Twilio from "twilio";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;

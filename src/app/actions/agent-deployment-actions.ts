@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { getAgentTypeDefinition } from "@/lib/agent-catalog";
 import { buildAgentPrompt } from "@/lib/agent-prompt-builders";
 import { buildDynamicAgentPrompt } from "./dynamic-prompt-builder";
@@ -119,14 +120,15 @@ export async function deployAgentFleet(
         return { success: false, agents: [], error: saveResult?.error || "Failed to save profile" };
     }
 
-    // 2. Fetch client and profile
+    // 2. Fetch client + decrypted VAPI key
     const { data: client } = await supabase
         .from("clients")
-        .select("id, name, vapi_key, account_type")
+        .select("id, name, account_type")
         .eq("id", clientId)
         .single();
 
-    if (!client?.vapi_key) {
+    const clientVapiKey = await getClientVapiKey(clientId);
+    if (!client || !clientVapiKey) {
         return { success: false, agents: [], error: "Client or VAPI key not found" };
     }
 
@@ -198,7 +200,7 @@ export async function deployAgentFleet(
             // Create VAPI assistant
             const vapiAssistant = await createAssistant(
                 vapiPayload,
-                client.vapi_key
+                clientVapiKey
             );
 
             if (!vapiAssistant) {
@@ -434,14 +436,15 @@ export async function deployAgentFleetV2(
         return { success: false, agents: [], error: saveResult?.error || "Failed to save profile" };
     }
 
-    // 2. Fetch client and profile
+    // 2. Fetch client + decrypted VAPI key
     const { data: client } = await supabase
         .from("clients")
-        .select("id, name, vapi_key, account_type")
+        .select("id, name, account_type")
         .eq("id", clientId)
         .single();
 
-    if (!client?.vapi_key) {
+    const clientVapiKey = await getClientVapiKey(clientId);
+    if (!client || !clientVapiKey) {
         return { success: false, agents: [], error: "Client or VAPI key not found" };
     }
 
@@ -518,7 +521,7 @@ export async function deployAgentFleetV2(
             // Create VAPI assistant
             const vapiAssistant = await createAssistant(
                 vapiPayload,
-                client.vapi_key
+                clientVapiKey
             );
 
             if (!vapiAssistant) {

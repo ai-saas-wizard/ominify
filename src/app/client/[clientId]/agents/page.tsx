@@ -1,5 +1,6 @@
 import { listAgents, getOrgIdFromAgents, VapiAgent } from "@/lib/vapi";
 import { supabase } from "@/lib/supabase";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { Plus, Search, Bot, Phone, Activity } from "lucide-react";
 import Link from "next/link";
 import { AgentGrid } from "@/components/agents/agent-grid";
@@ -16,15 +17,15 @@ export default async function AgentsPage(props: {
     if (params.clientId) {
         const { data } = await supabase
             .from("clients")
-            .select("name, vapi_key, vapi_org_id, account_type")
+            .select("name, vapi_org_id, account_type")
             .eq("id", params.clientId)
             .single();
         if (data) {
-            vapiKey = data.vapi_key;
             clientName = "Agents";
             currentOrgId = data.vapi_org_id;
             accountType = data.account_type;
         }
+        vapiKey = (await getClientVapiKey(params.clientId)) || undefined;
     }
 
     let agents: VapiAgent[] = await listAgents(vapiKey);

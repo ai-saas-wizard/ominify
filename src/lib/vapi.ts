@@ -1,8 +1,13 @@
+import "server-only";
+
 const VAPI_BASE_URL = 'https://api.vapi.ai';
 
-// In a real multi-tenant app, this key would be fetched from the DB based on the logged-in client.
-// For this MVP/Test, we use the env var which holds the "Test Type A" key.
-const DEFAULT_KEY = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY;
+// Every VAPI call must explicitly pass an apiKey resolved from the tenant's
+// encrypted credentials via getClientVapiKey() (CUSTOM clients) or the umbrella
+// key (UMBRELLA clients). There is no fallback: if a caller doesn't have a key,
+// the call returns empty/null. The previous `NEXT_PUBLIC_VAPI_PUBLIC_KEY`
+// fallback was removed because a) NEXT_PUBLIC_ env vars ship to the browser,
+// and b) a "default" write-capable key is a cross-tenant footgun.
 
 export interface VapiAgent {
     id: string;
@@ -127,7 +132,7 @@ export async function createAssistant(
     payload: CreateAssistantPayload,
     apiKey?: string
 ): Promise<VapiAgent | null> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return null;
 
     try {
@@ -155,7 +160,7 @@ export async function createAssistant(
 // ─── LIST AGENTS ───
 
 export async function listAgents(apiKey?: string): Promise<VapiAgent[]> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return [];
 
     try {
@@ -190,7 +195,7 @@ export function getOrgIdFromAgents(agents: VapiAgent[]): string | null {
 }
 
 export async function getAgent(id: string, apiKey?: string): Promise<VapiAgent | null> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return null;
 
     try {
@@ -215,7 +220,7 @@ export async function getAgent(id: string, apiKey?: string): Promise<VapiAgent |
  * Uses DELETE request to /call/{id} endpoint
  */
 export async function endCall(callId: string, apiKey?: string): Promise<boolean> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return false;
 
     try {
@@ -239,7 +244,7 @@ export async function endCall(callId: string, apiKey?: string): Promise<boolean>
 }
 
 export async function updateAgent(id: string, data: Partial<VapiAgent>, apiKey?: string): Promise<VapiAgent | null> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) {
         console.error("updateAgent: No VAPI API key available");
         return null;
@@ -268,7 +273,7 @@ export async function updateAgent(id: string, data: Partial<VapiAgent>, apiKey?:
 }
 
 export async function listCalls(apiKey?: string, assistantId?: string): Promise<VapiCall[]> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return [];
 
     try {
@@ -332,7 +337,7 @@ export async function importPhoneNumber(
     payload: ImportPhoneNumberPayload,
     apiKey?: string
 ): Promise<{ data: VapiPhoneNumber | null; error?: string }> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return { data: null, error: "No VAPI API key available" };
 
     try {
@@ -365,7 +370,7 @@ export async function updatePhoneNumber(
     payload: { assistantId?: string | null; name?: string; serverUrl?: string },
     apiKey?: string
 ): Promise<VapiPhoneNumber | null> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return null;
 
     try {
@@ -396,7 +401,7 @@ export async function deleteVapiPhoneNumber(
     phoneNumberId: string,
     apiKey?: string
 ): Promise<boolean> {
-    const token = apiKey || DEFAULT_KEY;
+    const token = apiKey;
     if (!token) return false;
 
     try {
@@ -423,7 +428,7 @@ export async function deleteVapiPhoneNumber(
 // ─── LIST PHONE NUMBERS ───
 
 export async function listPhoneNumbers(apiKey?: string): Promise<VapiPhoneNumber[]> {
-    const key = apiKey || DEFAULT_KEY;
+    const key = apiKey;
     if (!key) return [];
 
     try {

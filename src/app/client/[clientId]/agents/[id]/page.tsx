@@ -6,6 +6,7 @@ import { ArrowLeft, Calendar, FileSpreadsheet, ExternalLink } from "lucide-react
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { getCalendarConnectionStatus } from "@/lib/google-calendar";
 import { getSheetsConnectionStatus } from "@/lib/google-sheets";
 
@@ -14,15 +15,9 @@ export default async function AgentEditorPage(props: {
 }) {
     const params = await props.params;
 
-    let vapiKey: string | undefined = undefined;
-    if (params.clientId) {
-        const { data } = await supabase
-            .from("clients")
-            .select("vapi_key")
-            .eq("id", params.clientId)
-            .single();
-        if (data) vapiKey = data.vapi_key;
-    }
+    const vapiKey = params.clientId
+        ? (await getClientVapiKey(params.clientId)) || undefined
+        : undefined;
 
     const agent = await getAgent(params.id, vapiKey);
 

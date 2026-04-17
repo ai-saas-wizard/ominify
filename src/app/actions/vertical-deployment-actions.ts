@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { revalidatePath } from "next/cache";
 import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import { getVertical } from "@/lib/verticals/registry";
@@ -35,14 +36,15 @@ export async function deployVerticalAgents(
             };
         }
 
-        // 1. Fetch client for VAPI key
+        // 1. Fetch client basic fields + decrypted VAPI key
         const { data: client } = await supabase
             .from("clients")
-            .select("id, name, vapi_key, account_type")
+            .select("id, name, account_type")
             .eq("id", clientId)
             .single();
 
-        if (!client?.vapi_key) {
+        const clientVapiKey = await getClientVapiKey(clientId);
+        if (!client || !clientVapiKey) {
             return {
                 success: false,
                 agents: [],
@@ -146,7 +148,7 @@ export async function deployVerticalAgents(
         try {
             vapiAssistant = await createAssistant(
                 vapiPayload,
-                client.vapi_key
+                clientVapiKey
             );
         } catch (vapiError: any) {
             console.error("[VERTICAL] VAPI creation error:", vapiError);

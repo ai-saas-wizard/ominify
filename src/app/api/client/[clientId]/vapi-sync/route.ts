@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getVapiOrgId } from "@/lib/vapi-org";
+import { getClientVapiKey } from "@/lib/client-secrets";
 
 // POST - Sync Vapi Org ID for a client
 export async function POST(
@@ -10,21 +11,17 @@ export async function POST(
     const { clientId } = await params;
 
     try {
-        // Get client's Vapi key
-        const { data: client } = await supabase
-            .from('clients')
-            .select('vapi_key')
-            .eq('id', clientId)
-            .single();
+        // Resolve client's Vapi key (decrypted)
+        const vapiKey = await getClientVapiKey(clientId);
 
-        if (!client?.vapi_key) {
+        if (!vapiKey) {
             return NextResponse.json({
                 error: 'No Vapi API key configured for this client'
             }, { status: 400 });
         }
 
         // Fetch org ID from Vapi
-        const orgId = await getVapiOrgId(client.vapi_key);
+        const orgId = await getVapiOrgId(vapiKey);
 
         if (!orgId) {
             return NextResponse.json({

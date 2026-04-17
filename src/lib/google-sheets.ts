@@ -1,5 +1,8 @@
+import "server-only";
 import { google } from "googleapis";
 import { supabase } from "@/lib/supabase";
+import { encrypt } from "@/lib/encryption";
+import { safeDecrypt } from "@/lib/encryption-helpers";
 import { RE_SHEET_HEADERS } from "@/lib/verticals/real-estate-investor/sheets-schema";
 
 // ═══════════════════════════════════════════════════════════
@@ -45,8 +48,8 @@ export async function exchangeSheetsCodeForTokens(
     const { error } = await supabase.from("tenant_google_sheets").upsert(
         {
             client_id: clientId,
-            google_access_token_encrypted: tokens.access_token,
-            google_refresh_token_encrypted: tokens.refresh_token,
+            google_access_token_encrypted: tokens.access_token ? encrypt(tokens.access_token) : null,
+            google_refresh_token_encrypted: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
             token_expires_at: tokens.expiry_date
                 ? new Date(tokens.expiry_date).toISOString()
                 : null,
@@ -87,9 +90,12 @@ async function getSheetsConfig(
 
     if (error || !data) return null;
 
+    const accessToken = safeDecrypt(data.google_access_token_encrypted);
+    if (!accessToken) return null;
+
     return {
-        access_token: data.google_access_token_encrypted,
-        refresh_token: data.google_refresh_token_encrypted,
+        access_token: accessToken,
+        refresh_token: safeDecrypt(data.google_refresh_token_encrypted),
         sheet_id: data.google_sheet_id,
         sheet_url: data.google_sheet_url,
         token_expires_at: data.token_expires_at,
@@ -117,11 +123,13 @@ async function getAuthenticatedSheetsClient(clientId: string) {
         try {
             const { credentials } =
                 await oauth2Client.refreshAccessToken();
-            // Update stored tokens
+            // Update stored tokens — re-encrypt before writing back
             await supabase
                 .from("tenant_google_sheets")
                 .update({
-                    google_access_token_encrypted: credentials.access_token,
+                    google_access_token_encrypted: credentials.access_token
+                        ? encrypt(credentials.access_token)
+                        : null,
                     token_expires_at: credentials.expiry_date
                         ? new Date(credentials.expiry_date).toISOString()
                         : null,

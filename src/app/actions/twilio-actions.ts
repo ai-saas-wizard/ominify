@@ -34,6 +34,7 @@ import {
     checkCampaignStatus,
 } from "@/lib/twilio";
 import { deleteVapiPhoneNumber } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { revalidatePath } from "next/cache";
 
 // ─── Account Credentials Helper ────────────────────────────────────────────
@@ -368,13 +369,8 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
         // Clean up VAPI phone number if imported
         if (phoneRecord.vapi_phone_number_id) {
             try {
-                const { data: client } = await supabase
-                    .from("clients")
-                    .select("vapi_key")
-                    .eq("id", clientId)
-                    .single();
-
-                await deleteVapiPhoneNumber(phoneRecord.vapi_phone_number_id, client?.vapi_key || undefined);
+                const vapiKey = (await getClientVapiKey(clientId)) || undefined;
+                await deleteVapiPhoneNumber(phoneRecord.vapi_phone_number_id, vapiKey);
             } catch (err) {
                 console.error("Failed to delete VAPI phone number:", err);
             }

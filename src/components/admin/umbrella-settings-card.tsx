@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Save, Eye, EyeOff, Key } from "lucide-react";
+import { Loader2, Save, Key } from "lucide-react";
 import { updateUmbrella } from "@/app/actions/umbrella-actions";
 
+// The raw VAPI key never reaches the browser.
+// The server decrypts and derives `key_last_four` + `has_key`; we render only
+// a masked preview and accept a new key via an empty password input on edit.
 type UmbrellaData = {
     id: string;
     name: string;
     concurrency_limit: number;
     current_concurrency: number;
     tenant_count: number;
-    vapi_api_key_encrypted?: string;
+    key_last_four: string | null;
+    has_key: boolean;
 };
 
 export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
@@ -19,8 +23,9 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
     const [loading, setLoading] = useState(false);
     const [keyLoading, setKeyLoading] = useState(false);
     const [concurrency, setConcurrency] = useState(umbrella.concurrency_limit);
-    const [vapiKey, setVapiKey] = useState(umbrella.vapi_api_key_encrypted || "");
-    const [showKey, setShowKey] = useState(false);
+    // Empty by default — we never pre-populate with the current key because
+    // we don't have it on the client and never want to.
+    const [newVapiKey, setNewVapiKey] = useState("");
 
     const costEstimate = concurrency * 10;
     const usagePercent = umbrella.concurrency_limit > 0
@@ -43,24 +48,24 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
     };
 
     const handleKeySave = async () => {
-        if (!vapiKey.trim()) return;
+        if (!newVapiKey.trim()) return;
         setKeyLoading(true);
         const formData = new FormData();
-        formData.set("vapi_api_key", vapiKey.trim());
+        formData.set("vapi_api_key", newVapiKey.trim());
 
         const res = await updateUmbrella(umbrella.id, formData);
         setKeyLoading(false);
 
         if (res.success) {
             setEditingKey(false);
-            setShowKey(false);
+            setNewVapiKey("");
         } else {
             alert(res.error || "Failed to update VAPI key");
         }
     };
 
-    const maskedKey = vapiKey
-        ? `${vapiKey.slice(0, 8)}${"•".repeat(Math.max(vapiKey.length - 12, 4))}${vapiKey.slice(-4)}`
+    const maskedKey = umbrella.has_key && umbrella.key_last_four
+        ? `••••••••••••${umbrella.key_last_four}`
         : "Not set";
 
     return (
@@ -88,39 +93,44 @@ export function UmbrellaSettingsCard({ umbrella }: { umbrella: UmbrellaData }) {
                             onClick={() => setEditingKey(true)}
                             className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
                         >
-                            Edit
+                            {umbrella.has_key ? "Replace" : "Set"}
                         </button>
                     )}
                 </div>
 
                 {editingKey ? (
                     <div className="space-y-2">
-                        <div className="relative">
-                            <input
-                                type={showKey ? "text" : "password"}
-                                value={vapiKey}
-                                onChange={(e) => setVapiKey(e.target.value)}
-                                placeholder="Enter VAPI API key..."
-                                className="w-full p-2 pr-10 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowKey(!showKey)}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        <input
+                            type="password"
+                            value={newVapiKey}
+                            onChange={(e) => setNewVapiKey(e.target.value)}
+                            placeholder="Paste new VAPI API key…"
+                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-mono"
+                            autoComplete="off"
+                            autoFocus
+                        />
+                        <p className="text-xs text-gray-500">
+                            You can retrieve your key from the{" "}
+                            <a
+                                href="https://dashboard.vapi.ai"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-emerald-600 hover:underline"
                             >
-                                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                        </div>
+                                VAPI dashboard
+                            </a>
+                            . The existing key is not shown here — once saved, it's only visible as the last 4 characters.
+                        </p>
                         <div className="flex items-center gap-2 justify-end">
                             <button
-                                onClick={() => { setEditingKey(false); setVapiKey(umbrella.vapi_api_key_encrypted || ""); setShowKey(false); }}
+                                onClick={() => { setEditingKey(false); setNewVapiKey(""); }}
                                 className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleKeySave}
-                                disabled={keyLoading || !vapiKey.trim() || vapiKey === umbrella.vapi_api_key_encrypted}
+                                disabled={keyLoading || !newVapiKey.trim()}
                                 className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
                             >
                                 {keyLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}

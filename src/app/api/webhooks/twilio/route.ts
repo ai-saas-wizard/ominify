@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { verifyTwilioSignature } from "@/lib/webhook-signatures";
+import { safeDecrypt } from "@/lib/encryption-helpers";
 
 // Twilio webhook handler for inbound SMS, delivery status, and voice events
 // Twilio sends webhooks as application/x-www-form-urlencoded POST requests
+
+// Feature flag: set to "true" to reject requests with bad/missing signatures.
+const ENFORCE_TWILIO_SIGNATURE = process.env.ENFORCE_WEBHOOK_SIGNATURES === "true";
+const APP_BASE_URL = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "";
 
 export async function POST(request: NextRequest) {
     try {
@@ -27,6 +33,36 @@ export async function POST(request: NextRequest) {
         if (!tenantId) {
             console.error("[TWILIO WEBHOOK] Missing tenantId");
             return NextResponse.json({ error: "Missing tenantId" }, { status: 400 });
+        }
+
+        // Verify Twilio signature using the tenant's own auth token.
+        // Twilio signs against the PUBLIC URL — behind a proxy (Vercel etc)
+        // `request.url` may be the internal URL, so we reconstruct from
+        // APP_BASE_URL + pathname + search.
+        const sigHeader = request.headers.get("x-twilio-signature");
+        let signatureValid = false;
+        if (sigHeader && APP_BASE_URL) {
+            const { data: twilioAccount } = await supabase
+                .from("tenant_twilio_accounts")
+                .select("auth_token_encrypted")
+                .eq("client_id", tenantId)
+                .single();
+            const authToken = twilioAccount
+                ? safeDecrypt(twilioAccount.auth_token_encrypted) || undefined
+                : undefined;
+            const publicUrl = `${APP_BASE_URL.replace(/\/$/, "")}${url.pathname}${url.search}`;
+            signatureValid = verifyTwilioSignature(sigHeader, publicUrl, body, authToken);
+        }
+        if (!signatureValid) {
+            console.warn("[TWILIO WEBHOOK] Signature check failed", {
+                hasHeader: !!sigHeader,
+                hasBaseUrl: !!APP_BASE_URL,
+                enforced: ENFORCE_TWILIO_SIGNATURE,
+                tenantId,
+            });
+            if (ENFORCE_TWILIO_SIGNATURE) {
+                return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+            }
         }
 
         switch (type) {

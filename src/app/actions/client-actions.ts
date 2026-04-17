@@ -2,7 +2,10 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
-import { getActiveUmbrella } from "@/app/actions/umbrella-actions";
+import { getActiveUmbrellaWithRawKey } from "@/app/actions/umbrella-actions";
+import { encrypt } from "@/lib/encryption";
+import { isEncrypted } from "@/lib/encryption-helpers";
+import { auditLog } from "@/lib/audit";
 
 export async function createClientAction(formData: FormData) {
     const name = formData.get("name") as string;
@@ -22,13 +25,21 @@ export async function createClientAction(formData: FormData) {
             name,
             email,
             account_type: type,
-            vapi_key,
+            vapi_key: encrypt(vapi_key),
             clerk_id: placeholderClerkId,
         }).select("id").single();
 
         if (error) {
             console.error("Create Client Error:", error);
             return { success: false, error: error.message };
+        }
+
+        if (newClient?.id) {
+            await auditLog(
+                "create_client",
+                { type: "client", id: newClient.id },
+                { accountType: "CUSTOM", name }
+            );
         }
 
         revalidatePath("/admin/clients");
@@ -43,20 +54,27 @@ export async function createClientAction(formData: FormData) {
             return { success: false, error: "Client name is required" };
         }
 
-        // Auto-resolve the single active umbrella
-        const umbrella = await getActiveUmbrella();
+        // Auto-resolve the single active umbrella (needs raw ciphertext to copy)
+        const umbrella = await getActiveUmbrellaWithRawKey();
         if (!umbrella) {
             return { success: false, error: "No umbrella configured. Create one in Admin → Settings first." };
         }
 
+        // Defensive: if the umbrella row is still legacy plaintext (pre-migration),
+        // encrypt it in place before copying to avoid writing plaintext to new rows.
+        const umbrellaKey = umbrella.vapi_api_key_encrypted;
+        const vapiKeyCiphertext = umbrellaKey
+            ? (isEncrypted(umbrellaKey) ? umbrellaKey : encrypt(umbrellaKey))
+            : null;
+
         const placeholderClerkId = `pending_${crypto.randomUUID()}`;
 
-        // Create the client record with umbrella's VAPI credentials
+        // Create the client record with umbrella's VAPI credentials (already ciphertext)
         const { data: newClient, error: clientError } = await supabase.from("clients").insert({
             name,
             email,
             account_type: "UMBRELLA",
-            vapi_key: umbrella.vapi_api_key_encrypted,   // Use umbrella's VAPI key
+            vapi_key: vapiKeyCiphertext,
             vapi_org_id: umbrella.vapi_org_id,
             clerk_id: placeholderClerkId,
         }).select("id").single();
@@ -114,6 +132,12 @@ export async function createClientAction(formData: FormData) {
                 invited_by: "admin",
             });
         }
+
+        await auditLog(
+            "create_client",
+            { type: "client", id: clientId },
+            { accountType: "UMBRELLA", name, umbrellaId: umbrella.id }
+        );
 
         revalidatePath("/admin/clients");
         return { success: true, clientId };

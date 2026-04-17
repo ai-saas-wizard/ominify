@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { listAgents } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { WebhookManager } from "@/components/webhooks/webhook-manager";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -8,7 +9,7 @@ import { PageTransition } from "@/components/ui/page-transition";
 async function getClient(clientId: string) {
     const { data } = await supabase
         .from('clients')
-        .select('*')
+        .select('id, name, account_type, vapi_org_id')
         .eq('id', clientId)
         .single();
     return data;
@@ -42,7 +43,8 @@ export default async function WebhooksSettingsPage({
         );
     }
 
-    const agents = await getAgentsFromVapi(client.vapi_key);
+    const vapiKey = await getClientVapiKey(clientId);
+    const agents = await getAgentsFromVapi(vapiKey);
 
     return (
         <PageTransition>

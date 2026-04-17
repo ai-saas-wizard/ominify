@@ -8,7 +8,7 @@ import { SyncUsageButton } from "@/components/admin/sync-usage-button";
 import { UmbrellaSettingsCard } from "@/components/admin/umbrella-settings-card";
 import { AgentDefaultSettingsEditor } from "@/components/admin/agent-default-settings-editor";
 import { getAllAdmins } from "@/lib/auth";
-import { getActiveUmbrellaWithStats } from "@/app/actions/umbrella-actions";
+import { getActiveUmbrellaForAdminView } from "@/app/actions/umbrella-actions";
 import { getAllAgentDefaultSettings } from "@/app/actions/agent-default-settings-actions";
 
 // Get platform settings from database or env
@@ -65,7 +65,7 @@ export default async function AdminSettingsPage() {
     const settings = await getPlatformSettings();
     const clients = await getAllClientsData();
     const admins = await getAllAdmins();
-    const umbrella = await getActiveUmbrellaWithStats();
+    const umbrella = await getActiveUmbrellaForAdminView();
     const agentDefaults = await getAllAgentDefaultSettings();
 
     async function updateDefaultPricing(formData: FormData) {

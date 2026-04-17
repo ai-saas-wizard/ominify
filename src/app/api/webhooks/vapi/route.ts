@@ -4,7 +4,7 @@ import { recordCallUsage } from "@/lib/billing";
 import { extractContactInfo } from "@/lib/openai-extractor";
 import { getSheetsConnectionStatus, appendLeadRow } from "@/lib/google-sheets";
 import { buildSheetRow } from "@/lib/verticals/real-estate-investor/sheets-schema";
-import { verifyVapiSignature } from "@/lib/webhook-signatures";
+import { verifyVapiSecret } from "@/lib/webhook-signatures";
 import { canPlaceCall } from "@/lib/access";
 import { getClientVapiKey } from "@/lib/client-secrets";
 import { endCall } from "@/lib/vapi";
@@ -717,19 +717,20 @@ async function forwardToWebhook(
 
 export async function POST(request: Request) {
     try {
-        // Read raw body first so we can verify the HMAC signature before parsing.
+        // Read raw body once — we still need it for downstream JSON parsing.
+        // Per VAPI docs, the "Server URL Secret" is sent as a plain shared
+        // secret in either `Authorization: Bearer <secret>` (standard) or
+        // `X-Vapi-Secret: <secret>` (legacy). Accept both.
         const rawBody = await request.text();
-        const signature =
-            request.headers.get("x-vapi-signature") ||
-            request.headers.get("x-vapi-secret") ||
-            null;
+        const authHeader = request.headers.get("authorization");
+        const secretHeader = request.headers.get("x-vapi-secret");
 
-        const signatureValid = verifyVapiSignature(rawBody, signature, VAPI_WEBHOOK_SECRET);
-        if (!signatureValid) {
-            // Structured log so ops can spot expected-signature-mismatch during rollout.
-            console.warn("[VAPI WEBHOOK] Signature check failed", {
-                hasHeader: !!signature,
-                hasSecret: !!VAPI_WEBHOOK_SECRET,
+        const secretValid = verifyVapiSecret(authHeader, secretHeader, VAPI_WEBHOOK_SECRET);
+        if (!secretValid) {
+            console.warn("[VAPI WEBHOOK] Secret check failed", {
+                hasAuthHeader: !!authHeader,
+                hasSecretHeader: !!secretHeader,
+                hasExpectedSecret: !!VAPI_WEBHOOK_SECRET,
                 enforced: ENFORCE_VAPI_SIGNATURE,
             });
             if (ENFORCE_VAPI_SIGNATURE) {

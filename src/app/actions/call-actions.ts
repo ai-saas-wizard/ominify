@@ -2,22 +2,18 @@
 
 import { supabase } from "@/lib/supabase";
 import { endCall } from "@/lib/vapi";
+import { getClientVapiKey } from "@/lib/client-secrets";
 
 export async function endActiveCall(clientId: string, vapiCallId: string) {
     try {
-        // Get the client's Vapi API key
-        const { data: client, error: clientError } = await supabase
-            .from("clients")
-            .select("vapi_key")
-            .eq("id", clientId)
-            .single();
-
-        if (clientError || !client?.vapi_key) {
+        // Resolve the client's Vapi API key (decrypted)
+        const vapiKey = await getClientVapiKey(clientId);
+        if (!vapiKey) {
             return { success: false, error: "Client not found or missing Vapi API key" };
         }
 
         // End the call via Vapi API
-        const success = await endCall(vapiCallId, client.vapi_key);
+        const success = await endCall(vapiCallId, vapiKey);
 
         if (!success) {
             return { success: false, error: "Failed to end call via Vapi API" };

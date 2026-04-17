@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase";
 import { importPhoneNumber, updatePhoneNumber } from "@/lib/vapi";
 import { decrypt } from "@/lib/encryption";
+import { getClientVapiKey } from "@/lib/client-secrets";
 import { revalidatePath } from "next/cache";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.ominify.com";
@@ -44,14 +45,8 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
             ? twilioAccount.external_account_sid
             : twilioAccount.subaccount_sid;
 
-        // Resolve VAPI key
-        const { data: client } = await supabase
-            .from("clients")
-            .select("vapi_key")
-            .eq("id", clientId)
-            .single();
-
-        const vapiKey = client?.vapi_key || undefined;
+        // Resolve VAPI key (decrypted)
+        const vapiKey = (await getClientVapiKey(clientId)) || undefined;
 
         // Decrypt the auth token before sending to VAPI
         let authToken: string;
@@ -125,14 +120,8 @@ export async function assignPhoneNumberToAgent(
             return { success: false, error: "Agent not found" };
         }
 
-        // Get VAPI key
-        const { data: client } = await supabase
-            .from("clients")
-            .select("vapi_key")
-            .eq("id", clientId)
-            .single();
-
-        const vapiKey = client?.vapi_key || undefined;
+        // Get VAPI key (decrypted)
+        const vapiKey = (await getClientVapiKey(clientId)) || undefined;
 
         // If agent already has a different number → unassign the old one
         const { data: existingPhoneForAgent } = await supabase
@@ -223,18 +212,13 @@ export async function unassignPhoneNumberFromAgent(clientId: string, phoneNumber
             return { success: false, error: "Phone number not found" };
         }
 
-        // Clear VAPI assistantId
+        // Clear VAPI assistantId (decrypted key)
         if (phone.vapi_phone_number_id) {
-            const { data: client } = await supabase
-                .from("clients")
-                .select("vapi_key")
-                .eq("id", clientId)
-                .single();
-
+            const vapiKey = (await getClientVapiKey(clientId)) || undefined;
             await updatePhoneNumber(
                 phone.vapi_phone_number_id,
                 { assistantId: null },
-                client?.vapi_key || undefined
+                vapiKey
             );
         }
 

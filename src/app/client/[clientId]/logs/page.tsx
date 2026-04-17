@@ -1,6 +1,8 @@
-import { listCalls, listPhoneNumbers, VapiCall } from "@/lib/vapi";
+import { listPhoneNumbers, VapiCall } from "@/lib/vapi";
 import { LogsPageClient } from "@/components/logs/logs-page-client";
 import { supabase } from "@/lib/supabase";
+import { getClientVapiKey } from "@/lib/client-secrets";
+import { syncVapiCallsForClient } from "@/app/actions/vapi-sync-actions";
 
 // Agent record from Supabase (scoped to client)
 export interface ClientAgent {
@@ -132,117 +134,8 @@ async function fetchClientAgents(clientId: string): Promise<ClientAgent[]> {
     return (data || []) as ClientAgent[];
 }
 
-// Sync calls from VAPI API into Supabase for CUSTOM clients (fallback for missed webhooks)
-async function syncVapiCallsForCustomClient(
-    clientId: string,
-    vapiKey: string,
-    agents: ClientAgent[]
-) {
-    try {
-        const vapiCalls = await listCalls(vapiKey);
-        if (!vapiCalls.length) return;
-
-        // Auto-create missing agents from VAPI assistants
-        const existingVapiIds = new Set(agents.map(a => a.vapi_id));
-        const missingAssistantIds = [...new Set(
-            vapiCalls.map(c => c.assistantId).filter(id => id && !existingVapiIds.has(id))
-        )];
-
-        for (const assistantId of missingAssistantIds) {
-            try {
-                // Fetch assistant name from VAPI
-                const res = await fetch(`https://api.vapi.ai/assistant/${assistantId}`, {
-                    headers: { Authorization: `Bearer ${vapiKey}` }
-                });
-                const assistantName = res.ok ? (await res.json()).name : `Agent ${assistantId.slice(0, 8)}`;
-
-                const { data: newAgent } = await supabase
-                    .from('agents')
-                    .insert({
-                        client_id: clientId,
-                        vapi_id: assistantId,
-                        name: assistantName,
-                        agent_type: 'custom',
-                    })
-                    .select('id, vapi_id, name, agent_type')
-                    .single();
-
-                if (newAgent) {
-                    agents.push(newAgent as ClientAgent);
-                    console.log(`[VAPI SYNC] Auto-created agent: ${assistantName} (${assistantId})`);
-                }
-            } catch (err) {
-                console.error(`[VAPI SYNC] Failed to create agent for ${assistantId}:`, err);
-            }
-        }
-
-        // Build assistantId → internal agent UUID map (includes newly created agents)
-        const agentMap = new Map(agents.map(a => [a.vapi_id, a.id]));
-
-        const callRows = vapiCalls.map(call => {
-            // Build transcript from messages if no flat transcript
-            let transcript = call.transcript || '';
-            if (!transcript && call.messages?.length) {
-                transcript = call.messages
-                    .filter(m => m.role === 'user' || m.role === 'bot' || m.role === 'assistant')
-                    .map(m => `${m.role}: ${m.message}`)
-                    .join('\n');
-            }
-
-            // VAPI API doesn't always return durationSeconds — calculate from timestamps
-            let durationSeconds = call.durationSeconds || 0;
-            if (!durationSeconds && call.startedAt && call.endedAt) {
-                durationSeconds = Math.round(
-                    (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000
-                );
-            }
-
-            return {
-                client_id: clientId,
-                vapi_call_id: call.id,
-                agent_id: agentMap.get(call.assistantId) || null,
-                status: call.status || 'ended',
-                type: call.type || 'inboundPhoneCall',
-                ended_reason: call.endedReason || null,
-                transcript: transcript || null,
-                summary: call.analysis?.summary || null,
-                structured_data: call.analysis?.structuredData || {},
-                recording_url: call.recordingUrl || null,
-                customer_number: call.customer?.number || null,
-                cost: call.cost || 0,
-                duration_seconds: durationSeconds,
-                started_at: call.startedAt || null,
-                ended_at: call.endedAt || null,
-            };
-        });
-
-        // Upsert in batches of 50 — updates existing rows so VAPI data stays fresh
-        for (let i = 0; i < callRows.length; i += 50) {
-            const batch = callRows.slice(i, i + 50);
-            const { error } = await supabase
-                .from('calls')
-                .upsert(batch, { onConflict: 'vapi_call_id', ignoreDuplicates: false });
-
-            if (error) {
-                console.error('[VAPI SYNC] Batch upsert error:', error.message);
-            }
-        }
-
-        // Link all unlinked calls for this client to the correct agent
-        // For single-agent clients, assign all orphaned calls to that agent
-        if (agents.length === 1) {
-            await supabase
-                .from('calls')
-                .update({ agent_id: agents[0].id })
-                .eq('client_id', clientId)
-                .is('agent_id', null);
-        }
-
-        console.log(`[VAPI SYNC] Synced ${callRows.length} calls for client ${clientId}`);
-    } catch (error) {
-        console.error('[VAPI SYNC] Error syncing calls:', error);
-    }
-}
+// Sync logic lives in src/app/actions/vapi-sync-actions.ts so the raw VAPI key
+// is resolved server-action-internally and never threaded through this file.
 
 export default async function LogsPage({
     params,
@@ -258,19 +151,21 @@ export default async function LogsPage({
     let accountType: string | undefined = undefined;
 
     if (clientId) {
-        const { data } = await supabase.from('clients').select('vapi_key, account_type').eq('id', clientId).single();
+        const { data } = await supabase.from('clients').select('account_type').eq('id', clientId).single();
         if (data) {
-            vapiKey = data.vapi_key;
             accountType = data.account_type;
         }
+        vapiKey = (await getClientVapiKey(clientId)) || undefined;
     }
 
     // Fetch agents first (needed for both sync and display)
     const clientAgents = await fetchClientAgents(clientId);
 
-    // For CUSTOM clients, sync calls from VAPI API before reading from Supabase
-    if (accountType === 'CUSTOM' && vapiKey) {
-        await syncVapiCallsForCustomClient(clientId, vapiKey, clientAgents);
+    // For CUSTOM clients, sync calls from VAPI API before reading from Supabase.
+    // The server action resolves the decrypted VAPI key internally — we never
+    // pass it through this page component.
+    if (accountType === 'CUSTOM') {
+        await syncVapiCallsForClient(clientId, clientAgents);
     }
 
     // Fetch calls from Supabase (now includes any synced VAPI calls) + phone numbers from Vapi
