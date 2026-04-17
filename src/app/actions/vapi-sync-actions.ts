@@ -1,7 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
-import { listCalls, getCall } from "@/lib/vapi";
+import { listCalls } from "@/lib/vapi";
 import { getClientVapiKey } from "@/lib/client-secrets";
 
 // Agent record from Supabase (scoped to client). Mirrors ClientAgent in logs/page.
@@ -135,67 +135,91 @@ export async function syncVapiCallsForClient(
 }
 
 /**
- * Repair rows in `calls` where `started_at` is null by fetching the real
- * timestamp from VAPI. Runs opportunistically on page load — capped at 50
- * rows per invocation so a long tail of missing data can't tank render time.
+ * Repair rows in `calls` where `started_at` is null by bulk-fetching call
+ * data from VAPI's list endpoint (up to 1000 per request) and matching
+ * against our stored `vapi_call_id`s. One network round-trip instead of
+ * N per-call fetches — essential when a tenant has hundreds of null rows.
  *
  * Works for both UMBRELLA and CUSTOM clients because `getClientVapiKey`
  * returns the umbrella key for UMBRELLA tenants (credentials copied on
- * client creation).
+ * client creation). Returns the number of rows repaired.
  */
 export async function backfillMissingCallTimestamps(clientId: string): Promise<number> {
     try {
         const vapiKey = await getClientVapiKey(clientId);
         if (!vapiKey) return 0;
 
-        const { data: rows, error } = await supabase
+        const { data: nullRows, error: selectError } = await supabase
             .from('calls')
             .select('id, vapi_call_id')
             .eq('client_id', clientId)
-            .is('started_at', null)
-            .limit(25);
+            .is('started_at', null);
 
-        if (error) {
-            console.error('[VAPI BACKFILL] Error selecting null-timestamp rows:', error.message);
+        if (selectError) {
+            console.error('[VAPI BACKFILL] Error selecting null-timestamp rows:', selectError.message);
             return 0;
         }
-        if (!rows?.length) return 0;
+        if (!nullRows?.length) return 0;
+
+        const vapiCalls = await listCalls(vapiKey);
+        if (!vapiCalls.length) return 0;
+
+        const vapiById = new Map(
+            vapiCalls.filter(c => c.startedAt).map(c => [c.id, c])
+        );
+
+        const updates: Array<{
+            id: string;
+            started_at: string;
+            ended_at: string | null;
+            duration_seconds: number;
+        }> = [];
+
+        for (const row of nullRows) {
+            const vc = vapiById.get(row.vapi_call_id);
+            if (!vc?.startedAt) continue;
+
+            let durationSeconds = vc.durationSeconds || 0;
+            if (!durationSeconds && vc.startedAt && vc.endedAt) {
+                durationSeconds = Math.round(
+                    (new Date(vc.endedAt).getTime() - new Date(vc.startedAt).getTime()) / 1000
+                );
+            }
+
+            updates.push({
+                id: row.id,
+                started_at: vc.startedAt,
+                ended_at: vc.endedAt || null,
+                duration_seconds: durationSeconds,
+            });
+        }
+
+        if (!updates.length) return 0;
 
         let repaired = 0;
-        for (const row of rows) {
-            try {
-                const call = await getCall(row.vapi_call_id, vapiKey);
-                if (!call?.startedAt) continue;
-
-                let durationSeconds = call.durationSeconds || 0;
-                if (!durationSeconds && call.startedAt && call.endedAt) {
-                    durationSeconds = Math.round(
-                        (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000
-                    );
-                }
-
-                const { error: updateError } = await supabase
-                    .from('calls')
-                    .update({
-                        started_at: call.startedAt,
-                        ended_at: call.endedAt || null,
-                        duration_seconds: durationSeconds,
-                    })
-                    .eq('id', row.id);
-
-                if (updateError) {
-                    console.error(`[VAPI BACKFILL] Update failed for ${row.vapi_call_id}:`, updateError.message);
-                } else {
-                    repaired++;
-                }
-            } catch (err) {
-                console.error(`[VAPI BACKFILL] Error backfilling ${row.vapi_call_id}:`, err);
-            }
+        const CHUNK = 25;
+        for (let i = 0; i < updates.length; i += CHUNK) {
+            const chunk = updates.slice(i, i + CHUNK);
+            const results = await Promise.all(
+                chunk.map(async u => {
+                    const { error } = await supabase
+                        .from('calls')
+                        .update({
+                            started_at: u.started_at,
+                            ended_at: u.ended_at,
+                            duration_seconds: u.duration_seconds,
+                        })
+                        .eq('id', u.id);
+                    return !error;
+                })
+            );
+            repaired += results.filter(Boolean).length;
         }
 
-        if (repaired > 0) {
-            console.log(`[VAPI BACKFILL] Repaired ${repaired}/${rows.length} rows for client ${clientId}`);
-        }
+        console.log(
+            `[VAPI BACKFILL] Repaired ${repaired}/${nullRows.length} rows for client ${clientId} ` +
+            `(${vapiCalls.length} VAPI records scanned, ${updates.length} matched)`
+        );
         return repaired;
     } catch (error) {
         console.error('[VAPI BACKFILL] Error:', error);
