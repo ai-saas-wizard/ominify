@@ -46,7 +46,7 @@ export interface VapiCall {
         message: string;
         time?: number;
     }>;
-    startedAt: string;
+    startedAt?: string;
     endedAt?: string;
     cost?: number;
     type?: string;
@@ -211,6 +211,28 @@ export async function getAgent(id: string, apiKey?: string): Promise<VapiAgent |
         return await res.json();
     } catch (error) {
         console.error("Vapi Client Error:", error);
+        return null;
+    }
+}
+
+/**
+ * Fetch a single call by ID from VAPI. Used to backfill missing timestamps
+ * for rows where our webhook didn't capture `startedAt`/`endedAt`.
+ */
+export async function getCall(callId: string, apiKey?: string): Promise<VapiCall | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/call/${callId}`, {
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            next: { revalidate: 0 },
+        } as any);
+        if (!res.ok) return null;
+        return await res.json();
+    } catch (error) {
+        console.error('Vapi Client Error (getCall):', error);
         return null;
     }
 }

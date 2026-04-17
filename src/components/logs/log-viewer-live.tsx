@@ -91,9 +91,10 @@ function formatDuration(seconds?: number): string {
 
 function formatCallTime(dateStr: string): string {
     const date = new Date(dateStr);
-    if (isToday(date)) return format(date, 'h:mm a');
-    if (isYesterday(date)) return 'Yesterday';
-    return format(date, 'MMM d');
+    if (isToday(date)) return format(date, 'h:mm:ss a');
+    if (isYesterday(date)) return format(date, "'Yesterday' h:mm a");
+    const sameYear = new Date().getFullYear() === date.getFullYear();
+    return format(date, sameYear ? 'MMM d, h:mm a' : 'MMM d, yyyy, h:mm a');
 }
 
 function getCallTypeIcon(type?: string, isLive?: boolean) {
@@ -493,8 +494,10 @@ export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls, cl
                                                 )}>
                                                     {isLive ? (
                                                         <LiveDuration startedAt={call.startedAt!} />
+                                                    ) : call.startedAt ? (
+                                                        formatCallTime(call.startedAt)
                                                     ) : (
-                                                        call.startedAt && formatCallTime(call.startedAt)
+                                                        <span className="text-gray-300 italic">—</span>
                                                     )}
                                                 </span>
                                                 <div className={cn(
@@ -557,8 +560,10 @@ export const LogViewerWithLive = ({ calls, agents, phoneNumbers, activeCalls, cl
                                                     <Clock className="w-3 h-3" />
                                                     <LiveDuration startedAt={selectedCall.startedAt!} />
                                                 </span>
+                                            ) : selectedCall.startedAt ? (
+                                                <span>{format(new Date(selectedCall.startedAt), 'MMM d, yyyy · h:mm:ss a zzz')}</span>
                                             ) : (
-                                                <span>{selectedCall.startedAt && format(new Date(selectedCall.startedAt), 'MMM d, yyyy · h:mm a')}</span>
+                                                <span className="text-gray-400 italic">Timestamp unavailable</span>
                                             )}
                                         </div>
                                     </div>

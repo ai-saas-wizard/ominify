@@ -2,7 +2,7 @@ import { listPhoneNumbers, VapiCall } from "@/lib/vapi";
 import { LogsPageClient } from "@/components/logs/logs-page-client";
 import { supabase } from "@/lib/supabase";
 import { getClientVapiKey } from "@/lib/client-secrets";
-import { syncVapiCallsForClient } from "@/app/actions/vapi-sync-actions";
+import { syncVapiCallsForClient, backfillMissingCallTimestamps } from "@/app/actions/vapi-sync-actions";
 
 // Agent record from Supabase (scoped to client)
 export interface ClientAgent {
@@ -68,7 +68,7 @@ function transformToVapiCall(call: SupabaseCallWithAgent): VapiCall {
             structuredData: call.structured_data || undefined
         },
         messages,
-        startedAt: call.started_at || new Date().toISOString(),
+        startedAt: call.started_at || undefined,
         endedAt: call.ended_at || undefined,
         cost: call.cost,
         type: call.type,
@@ -167,6 +167,10 @@ export default async function LogsPage({
     if (accountType === 'CUSTOM') {
         await syncVapiCallsForClient(clientId, clientAgents);
     }
+
+    // Self-heal any rows with missing started_at by re-fetching from VAPI.
+    // Runs for both UMBRELLA and CUSTOM clients.
+    await backfillMissingCallTimestamps(clientId);
 
     // Fetch calls from Supabase (now includes any synced VAPI calls) + phone numbers from Vapi
     const [calls, phoneNumbers] = await Promise.all([
