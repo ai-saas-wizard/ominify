@@ -1,10 +1,12 @@
 import { getOrCreateMinuteBalance, getOrCreateClientBilling, getClientUsageRecords, getClientPurchases, getClientUsageSummary } from "@/lib/billing";
+import { getActiveSubscription, SUBSCRIPTION_PLANS, DEFAULT_PLAN } from "@/lib/subscriptions";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { ArrowLeft, CreditCard, Clock } from "lucide-react";
 import { BalanceCard } from "@/components/billing/balance-card";
 import { UsageTable } from "@/components/billing/usage-table";
 import { PurchaseModal } from "@/components/billing/purchase-modal";
+import { SubscriptionCard } from "@/components/billing/subscription-card";
 
 export default async function ClientBillingPage(props: {
     params: Promise<{ clientId: string }>;
@@ -12,10 +14,10 @@ export default async function ClientBillingPage(props: {
     const params = await props.params;
     const clientId = params.clientId;
 
-    // Fetch client info
+    // Fetch client info (need account_type + grandfather flag for the sub card).
     const { data: client } = await supabase
         .from('clients')
-        .select('id, name, email')
+        .select('id, name, email, account_type, subscription_grandfathered')
         .eq('id', clientId)
         .single();
 
@@ -23,13 +25,16 @@ export default async function ClientBillingPage(props: {
         return <div className="p-8 text-center text-red-600">Client not found</div>;
     }
 
-    const [balance, billing, usageRecords, purchases, usageSummary] = await Promise.all([
+    const [balance, billing, usageRecords, purchases, usageSummary, subscription] = await Promise.all([
         getOrCreateMinuteBalance(clientId),
         getOrCreateClientBilling(clientId),
         getClientUsageRecords(clientId, 20),
         getClientPurchases(clientId, 10),
-        getClientUsageSummary(clientId)
+        getClientUsageSummary(clientId),
+        getActiveSubscription(clientId)
     ]);
+
+    const plan = SUBSCRIPTION_PLANS[DEFAULT_PLAN];
 
     return (
         <div className="p-4 lg:p-8 max-w-6xl mx-auto space-y-8">
@@ -43,17 +48,31 @@ export default async function ClientBillingPage(props: {
                     Back to Dashboard
                 </Link>
                 <h1 className="text-3xl font-bold text-gray-900">Billing & Usage</h1>
-                <p className="mt-1 text-gray-600">Manage your voice minutes and view usage history</p>
+                <p className="mt-1 text-gray-600">Manage your subscription, voice minutes and usage</p>
             </div>
 
-            {/* Balance and Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <BalanceCard
-                    balance={balance.balance_minutes}
-                    totalPurchased={balance.total_purchased_minutes}
-                    totalUsed={balance.total_used_minutes}
+            {/* Subscription + Balance */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <SubscriptionCard
+                    clientId={clientId}
+                    status={subscription?.status ?? null}
+                    planName={plan.displayName}
+                    priceUsd={plan.priceUsd}
+                    currentPeriodEnd={subscription?.current_period_end ?? null}
+                    grandfathered={!!client.subscription_grandfathered}
+                    isCustom={client.account_type === 'CUSTOM'}
                 />
+                <BalanceCard
+                    balance={Number(balance.balance_minutes ?? 0)}
+                    totalPurchased={Number(balance.total_purchased_minutes ?? 0)}
+                    totalUsed={Number(balance.total_used_minutes ?? 0)}
+                    subscriptionMinutes={Number(balance.subscription_minutes ?? 0)}
+                    rolloverCap={Number(balance.subscription_rollover_cap ?? plan.rolloverCap)}
+                />
+            </div>
 
+            {/* Stats row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-blue-100 rounded-lg">
@@ -74,7 +93,7 @@ export default async function ClientBillingPage(props: {
                             <CreditCard className="w-6 h-6 text-green-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Your Rate</p>
+                            <p className="text-sm text-gray-500">Top-up Rate</p>
                             <p className="text-2xl font-bold text-gray-900">
                                 ${billing.price_per_minute.toFixed(2)}/min
                             </p>
@@ -88,7 +107,7 @@ export default async function ClientBillingPage(props: {
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-xl font-bold">Need more minutes?</h2>
-                        <p className="text-emerald-200 mt-1">Purchase any amount at ${billing.price_per_minute.toFixed(2)} per minute</p>
+                        <p className="text-emerald-200 mt-1">Top-up at ${billing.price_per_minute.toFixed(2)} per minute — adds on top of your subscription allowance</p>
                     </div>
                     <PurchaseModal
                         clientId={clientId}
@@ -117,7 +136,17 @@ export default async function ClientBillingPage(props: {
                         <div key={purchase.id} className="px-6 py-4 flex items-center justify-between">
                             <div>
                                 <p className="font-medium text-gray-900">
-                                    {purchase.minutes_purchased} Minutes
+                                    {purchase.minutes_purchased} Minutes{" "}
+                                    {purchase.kind === 'subscription_grant' && (
+                                        <span className="ml-2 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                                            Subscription
+                                        </span>
+                                    )}
+                                    {purchase.kind === 'subscription_rollover_trim' && (
+                                        <span className="ml-2 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+                                            Rollover trim
+                                        </span>
+                                    )}
                                 </p>
                                 <p className="text-sm text-gray-500">
                                     {new Date(purchase.created_at).toLocaleDateString()}
@@ -140,7 +169,7 @@ export default async function ClientBillingPage(props: {
                     ))}
                     {purchases.length === 0 && (
                         <div className="px-6 py-12 text-center text-gray-500">
-                            No purchases yet. Buy your first minute package above!
+                            No purchases yet.
                         </div>
                     )}
                 </div>

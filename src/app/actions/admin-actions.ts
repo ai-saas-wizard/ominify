@@ -2,6 +2,32 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+import { auditLog } from "@/lib/audit";
+
+/**
+ * Toggle the subscription_grandfathered flag on a client. Grandfathered
+ * clients bypass the subscription paywall (but still obey the zero-minute
+ * call block). Used for comp'd accounts and existing clients from before
+ * the paywall rollout.
+ */
+export async function toggleClientGrandfather(clientId: string, value: boolean) {
+    const { error } = await supabase
+        .from("clients")
+        .update({ subscription_grandfathered: value })
+        .eq("id", clientId);
+
+    if (error) {
+        throw new Error(`Failed to update grandfather flag: ${error.message}`);
+    }
+
+    await auditLog(
+        "toggle_subscription_grandfather",
+        { type: "client", id: clientId },
+        { value }
+    );
+
+    revalidatePath("/admin/clients");
+}
 
 export interface AgentPricing {
     id: string;

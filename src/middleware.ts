@@ -23,9 +23,14 @@ export default clerkMiddleware(async (auth, req) => {
     const url = req.nextUrl;
     const pathname = url.pathname;
 
+    // Forward the current pathname to server components/layouts so they can
+    // route-gate (e.g. paywall allowlist).
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set('x-pathname', pathname);
+
     // Allow public routes
     if (isPublicRoute(req)) {
-        return NextResponse.next();
+        return NextResponse.next({ request: { headers: requestHeaders } });
     }
 
     // Redirect to sign-in if not authenticated
@@ -46,7 +51,7 @@ export default clerkMiddleware(async (auth, req) => {
     // For client routes, extract the client ID and let the page handle authorization
     // The page will check if user has access to the specific client
 
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
 });
 
 export const config = {

@@ -4,7 +4,18 @@ import { recordCallUsage } from "@/lib/billing";
 import { extractContactInfo } from "@/lib/openai-extractor";
 import { getSheetsConnectionStatus, appendLeadRow } from "@/lib/google-sheets";
 import { buildSheetRow } from "@/lib/verticals/real-estate-investor/sheets-schema";
+import { verifyVapiSignature } from "@/lib/webhook-signatures";
+import { canPlaceCall } from "@/lib/access";
+import { getClientVapiKey } from "@/lib/client-secrets";
+import { endCall } from "@/lib/vapi";
+import { auditLog } from "@/lib/audit";
 import crypto from "crypto";
+
+// When true, reject webhook requests that don't present a valid signature.
+// Deploy with false first, monitor logs for expected-signature mismatches, then
+// flip to true after confirming VAPI is signing correctly.
+const ENFORCE_VAPI_SIGNATURE = process.env.ENFORCE_WEBHOOK_SIGNATURES === "true";
+const VAPI_WEBHOOK_SECRET = process.env.VAPI_WEBHOOK_SECRET;
 
 /**
  * Central Vapi Webhook Receiver
@@ -173,6 +184,29 @@ async function handleCallStarted(call: NonNullable<VapiWebhookPayload['message']
         console.log('[VAPI WEBHOOK] Client lookup result:', { orgId: call.orgId, clientId });
         if (!clientId) {
             console.log('[VAPI WEBHOOK] No client found for orgId:', call.orgId);
+            return;
+        }
+
+        // Paywall gate: hang up immediately if client lacks access or minutes.
+        // Inbound calls have already connected by the time we see this event,
+        // so this is best-effort — the ideal defense is at phone-number
+        // assignment level. We still try to cut the call ASAP.
+        const access = await canPlaceCall(clientId);
+        if (!access.allowed) {
+            console.warn(
+                `[VAPI WEBHOOK] Inbound call blocked: client=${clientId} reason=${access.reason}`
+            );
+            try {
+                const vapiKey = (await getClientVapiKey(clientId)) || undefined;
+                await endCall(call.id, vapiKey);
+            } catch (e) {
+                console.error('[VAPI WEBHOOK] Failed to end blocked call:', e);
+            }
+            await auditLog('inbound_call_blocked', { type: 'client', id: clientId }, {
+                vapi_call_id: call.id,
+                reason: access.reason,
+                customer_number: call.customer?.number,
+            });
             return;
         }
 
@@ -683,7 +717,27 @@ async function forwardToWebhook(
 
 export async function POST(request: Request) {
     try {
-        const rawPayload = await request.json();
+        // Read raw body first so we can verify the HMAC signature before parsing.
+        const rawBody = await request.text();
+        const signature =
+            request.headers.get("x-vapi-signature") ||
+            request.headers.get("x-vapi-secret") ||
+            null;
+
+        const signatureValid = verifyVapiSignature(rawBody, signature, VAPI_WEBHOOK_SECRET);
+        if (!signatureValid) {
+            // Structured log so ops can spot expected-signature-mismatch during rollout.
+            console.warn("[VAPI WEBHOOK] Signature check failed", {
+                hasHeader: !!signature,
+                hasSecret: !!VAPI_WEBHOOK_SECRET,
+                enforced: ENFORCE_VAPI_SIGNATURE,
+            });
+            if (ENFORCE_VAPI_SIGNATURE) {
+                return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+            }
+        }
+
+        const rawPayload = JSON.parse(rawBody);
 
         // Vapi wraps payload in { headers, params, query, body, webhookUrl, executionMode }
         // The actual message is inside body.body.message

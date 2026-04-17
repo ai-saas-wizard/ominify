@@ -2,6 +2,9 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { isAdmin, getAccessibleClients, addClientMember } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { encrypt } from "@/lib/encryption";
+import { isEncrypted } from "@/lib/encryption-helpers";
+import { hasActiveSubscription } from "@/lib/access";
 import Link from "next/link";
 
 // Get the single active umbrella
@@ -26,6 +29,14 @@ async function autoProvisionUmbrellaClient(
   const umbrella = await getActiveUmbrellaForSignup();
   if (!umbrella) return null;
 
+  // Copy the umbrella's VAPI key verbatim (it's ciphertext post-Phase-1).
+  // If we encounter a legacy plaintext row, encrypt it before copying so new
+  // rows are never written as plaintext.
+  const umbrellaKey = umbrella.vapi_api_key_encrypted;
+  const vapiKeyCiphertext = umbrellaKey
+    ? (isEncrypted(umbrellaKey) ? umbrellaKey : encrypt(umbrellaKey))
+    : null;
+
   // Create the client record
   const { data: newClient, error: clientError } = await supabase
     .from("clients")
@@ -33,7 +44,7 @@ async function autoProvisionUmbrellaClient(
       name: userName || userEmail.split("@")[0],
       email: userEmail.toLowerCase().trim(),
       account_type: "UMBRELLA",
-      vapi_key: umbrella.vapi_api_key_encrypted,
+      vapi_key: vapiKeyCiphertext,
       vapi_org_id: umbrella.vapi_org_id,
       clerk_id: userId, // Real Clerk ID — no placeholder needed
     })
@@ -128,6 +139,13 @@ export default async function HomePage() {
       .single();
 
     if (clientRecord?.account_type === "UMBRELLA") {
+      // Paywall gate — new UMBRELLA users must subscribe before onboarding.
+      // Grandfathered/CUSTOM clients bypass inside hasActiveSubscription.
+      const access = await hasActiveSubscription(client.id);
+      if (!access.allowed) {
+        redirect(`/client/${client.id}/subscribe`);
+      }
+
       const { data: profile } = await supabase
         .from("tenant_profiles")
         .select("onboarding_completed")
@@ -211,7 +229,8 @@ export default async function HomePage() {
   );
 
   if (newClientId) {
-    redirect(`/client/${newClientId}/onboarding`);
+    // Fresh UMBRELLA signup — route through the paywall first.
+    redirect(`/client/${newClientId}/subscribe`);
   }
 
   // Step 3: No umbrellas available — show "at capacity" message

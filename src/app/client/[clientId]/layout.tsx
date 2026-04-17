@@ -1,6 +1,8 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { canAccessClient, isAdmin, linkClerkIdToMember } from "@/lib/auth";
+import { hasActiveSubscription } from "@/lib/access";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
@@ -88,6 +90,32 @@ export default async function ClientLayout({
                     </div>
                 </div>
             );
+        }
+    }
+
+    // Paywall gate — redirect unsubscribed UMBRELLA clients away from
+    // everything except the subscribe page(s) and billing (so they can
+    // re-subscribe). Admins bypass so they can still support accounts.
+    {
+        const userIsAdmin = (await isAdmin(userEmail)) || (await isAdmin(userId));
+        if (!userIsAdmin) {
+            const h = await headers();
+            const currentPath =
+                h.get("x-invoke-path") ||
+                h.get("x-pathname") ||
+                h.get("next-url") ||
+                "";
+            const allowlist = [
+                `/client/${clientId}/subscribe`,
+                `/client/${clientId}/billing`,
+            ];
+            const onAllowedRoute = allowlist.some((p) => currentPath.startsWith(p));
+            if (!onAllowedRoute) {
+                const access = await hasActiveSubscription(clientId);
+                if (!access.allowed) {
+                    redirect(`/client/${clientId}/subscribe`);
+                }
+            }
         }
     }
 

@@ -17,6 +17,9 @@ export interface MinuteBalance {
     balance_minutes: number;
     total_purchased_minutes: number;
     total_used_minutes: number;
+    subscription_minutes: number;
+    subscription_rollover_cap: number;
+    last_subscription_grant_at: string | null;
     updated_at: string;
 }
 
@@ -27,6 +30,8 @@ export interface MinutePurchase {
     amount_paid: number;
     stripe_payment_intent_id: string | null;
     stripe_checkout_session_id: string | null;
+    stripe_invoice_id: string | null;
+    kind: 'topup' | 'subscription_grant' | 'subscription_rollover_trim';
     status: 'pending' | 'completed' | 'failed' | 'refunded';
     created_at: string;
 }

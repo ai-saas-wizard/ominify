@@ -18,6 +18,7 @@ import { redisConnection, vapiQueue } from '../lib/redis.js';
 import { umbrellaResolver } from '../lib/umbrella-resolver.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
+import { canPlaceCall } from '../lib/access.js';
 import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
@@ -181,6 +182,24 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
     const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId, inlineAgent } = job.data;
 
     console.log(`[VAPI] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}, priority ${urgencyPriority}`);
+
+    // 0. Paywall + balance gate. Reject (do not re-queue) if the tenant lacks
+    //    access or has zero minutes — the job is a no-op until they resubscribe
+    //    or buy a top-up pack.
+    const access = await canPlaceCall(tenantId);
+    if (access.allowed === false) {
+        console.log(`[VAPI] Access denied for tenant ${tenantId}: ${access.reason}`);
+        await logExecution({
+            enrollmentId,
+            stepId,
+            channel: 'voice',
+            action: 'skipped_no_access',
+            providerId: '',
+            providerResponse: { reason: access.reason },
+            callStatus: 'access_denied',
+        });
+        return { callId: '', status: 'skipped_no_access' };
+    }
 
     // 1. Resolve umbrella for this tenant
     const umbrella = await umbrellaResolver.getUmbrellaForTenant(tenantId);

@@ -1,10 +1,12 @@
 import { supabase } from "@/lib/supabase";
+import { secretLastChars } from "@/lib/encryption-helpers";
 import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap } from "lucide-react";
 import Link from "next/link";
 import { CreateClientDialog } from "@/components/admin/create-client-dialog";
 import { DisableClientButton } from "@/components/admin/disable-client-button";
 import { ClientCard } from "@/components/admin/client-card";
 import { Badge } from "@/components/ui/badge";
+import { SubscriptionBadge } from "@/components/admin/subscription-badge";
 
 // Fetch clients with umbrella + profile data
 async function getClients() {
@@ -20,15 +22,36 @@ async function getClients() {
 
     if (!data) return [];
 
-    // Enrich UMBRELLA clients with concurrency + onboarding status
+    // Enrich UMBRELLA clients with concurrency + onboarding status.
+    // Also compute key_last_four server-side and strip the raw ciphertext
+    // `vapi_key` from every client row so it never reaches any render path.
     const enriched = await Promise.all(
         data.map(async (client) => {
-            if (client.account_type === "UMBRELLA") {
+            // Compute last-4 from decrypted key (safe whether plaintext or ciphertext)
+            const keyLastFour = secretLastChars(client.vapi_key, 4);
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { vapi_key, ...safeClient } = client;
+
+            // Load live subscription status for admin-facing badge.
+            const { data: sub } = await supabase
+                .from("subscriptions")
+                .select("status")
+                .eq("client_id", client.id)
+                .in("status", ["active", "trialing", "past_due", "admin_granted"])
+                .maybeSingle();
+
+            const enrichedClient = {
+                ...safeClient,
+                key_last_four: keyLastFour,
+                subscription_status: (sub?.status as string | undefined) ?? null,
+            };
+
+            if (enrichedClient.account_type === "UMBRELLA") {
                 // Get concurrency cap from assignment
                 const { data: assignment } = await supabase
                     .from("tenant_vapi_assignments")
                     .select("tenant_concurrency_cap")
-                    .eq("client_id", client.id)
+                    .eq("client_id", enrichedClient.id)
                     .eq("is_active", true)
                     .single();
 
@@ -36,17 +59,17 @@ async function getClients() {
                 const { data: profile } = await supabase
                     .from("tenant_profiles")
                     .select("onboarding_completed, industry")
-                    .eq("client_id", client.id)
+                    .eq("client_id", enrichedClient.id)
                     .single();
 
                 return {
-                    ...client,
+                    ...enrichedClient,
                     concurrency_cap: assignment?.tenant_concurrency_cap,
                     onboarding_completed: profile?.onboarding_completed || false,
                     industry: profile?.industry,
                 };
             }
-            return client;
+            return enrichedClient;
         })
     );
 
@@ -111,6 +134,12 @@ export default async function AdminClientsPage() {
                                                         DISABLED
                                                     </Badge>
                                                 )}
+                                                <SubscriptionBadge
+                                                    clientId={client.id}
+                                                    accountType={client.account_type}
+                                                    grandfathered={!!client.subscription_grandfathered}
+                                                    subscriptionStatus={client.subscription_status}
+                                                />
                                                 <span className="text-xs text-gray-400 truncate max-w-[140px]">{client.email || "No email"}</span>
                                             </div>
                                         </div>
@@ -190,6 +219,12 @@ export default async function AdminClientsPage() {
                                                         DISABLED
                                                     </Badge>
                                                 )}
+                                                <SubscriptionBadge
+                                                    clientId={client.id}
+                                                    accountType={client.account_type}
+                                                    grandfathered={!!client.subscription_grandfathered}
+                                                    subscriptionStatus={client.subscription_status}
+                                                />
                                                 <span className="text-xs text-gray-400 truncate max-w-[140px]">{client.email || "No email"}</span>
                                             </div>
                                         </div>
@@ -202,7 +237,7 @@ export default async function AdminClientsPage() {
                                         <div className="flex items-center text-gray-500 gap-2">
                                             <Key className="w-4 h-4" />
                                             <span className="text-xs font-mono bg-gray-50 px-2 py-1 rounded">
-                                                {client.vapi_key ? "••••" + client.vapi_key.slice(-4) : "Not Configured"}
+                                                {client.key_last_four ? "••••" + client.key_last_four : "Not Configured"}
                                             </span>
                                         </div>
                                         <Link href={`/client/${client.id}/agents`} className="text-xs font-medium text-emerald-600 hover:text-emerald-700">

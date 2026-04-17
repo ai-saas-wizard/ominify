@@ -1,3 +1,4 @@
+import "server-only";
 import { supabase } from './supabase';
 
 // Re-export types and constants from billing-types (client-safe)
@@ -108,31 +109,27 @@ export async function addMinutesToBalance(
 }
 
 /**
- * Deduct minutes from client balance (after call usage)
+ * Deduct minutes from client balance (after call usage).
+ *
+ * Deducts across both buckets: subscription bucket first, then top-up.
+ * Returns success=false only if the combined balance was insufficient, but
+ * always deducts what it can (partial deduction). `newBalance` is the combined
+ * subscription + top-up balance after the deduction.
+ *
+ * Subscription-first order is deliberate: it makes the rollover cap a
+ * meaningful ceiling (otherwise subscription minutes would stockpile forever).
  */
 export async function deductMinutesFromBalance(
     clientId: string,
     minutes: number
 ): Promise<{ success: boolean; newBalance: number }> {
-    const current = await getOrCreateMinuteBalance(clientId);
-
-    if (current.balance_minutes < minutes) {
-        return { success: false, newBalance: current.balance_minutes };
-    }
-
-    const { data, error } = await supabase
-        .from('minute_balances')
-        .update({
-            balance_minutes: current.balance_minutes - minutes,
-            total_used_minutes: current.total_used_minutes + minutes,
-            updated_at: new Date().toISOString()
-        })
-        .eq('client_id', clientId)
-        .select()
-        .single();
-
-    if (error) throw new Error(`Failed to deduct minutes: ${error.message}`);
-    return { success: true, newBalance: (data as MinuteBalance).balance_minutes };
+    // Lazy-load to avoid a circular import if subscriptions.ts grows deps on billing.ts
+    const { deductFromBuckets } = await import('./subscriptions');
+    const result = await deductFromBuckets(clientId, minutes);
+    return {
+        success: result.shortfall === 0,
+        newBalance: result.newBalance.subscription + result.newBalance.topup,
+    };
 }
 
 /**

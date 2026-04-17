@@ -1,3 +1,4 @@
+import "server-only";
 import Stripe from 'stripe';
 import { getOrCreateClientBilling, createPurchaseRecord } from './billing';
 import { supabase } from './supabase';
@@ -125,4 +126,65 @@ export function constructWebhookEvent(
     if (!webhookSecret) throw new Error('Webhook secret not configured');
 
     return stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+}
+
+/**
+ * Create a Stripe Checkout session for a recurring subscription.
+ *
+ * Used by POST /api/stripe/subscribe. Attaches `clientId` + `plan_key` to both
+ * the checkout session's metadata and the resulting subscription's metadata so
+ * the webhook can resolve our client record reliably.
+ */
+export async function createSubscriptionCheckoutSession(
+    clientId: string,
+    email: string,
+    priceId: string,
+    planKey: string,
+    successUrl: string,
+    cancelUrl: string,
+    name?: string
+): Promise<{ sessionId: string; url: string }> {
+    if (!stripe) throw new Error('Stripe not configured');
+    if (!priceId) throw new Error('Stripe subscription price ID not configured');
+
+    const customerId = await getOrCreateStripeCustomer(clientId, email, name);
+
+    const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        mode: 'subscription',
+        payment_method_types: ['card'],
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        subscription_data: {
+            metadata: { clientId, plan_key: planKey },
+        },
+        metadata: { clientId, plan_key: planKey },
+        allow_promotion_codes: true,
+    });
+
+    return { sessionId: session.id, url: session.url! };
+}
+
+/**
+ * Create a Stripe Billing Portal session so the user can cancel, update card,
+ * and view invoices. Portal behavior (e.g. immediate cancellation) is
+ * configured in the Stripe Dashboard, not here.
+ */
+export async function createPortalSession(
+    clientId: string,
+    email: string,
+    returnUrl: string,
+    name?: string
+): Promise<{ url: string }> {
+    if (!stripe) throw new Error('Stripe not configured');
+
+    const customerId = await getOrCreateStripeCustomer(clientId, email, name);
+
+    const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: returnUrl,
+    });
+
+    return { url: session.url };
 }
