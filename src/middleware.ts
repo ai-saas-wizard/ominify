@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { hasActiveSubscriptionEdge, isAdminEdge } from "@/lib/access-edge";
 
 // Public routes that don't require authentication
 const isPublicRoute = createRouteMatcher([
@@ -11,12 +12,6 @@ const isPublicRoute = createRouteMatcher([
     '/api/integrations/google-calendar/callback',
     '/'
 ]);
-
-// Admin routes
-const isAdminRoute = createRouteMatcher(['/admin(.*)']);
-
-// Client routes
-const isClientRoute = createRouteMatcher(['/client/(.*)']);
 
 export default clerkMiddleware(async (auth, req) => {
     const { userId, sessionClaims } = await auth();
@@ -40,16 +35,52 @@ export default clerkMiddleware(async (auth, req) => {
         return NextResponse.redirect(signInUrl);
     }
 
-    // Get user email from session claims
-    const userEmail = (sessionClaims as any)?.email ||
-        (sessionClaims as any)?.primary_email_address;
+    // ── Paywall gate for /client/[clientId]/* routes ─────────────────────────
+    // Runs in middleware so it fires on EVERY request (including client-side
+    // navigation), which is stronger than a parent-layout check that Next.js
+    // skips when the segment boundary doesn't change.
+    const clientMatch = pathname.match(/^\/client\/([^\/]+)/);
+    if (clientMatch) {
+        const clientId = clientMatch[1];
 
-    // For admin routes, we'll check access in the page/layout level
-    // This is because we can't do async DB calls in middleware easily
-    // The middleware just ensures authentication
+        // Allowlist the subscribe flow + billing (so users can re-subscribe
+        // after cancel) and any client-scoped API endpoints that need to work
+        // pre-subscription (Stripe callbacks, etc.).
+        const allow = [
+            `/client/${clientId}/subscribe`,
+            `/client/${clientId}/billing`,
+        ];
+        const onAllowed =
+            allow.some((p) => pathname === p || pathname.startsWith(p + '/')) ||
+            pathname.startsWith('/api/');
 
-    // For client routes, extract the client ID and let the page handle authorization
-    // The page will check if user has access to the specific client
+        if (!onAllowed) {
+            const userEmail =
+                (sessionClaims as any)?.email ||
+                (sessionClaims as any)?.primary_email_address ||
+                null;
+
+            try {
+                // Admins bypass so they can help/debug any client.
+                const admin = await isAdminEdge(userEmail, userId);
+                if (!admin) {
+                    const access = await hasActiveSubscriptionEdge(clientId);
+                    if (!access.allowed && access.reason !== 'client_not_found') {
+                        const subscribeUrl = new URL(
+                            `/client/${clientId}/subscribe`,
+                            req.url
+                        );
+                        return NextResponse.redirect(subscribeUrl);
+                    }
+                }
+            } catch (err) {
+                // Fail-open on infra errors — the layout/page-level gates
+                // catch these on initial load. Middleware failing closed
+                // would be a bigger footgun than failing open.
+                console.error('[middleware] paywall check failed:', err);
+            }
+        }
+    }
 
     return NextResponse.next({ request: { headers: requestHeaders } });
 });
