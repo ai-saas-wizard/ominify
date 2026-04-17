@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { VapiCall, VapiPhoneNumber } from '@/lib/vapi';
 import { LogViewerWithLive } from './log-viewer-live';
 import type { ClientAgent } from '@/app/client/[clientId]/logs/page';
 import { fetchSupabaseToken, createAuthedSupabase } from '@/lib/supabase-browser';
+import { backfillMissingCallTimestamps } from '@/app/actions/vapi-sync-actions';
 
 export interface ActiveCall {
     id: string;
@@ -34,9 +36,22 @@ const TOKEN_REFRESH_MS = 25 * 60 * 1000;
 
 export function LogsPageClient({ calls, agents, phoneNumbers, clientId }: LogsPageClientProps) {
     const [activeCalls, setActiveCalls] = useState<ActiveCall[]>([]);
+    const router = useRouter();
 
     const supabaseRef = useRef<SupabaseClient | null>(null);
     const channelRef = useRef<RealtimeChannel | null>(null);
+
+    // Repair rows with null started_at in the background. Runs once per mount;
+    // if anything was repaired the server action refreshes the route cache.
+    useEffect(() => {
+        let cancelled = false;
+        backfillMissingCallTimestamps(clientId)
+            .then(repaired => {
+                if (!cancelled && repaired > 0) router.refresh();
+            })
+            .catch(() => { /* surfaced server-side already */ });
+        return () => { cancelled = true; };
+    }, [clientId, router]);
 
     const ensureClient = useCallback(async (): Promise<SupabaseClient | null> => {
         const tokenResp = await fetchSupabaseToken();

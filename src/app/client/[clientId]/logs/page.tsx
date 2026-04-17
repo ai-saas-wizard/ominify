@@ -2,7 +2,7 @@ import { listPhoneNumbers, VapiCall } from "@/lib/vapi";
 import { LogsPageClient } from "@/components/logs/logs-page-client";
 import { supabase } from "@/lib/supabase";
 import { getClientVapiKey } from "@/lib/client-secrets";
-import { syncVapiCallsForClient, backfillMissingCallTimestamps } from "@/app/actions/vapi-sync-actions";
+import { syncVapiCallsForClient } from "@/app/actions/vapi-sync-actions";
 
 // Agent record from Supabase (scoped to client)
 export interface ClientAgent {
@@ -168,9 +168,9 @@ export default async function LogsPage({
         await syncVapiCallsForClient(clientId, clientAgents);
     }
 
-    // Self-heal any rows with missing started_at by re-fetching from VAPI.
-    // Runs for both UMBRELLA and CUSTOM clients.
-    await backfillMissingCallTimestamps(clientId);
+    // Backfill for null timestamps runs client-side post-render via
+    // LogsPageClient — doing it here blocks SSR long enough to trip the
+    // Vercel function timeout.
 
     // Fetch calls from Supabase (now includes any synced VAPI calls) + phone numbers from Vapi
     const [calls, phoneNumbers] = await Promise.all([

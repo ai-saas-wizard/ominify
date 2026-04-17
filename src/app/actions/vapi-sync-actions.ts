@@ -143,23 +143,23 @@ export async function syncVapiCallsForClient(
  * returns the umbrella key for UMBRELLA tenants (credentials copied on
  * client creation).
  */
-export async function backfillMissingCallTimestamps(clientId: string): Promise<void> {
+export async function backfillMissingCallTimestamps(clientId: string): Promise<number> {
     try {
         const vapiKey = await getClientVapiKey(clientId);
-        if (!vapiKey) return;
+        if (!vapiKey) return 0;
 
         const { data: rows, error } = await supabase
             .from('calls')
             .select('id, vapi_call_id')
             .eq('client_id', clientId)
             .is('started_at', null)
-            .limit(50);
+            .limit(25);
 
         if (error) {
             console.error('[VAPI BACKFILL] Error selecting null-timestamp rows:', error.message);
-            return;
+            return 0;
         }
-        if (!rows?.length) return;
+        if (!rows?.length) return 0;
 
         let repaired = 0;
         for (const row of rows) {
@@ -196,7 +196,9 @@ export async function backfillMissingCallTimestamps(clientId: string): Promise<v
         if (repaired > 0) {
             console.log(`[VAPI BACKFILL] Repaired ${repaired}/${rows.length} rows for client ${clientId}`);
         }
+        return repaired;
     } catch (error) {
         console.error('[VAPI BACKFILL] Error:', error);
+        return 0;
     }
 }
