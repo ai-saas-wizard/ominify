@@ -6,13 +6,16 @@ import Link from "next/link";
 
 interface MinuteBalanceDisplayProps {
     clientId: string;
+    initialBalance?: number | null;
 }
 
-export function MinuteBalanceDisplay({ clientId }: MinuteBalanceDisplayProps) {
-    const [balance, setBalance] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+export function MinuteBalanceDisplay({ clientId, initialBalance }: MinuteBalanceDisplayProps) {
+    const [balance, setBalance] = useState<number | null>(initialBalance ?? null);
+    const [isLoading, setIsLoading] = useState(initialBalance === undefined);
 
     useEffect(() => {
+        if (initialBalance !== undefined) return;
+
         async function fetchBalance() {
             try {
                 const res = await fetch(`/api/client/${clientId}/balance`);
@@ -28,7 +31,7 @@ export function MinuteBalanceDisplay({ clientId }: MinuteBalanceDisplayProps) {
         }
 
         fetchBalance();
-    }, [clientId]);
+    }, [clientId, initialBalance]);
 
     if (isLoading) {
         return (

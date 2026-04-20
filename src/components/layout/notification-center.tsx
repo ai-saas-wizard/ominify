@@ -25,19 +25,21 @@ interface Notification {
     } | null;
 }
 
-export function NotificationCenter({ clientId }: { clientId: string }) {
+export function NotificationCenter({ clientId, initialUnreadCount }: { clientId: string; initialUnreadCount?: number }) {
     const [isOpen, setIsOpen] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [unreadCount, setUnreadCount] = useState(0);
+    const [unreadCount, setUnreadCount] = useState(initialUnreadCount ?? 0);
     const [loading, setLoading] = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
 
-    // Fetch unread count on mount and periodically
+    // Skip initial fetch if layout already prefetched the count; keep the 30s poll for freshness.
     useEffect(() => {
-        fetchUnreadCount();
-        const interval = setInterval(fetchUnreadCount, 30000); // Poll every 30s
+        if (initialUnreadCount === undefined) {
+            fetchUnreadCount();
+        }
+        const interval = setInterval(fetchUnreadCount, 30000);
         return () => clearInterval(interval);
-    }, [clientId]);
+    }, [clientId, initialUnreadCount]);
 
     // Close on outside click
     useEffect(() => {

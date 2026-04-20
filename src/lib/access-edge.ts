@@ -31,11 +31,29 @@ export type EdgeAccessResult =
     | { allowed: true }
     | { allowed: false; reason: "no_subscription" | "past_due" | "canceled" | "client_not_found" };
 
+// In-memory TTL caches. Middleware fires on every request; without caching
+// that's a Supabase round-trip per sidebar click. 30s TTL is short enough
+// that admin flips and subscription cancellations reflect quickly, long
+// enough to absorb rapid navigation.
+//
+// Note: edge runtime may run multiple instances; each one has its own Map.
+// That's fine — partial caching still eliminates the lag on the common
+// case (same instance serving a burst of clicks from one user).
+const ADMIN_TTL_MS = 30_000;
+const SUB_TTL_MS = 30_000;
+const adminCache = new Map<string, { value: boolean; expires: number }>();
+const subCache = new Map<string, { value: EdgeAccessResult; expires: number }>();
+
 export async function isAdminEdge(userEmail: string | null, userId: string | null): Promise<boolean> {
     if (!userEmail && !userId) return false;
+
+    const key = `${userEmail?.toLowerCase() ?? ""}|${userId ?? ""}`;
+    const now = Date.now();
+    const hit = adminCache.get(key);
+    if (hit && hit.expires > now) return hit.value;
+
     const supabase = getClient();
 
-    // Supabase .or() needs comma-joined filters. Either email or clerk_id match.
     const filters: string[] = [];
     if (userEmail) filters.push(`email.eq.${userEmail.toLowerCase()}`);
     if (userId) filters.push(`clerk_id.eq.${userId}`);
@@ -46,10 +64,16 @@ export async function isAdminEdge(userEmail: string | null, userId: string | nul
         .or(filters.join(","))
         .maybeSingle();
 
-    return !!data;
+    const value = !!data;
+    adminCache.set(key, { value, expires: now + ADMIN_TTL_MS });
+    return value;
 }
 
 export async function hasActiveSubscriptionEdge(clientId: string): Promise<EdgeAccessResult> {
+    const now = Date.now();
+    const hit = subCache.get(clientId);
+    if (hit && hit.expires > now) return hit.value;
+
     const supabase = getClient();
 
     const { data: client } = await supabase
@@ -58,12 +82,20 @@ export async function hasActiveSubscriptionEdge(clientId: string): Promise<EdgeA
         .eq("id", clientId)
         .maybeSingle();
 
-    if (!client) return { allowed: false, reason: "client_not_found" };
+    if (!client) {
+        const result: EdgeAccessResult = { allowed: false, reason: "client_not_found" };
+        subCache.set(clientId, { value: result, expires: now + SUB_TTL_MS });
+        return result;
+    }
     if ((client as { subscription_grandfathered: boolean }).subscription_grandfathered) {
-        return { allowed: true };
+        const result: EdgeAccessResult = { allowed: true };
+        subCache.set(clientId, { value: result, expires: now + SUB_TTL_MS });
+        return result;
     }
     if ((client as { account_type: string }).account_type === "CUSTOM") {
-        return { allowed: true };
+        const result: EdgeAccessResult = { allowed: true };
+        subCache.set(clientId, { value: result, expires: now + SUB_TTL_MS });
+        return result;
     }
 
     const { data: sub } = await supabase
@@ -73,11 +105,19 @@ export async function hasActiveSubscriptionEdge(clientId: string): Promise<EdgeA
         .in("status", ["active", "trialing", "past_due", "admin_granted"])
         .maybeSingle();
 
-    if (!sub) return { allowed: false, reason: "no_subscription" };
-    const status = (sub as { status: string }).status;
-    if (status === "active" || status === "trialing" || status === "admin_granted") {
-        return { allowed: true };
+    let result: EdgeAccessResult;
+    if (!sub) {
+        result = { allowed: false, reason: "no_subscription" };
+    } else {
+        const status = (sub as { status: string }).status;
+        if (status === "active" || status === "trialing" || status === "admin_granted") {
+            result = { allowed: true };
+        } else if (status === "past_due") {
+            result = { allowed: false, reason: "past_due" };
+        } else {
+            result = { allowed: false, reason: "canceled" };
+        }
     }
-    if (status === "past_due") return { allowed: false, reason: "past_due" };
-    return { allowed: false, reason: "canceled" };
+    subCache.set(clientId, { value: result, expires: now + SUB_TTL_MS });
+    return result;
 }

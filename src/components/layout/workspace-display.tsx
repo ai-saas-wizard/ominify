@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Building2 } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 
 interface WorkspaceDisplayProps {
     clientId: string;
+    initialCurrentClient?: ClientInfo;
+    initialAllClients?: ClientInfo[];
 }
 
 interface ClientInfo {
@@ -14,23 +16,29 @@ interface ClientInfo {
     business_name?: string | null;
 }
 
-export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
-    const [currentClient, setCurrentClient] = useState<ClientInfo | null>(null);
-    const [allClients, setAllClients] = useState<ClientInfo[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+export function WorkspaceDisplay({
+    clientId,
+    initialCurrentClient,
+    initialAllClients,
+}: WorkspaceDisplayProps) {
+    const [currentClient, setCurrentClient] = useState<ClientInfo | null>(
+        initialCurrentClient ?? null
+    );
+    const [allClients, setAllClients] = useState<ClientInfo[]>(initialAllClients ?? []);
+    const [isLoading, setIsLoading] = useState(!initialCurrentClient);
     const [isOpen, setIsOpen] = useState(false);
 
     useEffect(() => {
+        if (initialCurrentClient && initialAllClients) return;
+
         async function fetchClientData() {
             try {
-                // Fetch current client info
                 const currentRes = await fetch(`/api/client/${clientId}/info`);
                 if (currentRes.ok) {
                     const data = await currentRes.json();
                     setCurrentClient(data);
                 }
 
-                // Fetch all accessible clients for current user
                 const allRes = await fetch('/api/user/clients');
                 if (allRes.ok) {
                     const data = await allRes.json();
@@ -44,7 +52,7 @@ export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
         }
 
         fetchClientData();
-    }, [clientId]);
+    }, [clientId, initialCurrentClient, initialAllClients]);
 
     if (isLoading) {
         return (
@@ -89,7 +97,6 @@ export function WorkspaceDisplay({ clientId }: WorkspaceDisplayProps) {
                 )}
             </div>
 
-            {/* Dropdown for multiple clients */}
             {isOpen && hasMultipleClients && (
                 <div className="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
                     {allClients

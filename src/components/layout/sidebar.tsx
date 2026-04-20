@@ -2,24 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
-    LayoutDashboard,
     Users,
     Phone,
     CreditCard,
     Settings,
     Bot,
-    BookOpen,
-    Zap,
     GitBranch,
-    PlayCircle,
-    Contact,
-    Puzzle,
     FileText,
-    Building2,
-    ChevronDown,
     BarChart3,
     KanbanSquare
 } from "lucide-react";
@@ -28,97 +19,68 @@ import { MinuteBalanceDisplay } from "./minute-balance-display";
 import { WorkspaceDisplay } from "./workspace-display";
 import { NotificationCenter } from "./notification-center";
 
+export interface SidebarInitialData {
+    clientId: string;
+    accountType: string | null;
+    businessName: string | null;
+    clientName: string | null;
+    balance: number | null;
+    accessibleClients: Array<{ id: string; name: string; business_name: string | null }>;
+    initialUnreadCount: number;
+}
+
 const baseRoutes = [
-    {
-        label: "Agents",
-        icon: Bot,
-        href: "/agents",
-    },
-    {
-        label: "Contacts",
-        icon: Users,
-        href: "/contacts",
-    },
-    {
-        label: "Pipeline",
-        icon: KanbanSquare,
-        href: "/pipeline",
-    },
-    {
-        label: "Analytics",
-        icon: BarChart3,
-        href: "/analytics",
-    },
-    {
-        label: "Logs",
-        icon: FileText,
-        href: "/logs",
-    },
-    {
-        label: "Billing",
-        icon: CreditCard,
-        href: "/billing",
-    },
+    { label: "Agents", icon: Bot, href: "/agents" },
+    { label: "Contacts", icon: Users, href: "/contacts" },
+    { label: "Pipeline", icon: KanbanSquare, href: "/pipeline" },
+    { label: "Analytics", icon: BarChart3, href: "/analytics" },
+    { label: "Logs", icon: FileText, href: "/logs" },
+    { label: "Billing", icon: CreditCard, href: "/billing" },
 ];
 
-// Additional routes for TYPE B (UMBRELLA) clients
 const umbrellaRoutes = [
-    {
-        label: "Sequences",
-        icon: GitBranch,
-        href: "/sequences",
-    },
-    {
-        label: "Phone Numbers",
-        icon: Phone,
-        href: "/phone-numbers",
-    },
+    { label: "Sequences", icon: GitBranch, href: "/sequences" },
+    { label: "Phone Numbers", icon: Phone, href: "/phone-numbers" },
 ];
 
 const bottomRoutes = [
-    {
-        label: "Settings",
-        icon: Settings,
-        href: "/settings",
-    },
-]
+    { label: "Settings", icon: Settings, href: "/settings" },
+];
 
-export const Sidebar = () => {
+export const Sidebar = ({ initialData }: { initialData: SidebarInitialData }) => {
     const pathname = usePathname();
-    const clientId = pathname.split('/')[2];
-    const [accountType, setAccountType] = useState<string | null>(null);
-
-    // Fetch client account type to determine which nav items to show
-    useEffect(() => {
-        if (!clientId) return;
-        fetch(`/api/client/${clientId}/info`)
-            .then(res => res.json())
-            .then(data => {
-                if (data?.account_type) {
-                    setAccountType(data.account_type);
-                }
-            })
-            .catch(() => {
-                // Fallback: show base routes only
-            });
-    }, [clientId]);
+    const {
+        clientId,
+        accountType,
+        businessName,
+        clientName,
+        balance,
+        accessibleClients,
+        initialUnreadCount,
+    } = initialData;
 
     const isUmbrella = accountType === "UMBRELLA";
     const routes = isUmbrella ? [...baseRoutes, ...umbrellaRoutes] : baseRoutes;
 
     return (
         <div className="flex flex-col h-full bg-white border-r border-gray-200">
-            {/* Workspace Display + Notifications */}
             <div className="flex items-center justify-between pr-2">
                 <div className="flex-1 min-w-0">
-                    <WorkspaceDisplay clientId={clientId} />
+                    <WorkspaceDisplay
+                        clientId={clientId}
+                        initialCurrentClient={{
+                            id: clientId,
+                            name: clientName || "",
+                            business_name: businessName,
+                        }}
+                        initialAllClients={accessibleClients}
+                    />
                 </div>
-                <NotificationCenter clientId={clientId} />
+                <NotificationCenter clientId={clientId} initialUnreadCount={initialUnreadCount} />
             </div>
 
             <div className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5 scrollbar-thin scrollbar-thumb-gray-200">
                 {routes.map((route) => {
-                    // Construct absolute path: /client/[id]/[page]
                     const href = `/client/${clientId}${route.href}`;
                     const isActive = pathname === href || pathname.startsWith(`${href}/`);
                     return (
@@ -163,9 +125,8 @@ export const Sidebar = () => {
                 })}
             </div>
 
-            {/* Balance / Credits Status */}
             <div className="p-4 border-t border-gray-100 space-y-3">
-                <MinuteBalanceDisplay clientId={clientId} />
+                <MinuteBalanceDisplay clientId={clientId} initialBalance={balance} />
 
                 <div className="flex items-center gap-2 px-1 py-2">
                     <UserButton

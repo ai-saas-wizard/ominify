@@ -1,12 +1,40 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { canAccessClient, isAdmin, linkClerkIdToMember } from "@/lib/auth";
+import { linkClerkIdToMember } from "@/lib/auth";
 import { hasActiveSubscription } from "@/lib/access";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { Sidebar } from "@/components/layout/sidebar";
+import { Sidebar, type SidebarInitialData } from "@/components/layout/sidebar";
 import { supabase } from "@/lib/supabase";
+import { getOrCreateMinuteBalance } from "@/lib/billing";
+import { getUnreadNotificationCount } from "@/app/actions/sequence-actions";
 import Link from "next/link";
 import { WalkthroughProvider } from "@/components/walkthrough/walkthrough-provider";
+
+async function fetchAccessibleClients(userId: string) {
+    const { data: clients } = await supabase
+        .from("clients")
+        .select("id, name")
+        .eq("clerk_id", userId)
+        .order("name");
+
+    const list = clients || [];
+    if (list.length === 0) return [];
+
+    const { data: profiles } = await supabase
+        .from("tenant_profiles")
+        .select("client_id, legal_business_name")
+        .in("client_id", list.map((c) => c.id));
+
+    const profileMap = new Map(
+        (profiles || []).map((p) => [p.client_id, p.legal_business_name as string | null])
+    );
+
+    return list.map((c) => ({
+        id: c.id as string,
+        name: c.name as string,
+        business_name: profileMap.get(c.id as string) || null,
+    }));
+}
 
 export default async function ClientLayout({
     children,
@@ -15,25 +43,60 @@ export default async function ClientLayout({
     children: React.ReactNode;
     params: Promise<{ clientId: string }>;
 }) {
-    const { clientId } = await params;
-    const { userId } = await auth();
-    const user = await currentUser();
+    const [{ clientId }, authResult, user] = await Promise.all([
+        params,
+        auth(),
+        currentUser(),
+    ]);
 
+    const userId = authResult.userId;
     if (!userId || !user) {
         redirect("/sign-in");
     }
 
     const userEmail = user.emailAddresses[0]?.emailAddress;
-
     if (!userEmail) {
         redirect("/sign-in");
     }
 
-    // Link clerk_id to any matching member entries
-    await linkClerkIdToMember(userEmail, userId);
+    const emailLower = userEmail.toLowerCase();
 
-    // Check if user can access this client
-    const hasAccess = await canAccessClient(userEmail, clientId) || await canAccessClient(userId, clientId);
+    const [
+        _link,
+        adminByEmail,
+        adminById,
+        memberByEmail,
+        memberById,
+        ownerCheck,
+        clientRecordResult,
+        profileResult,
+        subscriptionAccess,
+        h,
+        balance,
+        accessibleClients,
+        unreadCountResult,
+    ] = await Promise.all([
+        linkClerkIdToMember(userEmail, userId),
+        supabase.from("admin_users").select("id").eq("email", emailLower).maybeSingle(),
+        supabase.from("admin_users").select("id").eq("clerk_id", userId).maybeSingle(),
+        supabase.from("client_members").select("id").eq("client_id", clientId).eq("email", emailLower).maybeSingle(),
+        supabase.from("client_members").select("id").eq("client_id", clientId).eq("clerk_id", userId).maybeSingle(),
+        supabase.from("clients").select("clerk_id").eq("id", clientId).maybeSingle(),
+        supabase.from("clients").select("account_type, disabled, name").eq("id", clientId).maybeSingle(),
+        supabase.from("tenant_profiles").select("legal_business_name, onboarding_completed, walkthrough_completed").eq("client_id", clientId).maybeSingle(),
+        hasActiveSubscription(clientId).catch(() => ({ allowed: true as const, reason: undefined })),
+        headers(),
+        getOrCreateMinuteBalance(clientId).catch(() => null),
+        fetchAccessibleClients(userId).catch(() => []),
+        getUnreadNotificationCount(clientId).catch(() => ({ success: false as const, count: 0 })),
+    ]);
+
+    const userIsAdmin = !!adminByEmail.data || !!adminById.data;
+    const isMember = !!memberByEmail.data || !!memberById.data;
+    const isOwner = (ownerCheck.data as { clerk_id: string | null } | null)?.clerk_id === userId;
+    const hasAccess = userIsAdmin || isMember || isOwner;
+    const clientRecord = clientRecordResult.data as { account_type: string; disabled: boolean; name: string } | null;
+    const profile = profileResult.data as { legal_business_name: string | null; onboarding_completed: boolean | null; walkthrough_completed: boolean | null } | null;
 
     if (!hasAccess) {
         return (
@@ -59,76 +122,49 @@ export default async function ClientLayout({
         );
     }
 
-    // Check if client is disabled (admins can still access)
-    const { data: clientRecord } = await supabase
-        .from("clients")
-        .select("account_type, disabled")
-        .eq("id", clientId)
-        .single();
-
-    if (clientRecord?.disabled) {
-        const userIsAdmin = await isAdmin(userEmail) || await isAdmin(userId);
-        if (!userIsAdmin) {
-            return (
-                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                    <div className="text-center max-w-md mx-auto p-8">
-                        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                            </svg>
-                        </div>
-                        <h1 className="text-2xl font-bold text-gray-900 mb-2">Account Disabled</h1>
-                        <p className="text-gray-600 mb-6">
-                            This client account has been disabled by an administrator. Please contact support if you believe this is an error.
-                        </p>
-                        <p className="text-sm text-gray-500">
-                            Signed in as: <span className="font-medium">{userEmail}</span>
-                        </p>
-                        <a href="/" className="mt-6 inline-block text-emerald-600 hover:underline">
-                            &larr; Go back home
-                        </a>
+    if (clientRecord?.disabled && !userIsAdmin) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center max-w-md mx-auto p-8">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
                     </div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">Account Disabled</h1>
+                    <p className="text-gray-600 mb-6">
+                        This client account has been disabled by an administrator. Please contact support if you believe this is an error.
+                    </p>
+                    <p className="text-sm text-gray-500">
+                        Signed in as: <span className="font-medium">{userEmail}</span>
+                    </p>
+                    <a href="/" className="mt-6 inline-block text-emerald-600 hover:underline">
+                        &larr; Go back home
+                    </a>
                 </div>
-            );
+            </div>
+        );
+    }
+
+    if (!userIsAdmin) {
+        const currentPath =
+            h.get("x-invoke-path") ||
+            h.get("x-pathname") ||
+            h.get("next-url") ||
+            "";
+        const allowlist = [
+            `/client/${clientId}/subscribe`,
+            `/client/${clientId}/billing`,
+        ];
+        const onAllowedRoute = allowlist.some((p) => currentPath.startsWith(p));
+        if (!onAllowedRoute && !subscriptionAccess.allowed) {
+            redirect(`/client/${clientId}/subscribe`);
         }
     }
 
-    // Paywall gate — redirect unsubscribed UMBRELLA clients away from
-    // everything except the subscribe page(s) and billing (so they can
-    // re-subscribe). Admins bypass so they can still support accounts.
-    {
-        const userIsAdmin = (await isAdmin(userEmail)) || (await isAdmin(userId));
-        if (!userIsAdmin) {
-            const h = await headers();
-            const currentPath =
-                h.get("x-invoke-path") ||
-                h.get("x-pathname") ||
-                h.get("next-url") ||
-                "";
-            const allowlist = [
-                `/client/${clientId}/subscribe`,
-                `/client/${clientId}/billing`,
-            ];
-            const onAllowedRoute = allowlist.some((p) => currentPath.startsWith(p));
-            if (!onAllowedRoute) {
-                const access = await hasActiveSubscription(clientId);
-                if (!access.allowed) {
-                    redirect(`/client/${clientId}/subscribe`);
-                }
-            }
-        }
-    }
-
-    // Check if UMBRELLA client needs onboarding banner or walkthrough
     let showOnboardingBanner = false;
     let showWalkthrough = false;
     if (clientRecord?.account_type === "UMBRELLA") {
-        const { data: profile } = await supabase
-            .from("tenant_profiles")
-            .select("onboarding_completed, walkthrough_completed")
-            .eq("client_id", clientId)
-            .single();
-
         if (!profile?.onboarding_completed) {
             showOnboardingBanner = true;
         } else if (!profile?.walkthrough_completed) {
@@ -136,17 +172,24 @@ export default async function ClientLayout({
         }
     }
 
+    const sidebarInitialData: SidebarInitialData = {
+        clientId,
+        accountType: clientRecord?.account_type ?? null,
+        businessName: profile?.legal_business_name ?? null,
+        clientName: clientRecord?.name ?? null,
+        balance: balance?.balance_minutes ?? null,
+        accessibleClients,
+        initialUnreadCount: unreadCountResult.success ? unreadCountResult.count : 0,
+    };
+
     return (
         <WalkthroughProvider clientId={clientId} shouldShowWalkthrough={showWalkthrough}>
             <div className="flex h-screen bg-gray-50">
-                {/* Sidebar */}
                 <div className="w-56 flex-shrink-0">
-                    <Sidebar />
+                    <Sidebar initialData={sidebarInitialData} />
                 </div>
 
-                {/* Main Content */}
                 <main className="flex-1 overflow-auto">
-                    {/* Onboarding Incomplete Banner */}
                     {showOnboardingBanner && (
                         <div className="bg-amber-50 border-b border-amber-200 px-6 py-3">
                             <div className="flex items-center justify-between">
