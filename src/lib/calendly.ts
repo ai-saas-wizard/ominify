@@ -577,6 +577,10 @@ export async function createEvent(
     }
 
     // POST /invitees (Scheduling API).
+    // Per Calendly's API reference, invitee.email is required — there is no
+    // phone-only booking. We pass the real phone as text_reminder_number so
+    // Calendly's SMS reminder workflow can reach the caller. If no email was
+    // provided, inviteeEmail is a synthesized placeholder (see synthEmailFromPhone).
     const createRes = await calendlyFetch<{
         resource: CalendlyInvitee & { event_uri?: string };
     }>(config.pat, "/invitees", {
@@ -588,6 +592,7 @@ export async function createEvent(
                 name: inviteeName,
                 email: inviteeEmail,
                 timezone: tz,
+                ...(phoneE164 ? { text_reminder_number: phoneE164 } : {}),
             },
         }),
     });
