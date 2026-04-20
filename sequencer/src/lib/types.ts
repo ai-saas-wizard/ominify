@@ -149,6 +149,12 @@ export interface Sequence {
     sequence_strategy: SequenceStrategy | null;
     // Phase 7: SMS Chatbot Mode
     enable_chatbot_mode: boolean;
+    // Operator instructions for this campaign ("current offer", special context).
+    // Injected into system prompt as business_context override at dispatch time.
+    task_context: string | null;
+    // Max outbound actions per minute. When set, bulk enrollment staggers
+    // next_step_at so the scheduler doesn't fire all calls simultaneously.
+    pacing_per_minute: number | null;
     created_at: string;
     updated_at: string;
 }
@@ -283,6 +289,10 @@ export interface InlineVapiAgent {
     voicemailMessage?: string;
     voicemailDetection?: any;
     serverUrl?: string;
+    // Per-contact variables for VAPI {{placeholder}} substitution at call time.
+    // Populated from enrollment.custom_variables at dispatch; merged with
+    // call-time values (currentDate, tenantTimezone) in vapi-worker.
+    variableValues?: Record<string, string>;
 }
 
 export interface SequenceEnrollment {
@@ -399,6 +409,11 @@ export interface Contact {
     last_call_at: string | null;
     conversation_summary: string | null;
     custom_fields: Record<string, any> | null;
+    // Persistent opt-out: set when the contact says STOP on any channel,
+    // clicks an unsubscribe link, or is marked DNC manually. Scheduler checks
+    // this before claiming any outbound step across all sequences.
+    opted_out_at: string | null;
+    opted_out_channel: string | null;
     created_at: string;
     updated_at: string;
 }

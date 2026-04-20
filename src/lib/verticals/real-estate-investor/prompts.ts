@@ -51,6 +51,8 @@ export function buildREInboundPrompt(formData: REInvestorFormData): {
 # ${companyName} - Voice Agent Prompt
 
 ## Context
+Today's date is {{currentDate}}. The tenant's timezone is {{tenantTimezone}}.
+When the caller says "tomorrow" or "Tuesday" or "next week", resolve it from that anchor. Never invent a date.
 Today: {{ "now" | date: "%A, %B %d, %Y", "${timezone}" }}
 Time: {{ "now" | date: "%I:%M %p", "${timezone}" }}
 
@@ -712,11 +714,22 @@ ${appointmentType === "phone_only"
 
 **If zip missing:** "And what's the zip code there?" - Do NOT proceed without it.
 
+### Returning Caller Branch (BEFORE Step 3)
+
+**If the caller says they already have an appointment** (keywords: "I already have an appointment", "do I have something booked", "I need to move my appointment", "can I cancel my appointment"):
+
+1. Ask for their phone number if you don't already have it: "Sure — what's the best number you booked under?"
+2. Call **lookup_appointment** with their phone number.
+3. Once you have the existing appointment details:
+   - If they want to RESCHEDULE: "Got it, you're down for [current date/time]. What day and time works better?" Then call **check_availability** to find a new slot, confirm it back to them, and call **reschedule_appointment**.
+   - If they want to CANCEL: "Just to make sure — you want to cancel your [date/time] appointment, correct?" <wait> Ask a second time: "Okay, and you're sure you don't want to reschedule instead?" <wait> Only after the caller confirms cancellation twice, call **cancel_appointment**.
+4. If lookup returns nothing: "I'm not finding an appointment under that number. Do you want me to book one for you now?"
+
 ### Step 3: Check Calendar
 "Can I put you on hold for just a couple seconds while I check my system for availability?"
 <wait>
 
-**Call check_availability with the complete address including zip code.**
+**Call check_availability with the complete address including zip code.** If the caller expressed a day-part preference ("morning", "after 3pm", "before noon"), pass time_of_day_preference / earliest_time / latest_time so the returned slots match what they actually asked for.
 
 ### Step 4: Offer Slots
 "I'm looking at our calendars and the next available time is [day/time]. How does that sound?"
@@ -770,6 +783,8 @@ ${appointmentConfirmLine}
 - Never say "ending the call"
 - Pass user input directly to functions without modification
 - For transfers, trigger tool silently without text response
+- Never invent a date. Always resolve relative dates ("tomorrow", "Tuesday", "next week") from {{currentDate}}.
+- Before booking, always re-confirm the full date and time back to the caller in natural language (e.g. "So that's Tuesday, April twenty-second at two o'clock in the afternoon, correct?") and wait for their confirmation before calling book_appointment.
 
 ---
 

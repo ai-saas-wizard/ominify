@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import * as Papa from "papaparse";
 import {
     Loader2,
@@ -26,6 +26,8 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { createTaskFromDescription } from "@/app/actions/ai-generate-sequence-actions";
+import { bulkEnrollFromCSV } from "@/app/actions/sequence-actions";
+import { CSVColumnMapper } from "@/components/sequences/csv-column-mapper";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +65,9 @@ export function TaskDialog({
     onTestMode,
 }: TaskDialogProps) {
     const [instruction, setInstruction] = useState("");
+    const [taskContext, setTaskContext] = useState("");
+    const [pacingPerMinute, setPacingPerMinute] = useState<string>("");
+    const taskContextRef = useRef<HTMLTextAreaElement | null>(null);
     const [csvFile, setCsvFile] = useState<File | null>(null);
     const [csvColumns, setCsvColumns] = useState<string[]>([]);
     const [csvRowCount, setCsvRowCount] = useState(0);
@@ -70,6 +75,21 @@ export function TaskDialog({
     const [csvParsedData, setCsvParsedData] = useState<Record<string, string>[]>([]);
     const [loadingAction, setLoadingAction] = useState<"launch" | "test" | null>(null);
     const [error, setError] = useState("");
+
+    // Two-phase flow: "brief" (user writes task + uploads CSV) → "mapping"
+    // (user maps columns). We show the mapper before calling the server so we
+    // don't create a task then fail mid-enroll.
+    const [phase, setPhase] = useState<"brief" | "mapping">("brief");
+    const [pendingMode, setPendingMode] = useState<"launch" | "test" | null>(null);
+    const [enrollmentErrors, setEnrollmentErrors] = useState<string[]>([]);
+    // Set after a successful bulk enroll so "Retry failed rows" can hit the
+    // same sequence with a filtered subset of rows.
+    const [lastEnrolledSequenceId, setLastEnrolledSequenceId] = useState<
+        string | null
+    >(null);
+    const [lastMapping, setLastMapping] = useState<Record<string, string> | null>(
+        null
+    );
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // ── CSV Parsing (simple header extraction) ──────────────────────────────
@@ -150,22 +170,37 @@ export function TaskDialog({
 
     // ── Submit Handlers ─────────────────────────────────────────────────────
 
-    const handleSubmit = useCallback(
-        async (mode: "launch" | "test") => {
-            if (!instruction.trim()) {
-                setError("Please describe what you want to do.");
-                return;
-            }
+    const resetAll = useCallback(() => {
+        setInstruction("");
+        setTaskContext("");
+        setPacingPerMinute("");
+        setCsvFile(null);
+        setCsvColumns([]);
+        setCsvRowCount(0);
+        setCsvSampleData([]);
+        setCsvParsedData([]);
+        setError("");
+        setPhase("brief");
+        setPendingMode(null);
+        setEnrollmentErrors([]);
+        setLastEnrolledSequenceId(null);
+        setLastMapping(null);
+    }, []);
 
+    const finishTaskCreation = useCallback(
+        async (mode: "launch" | "test", mapping?: Record<string, string>) => {
             setLoadingAction(mode);
             setError("");
+            setEnrollmentErrors([]);
 
             try {
                 const result = await createTaskFromDescription(
                     clientId,
                     instruction.trim(),
                     csvColumns.length > 0 ? csvColumns : undefined,
-                    channelReadiness
+                    channelReadiness,
+                    taskContext.trim() || undefined,
+                    pacingPerMinute.trim() ? Math.max(1, parseInt(pacingPerMinute.trim(), 10)) : undefined
                 );
 
                 if (!result.success || !result.sequenceId) {
@@ -174,47 +209,202 @@ export function TaskDialog({
                     return;
                 }
 
-                // Success — invoke the appropriate callback
-                if (mode === "test") {
-                    onTestMode(result.sequenceId);
-                } else {
-                    onLaunch(result.sequenceId);
+                const sequenceId = result.sequenceId;
+
+                // If CSV + mapping provided, enroll contacts.
+                if (mapping && csvParsedData.length > 0) {
+                    const enrollResult = await bulkEnrollFromCSV(
+                        sequenceId,
+                        clientId,
+                        csvParsedData,
+                        mapping as any
+                    );
+
+                    if (!enrollResult.success) {
+                        setError(enrollResult.error || "Failed to enroll contacts.");
+                        setLoadingAction(null);
+                        return;
+                    }
+
+                    const { enrolled, errors: enrollErrors } = enrollResult.data!;
+                    setEnrollmentErrors(enrollErrors || []);
+                    setLastEnrolledSequenceId(sequenceId);
+                    setLastMapping(mapping);
+
+                    // Any failures — stay on the mapping screen so the operator
+                    // can retry the failed subset or continue anyway.
+                    if (enrollErrors && enrollErrors.length > 0) {
+                        if (enrolled === 0) {
+                            setError(
+                                `No contacts enrolled. ${enrollErrors.length} row(s) failed.`
+                            );
+                        }
+                        setLoadingAction(null);
+                        return;
+                    }
                 }
 
-                // Close dialog on success
-                onOpenChange(false);
+                // Fire callback
+                if (mode === "test") {
+                    onTestMode(sequenceId);
+                } else {
+                    onLaunch(sequenceId);
+                }
 
-                // Reset state
-                setInstruction("");
-                setCsvFile(null);
-                setCsvColumns([]);
-                setCsvRowCount(0);
-                setCsvSampleData([]);
-                setCsvParsedData([]);
-                setError("");
+                onOpenChange(false);
+                resetAll();
             } catch (err) {
                 setError(err instanceof Error ? err.message : "An unexpected error occurred.");
             } finally {
                 setLoadingAction(null);
             }
         },
-        [instruction, csvColumns, clientId, channelReadiness, onLaunch, onTestMode, onOpenChange]
+        [
+            instruction,
+            taskContext,
+            pacingPerMinute,
+            csvColumns,
+            csvParsedData,
+            clientId,
+            channelReadiness,
+            onLaunch,
+            onTestMode,
+            onOpenChange,
+            resetAll,
+        ]
+    );
+
+    const handleSubmit = useCallback(
+        async (mode: "launch" | "test") => {
+            if (!instruction.trim()) {
+                setError("Please describe what you want to do.");
+                return;
+            }
+
+            // If CSV uploaded, show mapping step first.
+            if (csvFile && csvColumns.length > 0) {
+                setPendingMode(mode);
+                setPhase("mapping");
+                setError("");
+                return;
+            }
+
+            try {
+                await finishTaskCreation(mode);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : "An unexpected error occurred.");
+            }
+        },
+        [instruction, csvFile, csvColumns, finishTaskCreation]
     );
 
     const handleClose = useCallback(() => {
         if (loadingAction !== null) return;
         onOpenChange(false);
         // Reset after animation
-        setTimeout(() => {
-            setInstruction("");
-            setCsvFile(null);
-            setCsvColumns([]);
-            setCsvRowCount(0);
-            setCsvSampleData([]);
-            setCsvParsedData([]);
-            setError("");
-        }, 200);
-    }, [loadingAction, onOpenChange]);
+        setTimeout(resetAll, 200);
+    }, [loadingAction, onOpenChange, resetAll]);
+
+    const handleMappingConfirm = useCallback(
+        (mapping: Record<string, string>) => {
+            if (!pendingMode) return;
+            void finishTaskCreation(pendingMode, mapping);
+        },
+        [pendingMode, finishTaskCreation]
+    );
+
+    const handleMappingCancel = useCallback(() => {
+        setPhase("brief");
+        setPendingMode(null);
+    }, []);
+
+    // Extract 1-based row indexes from error strings of the form "Row N: ..."
+    const parseFailedRowIndexes = (errs: string[]): number[] => {
+        const idxs = new Set<number>();
+        for (const err of errs) {
+            const m = err.match(/^Row (\d+):/);
+            if (m) idxs.add(parseInt(m[1], 10));
+        }
+        return [...idxs];
+    };
+
+    const handleRetryFailedRows = useCallback(async () => {
+        if (!lastEnrolledSequenceId || !lastMapping || enrollmentErrors.length === 0) return;
+        const failedIdxs = parseFailedRowIndexes(enrollmentErrors);
+        if (failedIdxs.length === 0) return;
+
+        // Rows are 1-indexed in error messages; csvParsedData is 0-indexed.
+        const subset = failedIdxs
+            .map((i) => csvParsedData[i - 1])
+            .filter(Boolean);
+
+        if (subset.length === 0) return;
+
+        setLoadingAction(pendingMode || "launch");
+        setError("");
+        try {
+            const result = await bulkEnrollFromCSV(
+                lastEnrolledSequenceId,
+                clientId,
+                subset,
+                lastMapping as any
+            );
+            if (!result.success) {
+                setError(result.error || "Retry failed.");
+            } else {
+                setEnrollmentErrors(result.data?.errors || []);
+            }
+        } finally {
+            setLoadingAction(null);
+        }
+    }, [lastEnrolledSequenceId, lastMapping, enrollmentErrors, csvParsedData, clientId, pendingMode]);
+
+    // Available variables to offer as clickable chips under the taskContext
+    // field. Built-ins are always shown; CSV columns (if any) append.
+    const availableVariables = useMemo(() => {
+        const builtins = [
+            "first_name",
+            "last_name",
+            "company",
+            "phone",
+            "email",
+            "currentDate",
+            "tenantTimezone",
+        ];
+        const csvExtras = csvColumns.filter((c) => !builtins.includes(c));
+        return [...builtins, ...csvExtras];
+    }, [csvColumns]);
+
+    const insertVariableIntoTaskContext = useCallback((varName: string) => {
+        const token = `{{${varName}}}`;
+        const el = taskContextRef.current;
+        if (!el) {
+            setTaskContext((prev) => `${prev}${token}`);
+            return;
+        }
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? el.value.length;
+        const next = el.value.slice(0, start) + token + el.value.slice(end);
+        setTaskContext(next);
+        // Restore cursor after the inserted token on the next tick.
+        requestAnimationFrame(() => {
+            if (!taskContextRef.current) return;
+            const pos = start + token.length;
+            taskContextRef.current.focus();
+            taskContextRef.current.setSelectionRange(pos, pos);
+        });
+    }, []);
+
+    const handleContinueAnyway = useCallback(() => {
+        if (!lastEnrolledSequenceId) return;
+        if (pendingMode === "test") {
+            onTestMode(lastEnrolledSequenceId);
+        } else {
+            onLaunch(lastEnrolledSequenceId);
+        }
+        onOpenChange(false);
+        resetAll();
+    }, [lastEnrolledSequenceId, pendingMode, onLaunch, onTestMode, onOpenChange, resetAll]);
 
     // ── Derived state ───────────────────────────────────────────────────────
 
@@ -236,7 +426,7 @@ export function TaskDialog({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col overflow-hidden"
+                        className={`bg-white rounded-xl shadow-xl w-full ${phase === "mapping" ? "max-w-2xl" : "max-w-lg"} flex flex-col overflow-hidden`}
                     >
                         {/* ── Header ─────────────────────────────────────── */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
@@ -245,7 +435,7 @@ export function TaskDialog({
                                     <Rocket className="w-4 h-4 text-emerald-600" />
                                 </div>
                                 <h2 className="text-lg font-semibold text-gray-900">
-                                    New Task
+                                    {phase === "mapping" ? "Map CSV Columns" : "New Task"}
                                 </h2>
                             </div>
                             <button
@@ -257,6 +447,72 @@ export function TaskDialog({
                             </button>
                         </div>
 
+                        {phase === "mapping" ? (
+                            <div className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Tell us which column is the phone number. Everything else becomes a conversation variable the agent can reference like{" "}
+                                    <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{`{{first_name}}`}</code>.
+                                </p>
+                                <CSVColumnMapper
+                                    columns={csvColumns}
+                                    sampleData={csvSampleData}
+                                    onConfirm={handleMappingConfirm}
+                                    onCancel={handleMappingCancel}
+                                />
+                                {loadingAction !== null && (
+                                    <div className="mt-4 text-sm text-gray-500 flex items-center gap-2">
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Enrolling {csvRowCount} contacts…
+                                    </div>
+                                )}
+                                {error && (
+                                    <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
+                                        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                        <span>{error}</span>
+                                    </div>
+                                )}
+                                {enrollmentErrors.length > 0 && (
+                                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+                                        <div className="font-medium mb-1">
+                                            {enrollmentErrors.length} row(s) skipped:
+                                        </div>
+                                        <ul className="space-y-0.5 max-h-32 overflow-y-auto">
+                                            {enrollmentErrors.slice(0, 20).map((err, idx) => (
+                                                <li key={idx}>• {err}</li>
+                                            ))}
+                                            {enrollmentErrors.length > 20 && (
+                                                <li className="italic">
+                                                    …and {enrollmentErrors.length - 20} more
+                                                </li>
+                                            )}
+                                        </ul>
+                                        {lastEnrolledSequenceId && (
+                                            <div className="mt-3 flex items-center gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={handleRetryFailedRows}
+                                                    disabled={loadingAction !== null || parseFailedRowIndexes(enrollmentErrors).length === 0}
+                                                >
+                                                    {loadingAction !== null ? (
+                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                    ) : null}
+                                                    Retry failed rows
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={handleContinueAnyway}
+                                                    disabled={loadingAction !== null}
+                                                >
+                                                    Continue to sequence
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                        <>
                         {/* ── Body ───────────────────────────────────────── */}
                         <div className="px-6 py-5 space-y-5 overflow-y-auto max-h-[calc(80vh-140px)]">
                             {/* Instruction Textarea */}
@@ -272,6 +528,70 @@ export function TaskDialog({
                                     disabled={loadingAction !== null}
                                     className="min-h-[100px]"
                                 />
+                            </div>
+
+                            {/* Special Instructions / Campaign Context */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-gray-700">
+                                    Special instructions for this batch{" "}
+                                    <span className="text-xs text-gray-400 font-normal">
+                                        (optional)
+                                    </span>
+                                </label>
+                                <Textarea
+                                    ref={taskContextRef}
+                                    value={taskContext}
+                                    onChange={(e) => setTaskContext(e.target.value)}
+                                    placeholder={'e.g. "Mention our 24-hour close offer to {{first_name}}. Only book walkthroughs Mon–Fri 1–5 PM."'}
+                                    rows={3}
+                                    disabled={loadingAction !== null}
+                                />
+                                {/* Variable chips — click to insert at cursor */}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="text-xs text-gray-400">Insert variable:</span>
+                                    {availableVariables.map((v) => (
+                                        <button
+                                            key={v}
+                                            type="button"
+                                            onClick={() => insertVariableIntoTaskContext(v)}
+                                            disabled={loadingAction !== null}
+                                            className="text-xs font-mono bg-gray-100 hover:bg-emerald-50 hover:text-emerald-700 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:border-emerald-300 transition-colors disabled:opacity-50"
+                                            title={`Insert {{${v}}} at cursor`}
+                                        >
+                                            {`{{${v}}}`}
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-400">
+                                    Injected into the agent's prompt for every call — use <code>{'{{first_name}}'}</code> etc. to personalize.
+                                </p>
+                            </div>
+
+                            {/* Pacing */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-gray-700">
+                                    Pace{" "}
+                                    <span className="text-xs text-gray-400 font-normal">
+                                        (optional, applies to bulk CSV)
+                                    </span>
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={600}
+                                        inputMode="numeric"
+                                        value={pacingPerMinute}
+                                        onChange={(e) => setPacingPerMinute(e.target.value)}
+                                        placeholder="e.g. 20"
+                                        disabled={loadingAction !== null}
+                                        className="w-28 rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50"
+                                    />
+                                    <span className="text-sm text-gray-500">calls per minute</span>
+                                </div>
+                                <p className="text-xs text-gray-400">
+                                    Leave blank to fire everything immediately. Set a number to spread a large batch over time (recommended: 10–30/min).
+                                </p>
                             </div>
 
                             {/* CSV Upload Area */}
@@ -421,9 +741,29 @@ export function TaskDialog({
                         {/* ── Error ──────────────────────────────────────── */}
                         {error && (
                             <div className="px-6 pb-2 flex-shrink-0">
-                                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                                    {error}
-                                </p>
+                                {error.startsWith("NO_OUTBOUND_AGENT") ? (
+                                    <div className="text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                                        <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                                        <div className="flex-1">
+                                            <p className="text-amber-900 font-medium">
+                                                You need an outbound agent first.
+                                            </p>
+                                            <p className="text-amber-800 mt-1">
+                                                This task wants to place calls, but no outbound agent is configured.{" "}
+                                                <a
+                                                    href={`/client/${clientId}/agents/new`}
+                                                    className="underline font-medium hover:text-amber-900"
+                                                >
+                                                    Configure outbound agent →
+                                                </a>
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                                        {error}
+                                    </p>
+                                )}
                             </div>
                         )}
 
@@ -455,6 +795,8 @@ export function TaskDialog({
                                 Launch Task
                             </Button>
                         </div>
+                        </>
+                        )}
                     </motion.div>
                 </div>
             )}

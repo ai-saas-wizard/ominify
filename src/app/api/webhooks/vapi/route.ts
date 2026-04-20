@@ -9,6 +9,7 @@ import { canPlaceCall } from "@/lib/access";
 import { getClientVapiKey } from "@/lib/client-secrets";
 import { endCall } from "@/lib/vapi";
 import { auditLog } from "@/lib/audit";
+import { getCallTimeVariables } from "@/lib/call-variables";
 import crypto from "crypto";
 
 // When true, reject webhook requests that don't present a valid signature.
@@ -841,7 +842,45 @@ export async function POST(request: Request) {
             await handleCallStarted(call);
             const context = await getContactContext(call);
             console.log('[VAPI WEBHOOK] Returning context:', context ? 'found' : 'none');
-            return NextResponse.json(context || {});
+
+            // Resolve currentDate + tenantTimezone so {{currentDate}} /
+            // {{tenantTimezone}} placeholders in the system prompt get
+            // interpolated at call start.
+            let callVars: Awaited<ReturnType<typeof getCallTimeVariables>> | null = null;
+            try {
+                const clientId = call.orgId
+                    ? await getClientIdByOrgId(call.orgId, call._assistantId)
+                    : null;
+                if (clientId) {
+                    callVars = await getCallTimeVariables(clientId);
+                }
+            } catch (err) {
+                console.warn('[VAPI WEBHOOK] Failed to compute call-time variables:', err);
+            }
+
+            // Merge existing contact variables with call-time variables.
+            // We emit BOTH the legacy top-level `variableValues` (preserves
+            // whatever prior behavior VAPI accepted) AND the canonical
+            // `assistantOverrides.variableValues` shape — VAPI ignores unknown
+            // fields, so including both is safe and future-proof.
+            const mergedVariableValues: Record<string, any> = {
+                ...(context?.variableValues || {}),
+                ...(callVars
+                    ? { currentDate: callVars.currentDate, tenantTimezone: callVars.tenantTimezone }
+                    : {}),
+            };
+
+            const responseBody: Record<string, any> = {
+                // Legacy top-level shape (matches pre-existing behavior)
+                ...(context || {}),
+                variableValues: mergedVariableValues,
+                // Canonical VAPI assistant-request shape
+                assistantOverrides: {
+                    variableValues: mergedVariableValues,
+                },
+            };
+
+            return NextResponse.json(responseBody);
         }
 
         if (messageType === 'call-started' || messageType === 'assistant.started' || messageType === 'speech-update') {

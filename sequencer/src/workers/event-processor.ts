@@ -836,6 +836,16 @@ async function maybeTriggerChatbotReply(
                     contact_replied: true,
                 });
 
+                // Persist opt-out at the CONTACT level so every sequence skips them.
+                await supabase
+                    .from('contacts')
+                    .update({
+                        opted_out_at: new Date().toISOString(),
+                        opted_out_channel: 'sms',
+                    })
+                    .eq('id', enrollment.contact_id)
+                    .is('opted_out_at', null);
+
                 // Record the opt-out interaction
                 await recordInteraction({
                     clientId: enrollment.tenant_id,
@@ -1357,6 +1367,14 @@ async function maybeTriggerEmailReply(
                     status: 'manual_stop' as EnrollmentStatus,
                     contact_replied: true,
                 });
+                await supabase
+                    .from('contacts')
+                    .update({
+                        opted_out_at: new Date().toISOString(),
+                        opted_out_channel: 'email',
+                    })
+                    .eq('id', enrollment.contact_id)
+                    .is('opted_out_at', null);
                 return true;
             }
 

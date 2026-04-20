@@ -325,6 +325,32 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return; // Don't advance, don't reschedule — wait for human to take over
     }
 
+    // 0b. DNC / opt-out gate — applies to outbound channels only.
+    // Set at the CONTACT level so it covers every sequence the contact is in.
+    if (['sms', 'voice'].includes(step.channel) && contact.opted_out_at) {
+        console.log(
+            `[SCHEDULER] Contact ${contact.id} opted out on ${contact.opted_out_channel || 'unknown'} at ${contact.opted_out_at} — marking enrollment ${enrollment.id} as manual_stop`
+        );
+        await supabase
+            .from('sequence_enrollments')
+            .update({
+                status: 'manual_stop',
+                completed_at: new Date().toISOString(),
+            })
+            .eq('id', enrollment.id);
+        await supabase.from('sequence_execution_log').insert({
+            enrollment_id: enrollment.id,
+            step_id: step.id,
+            channel: step.channel,
+            action: 'skipped_opt_out',
+            provider_id: null,
+            provider_response: { opted_out_channel: contact.opted_out_channel, opted_out_at: contact.opted_out_at },
+            call_status: 'skipped',
+            executed_at: new Date().toISOString(),
+        });
+        return;
+    }
+
     // 1. Check skip conditions
     if (shouldSkipStep(enrollment, step.skip_conditions)) {
         console.log(`[SCHEDULER] Skipping step ${step.step_order} - conditions met`);
@@ -605,14 +631,26 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                         promptInjections.tone_directive = toneDirective;
                     }
 
+                    // Merge per-task operator context ("current offer") into
+                    // business_context; explicit step override still wins.
+                    const sectionOverrides: Record<string, string> = {
+                        ...(sequence.task_context
+                            ? {
+                                  business_context: `${blueprint.prompt_sections.business_context}\n\nCampaign context:\n${sequence.task_context}`,
+                              }
+                            : {}),
+                        ...(voiceContent.prompt_section_overrides || {}),
+                    };
+
                     inlineAgent = assembleInlineAgent({
                         blueprint,
-                        promptSectionOverrides: voiceContent.prompt_section_overrides,
+                        promptSectionOverrides: sectionOverrides,
                         promptInjections,
                         toolOverrides: voiceContent.tool_overrides,
                         firstMessageOverride: voiceContent.first_message !== blueprint.first_message
                             ? voiceContent.first_message
                             : undefined,
+                        variableValues: voiceContent.override_variables,
                     });
 
                     console.log(`[SCHEDULER] Blueprint assembled for enrollment ${enrollment.id} (model: ${blueprint.model.model}, voice: ${blueprint.voice.voiceId})`);
@@ -623,6 +661,9 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 
             // Fallback: if no blueprint, inject context into system_prompt the legacy way
             if (!inlineAgent) {
+                if (sequence.task_context) {
+                    voiceContent.system_prompt = `${voiceContent.system_prompt}\n\nCampaign context:\n${sequence.task_context}`;
+                }
                 if (conversationHistoryInjection) {
                     voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${conversationHistoryInjection}`;
                 }

@@ -1174,7 +1174,9 @@ export async function createTaskFromDescription(
     clientId: string,
     instruction: string,
     csvColumns?: string[],
-    availableChannels?: { sms: { ready: boolean }; email: { ready: boolean }; voice: { ready: boolean } }
+    availableChannels?: { sms: { ready: boolean }; email: { ready: boolean }; voice: { ready: boolean } },
+    taskContext?: string,
+    pacingPerMinute?: number
 ): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
     try {
         // ── Fetch tenant profile for business context
@@ -1329,11 +1331,17 @@ Output ONLY the JSON object.`;
         }
 
         // ── Inject VAPI assistant ID for voice steps
+        // Gate: voice steps require an outbound agent; bail out with a clear
+        // error the UI can surface with a "Configure Outbound Agent" CTA.
         if (validation.steps![0].channel === "voice") {
             const vapiId = await getOutboundVapiId(clientId);
-            if (vapiId) {
-                validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
+            if (!vapiId) {
+                return {
+                    success: false,
+                    error: "NO_OUTBOUND_AGENT: This task needs an outbound agent to place calls. Create one from the Agents page, then try again.",
+                };
             }
+            validation.steps = injectVapiAssistantId(validation.steps!, vapiId);
         }
 
         // ── Build sequence strategy for dynamic JIT generation
@@ -1366,14 +1374,21 @@ Output ONLY the JSON object.`;
                 sequence_strategy: sequenceStrategy,
                 metadata: { is_task: true, source_instruction: instruction },
                 enable_chatbot_mode: true,
+                task_context: taskContext?.trim() || null,
+                pacing_per_minute:
+                    pacingPerMinute && pacingPerMinute > 0 ? pacingPerMinute : null,
             })
             .select("id")
             .single();
 
         if (seqError || !sequence) {
-            // If metadata column doesn't exist, retry without it
-            if (seqError?.message?.includes("metadata")) {
-                console.log("[createTaskFromDescription] metadata column not found, inserting without it");
+            // If metadata/task_context/pacing_per_minute column doesn't exist, retry without it
+            if (
+                seqError?.message?.includes("metadata") ||
+                seqError?.message?.includes("task_context") ||
+                seqError?.message?.includes("pacing_per_minute")
+            ) {
+                console.log("[createTaskFromDescription] metadata/task_context/pacing_per_minute column not found, inserting without it");
                 const { data: seq2, error: seqError2 } = await insertSequence(
                     clientId,
                     extracted.sequence_name || "Task Sequence",

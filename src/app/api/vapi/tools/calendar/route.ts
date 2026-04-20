@@ -1,25 +1,58 @@
 import { NextResponse } from "next/server";
-import { getAvailableSlots, createEvent } from "@/lib/google-calendar";
+import {
+    getAvailableSlots,
+    createEvent,
+    lookupAppointmentByPhone,
+    rescheduleEvent,
+    cancelEvent,
+} from "@/lib/google-calendar";
 import { supabase } from "@/lib/supabase";
 
 /**
  * VAPI Tool Endpoint: Calendar Operations
  *
- * VAPI calls this when the assistant invokes "check_availability" or "book_appointment".
+ * Handles five tool calls from VAPI assistants:
+ *   - check_availability
+ *   - book_appointment
+ *   - lookup_appointment
+ *   - reschedule_appointment
+ *   - cancel_appointment
+ *
  * Resolves the tenant (clientId) from the assistantId in the VAPI payload.
  * Falls back to ?clientId= query param for backwards compatibility.
+ *
+ * Response shape:
+ *   { results: [{ toolCallId, result: "speech" }] }   on success
+ *   { results: [{ toolCallId, error:  "speech" }] }   on failure (LLM retries)
  */
 
+interface ToolResult {
+    toolCallId?: string;
+    result?: string;
+    error?: string;
+}
+
+function ok(toolCallId: string | undefined, result: string) {
+    const entry: ToolResult = { toolCallId, result };
+    return NextResponse.json({ results: [entry] });
+}
+
+function fail(toolCallId: string | undefined, error: string) {
+    const entry: ToolResult = { toolCallId, error };
+    return NextResponse.json({ results: [entry] });
+}
+
 export async function POST(request: Request) {
+    let parsedToolCallId: string | undefined;
+
     try {
         const body = await request.json();
 
-        // Extract assistantId from VAPI payload
+        // ─── 1. Resolve clientId ─────────────────────────────────────
         const assistantId = body.message?.call?.assistantId
             || body.message?.assistant?.id
             || null;
 
-        // Resolve clientId: prefer assistantId lookup, fall back to query param
         const { searchParams } = new URL(request.url);
         let clientId = searchParams.get("clientId");
 
@@ -35,133 +68,253 @@ export async function POST(request: Request) {
             }
         }
 
-        console.log('[CALENDAR TOOL] clientId:', clientId, 'assistantId:', assistantId);
-
-        if (!clientId) {
-            console.error('[CALENDAR TOOL] Could not resolve clientId. assistantId:', assistantId);
-            return NextResponse.json(
-                { results: [{ result: "Configuration error. Unable to access the calendar." }] },
-                { status: 200 }
-            );
-        }
-
-        // VAPI sends tool calls in the message payload
-        const toolCall = body.message?.toolCallList?.[0] || body.message;
-        const functionName =
-            toolCall?.functionCall?.name ||
-            toolCall?.function?.name ||
-            toolCall?.name;
-        const args =
-            toolCall?.functionCall?.parameters ||
-            toolCall?.function?.arguments ||
-            toolCall?.parameters ||
+        // ─── 2. Parse tool call (defensive across VAPI shapes) ──────
+        // VAPI docs: message.toolCallList[0]
+        // VAPI GitHub examples: message.toolCalls[0]
+        // Legacy: message.functionCall
+        const toolCall =
+            body.message?.toolCallList?.[0] ||
+            body.message?.toolCalls?.[0] ||
+            body.message?.toolCall ||
+            body.message?.functionCall ||
+            body.message ||
             {};
 
-        if (functionName === "check_availability") {
-            const result = await getAvailableSlots(
-                clientId,
-                args.preferred_date,
-                args.duration_minutes
-            );
+        const toolCallId: string | undefined =
+            toolCall?.id ||
+            toolCall?.toolCallId ||
+            toolCall?.tool_call_id;
+        parsedToolCallId = toolCallId;
 
-            if (!result) {
-                return NextResponse.json({
-                    results: [
-                        {
-                            toolCallId: toolCall?.id,
-                            result:
-                                "I'm unable to check our schedule right now. Let me take your information and have someone call you back to schedule.",
-                        },
-                    ],
-                });
+        const functionName: string | undefined =
+            toolCall?.function?.name ||
+            toolCall?.functionCall?.name ||
+            toolCall?.name;
+
+        let rawArgs: unknown =
+            toolCall?.function?.arguments ??
+            toolCall?.functionCall?.parameters ??
+            toolCall?.arguments ??
+            toolCall?.parameters ??
+            {};
+
+        // VAPI sometimes sends arguments as a JSON string
+        if (typeof rawArgs === "string") {
+            try {
+                rawArgs = JSON.parse(rawArgs);
+            } catch {
+                rawArgs = {};
             }
+        }
+        const args: Record<string, any> = (rawArgs as Record<string, any>) || {};
 
-            if (result.slots.length === 0) {
-                return NextResponse.json({
-                    results: [
-                        {
-                            toolCallId: toolCall?.id,
-                            result:
-                                "I wasn't able to find any available slots in that time range. Would you like me to check a different date?",
-                        },
-                    ],
-                });
-            }
+        const vapiCallId: string | undefined = body.message?.call?.id;
 
-            return NextResponse.json({
-                results: [
-                    {
-                        toolCallId: toolCall?.id,
-                        result: `Available slots: ${result.formatted}. Which time works best for you?`,
-                    },
-                ],
-            });
+        console.log(
+            "[CALENDAR TOOL] clientId:", clientId,
+            "assistantId:", assistantId,
+            "function:", functionName,
+            "args:", JSON.stringify(args),
+            "vapiCallId:", vapiCallId,
+        );
+
+        if (!clientId) {
+            console.error("[CALENDAR TOOL] Could not resolve clientId. assistantId:", assistantId);
+            return fail(toolCallId, "Configuration error. Calendar is not available for this caller.");
         }
 
-        if (functionName === "book_appointment") {
-            if (!args.date || !args.time || !args.customer_name || !args.customer_phone) {
-                return NextResponse.json({
-                    results: [
-                        {
-                            toolCallId: toolCall?.id,
-                            result:
-                                "I need the date, time, your name, and phone number to book the appointment. Could you provide those details?",
-                        },
-                    ],
-                });
-            }
-
-            const result = await createEvent(clientId, {
-                date: args.date,
-                time: args.time,
-                customerName: args.customer_name,
-                customerPhone: args.customer_phone,
-                serviceType: args.service_type,
-                notes: args.notes,
-            });
-
-            if (!result.success) {
-                return NextResponse.json({
-                    results: [
-                        {
-                            toolCallId: toolCall?.id,
-                            result:
-                                result.error === "Google Calendar not connected"
-                                    ? "I'm unable to book appointments online right now. Let me take your information and have someone call you back to confirm the appointment."
-                                    : "There was an issue booking the appointment. Let me take your information and have someone confirm with you.",
-                        },
-                    ],
-                });
-            }
-
-            return NextResponse.json({
-                results: [
-                    {
-                        toolCallId: toolCall?.id,
-                        result: `Your appointment has been booked for ${result.formatted}. You're all set!`,
-                    },
-                ],
-            });
+        if (!functionName) {
+            console.error("[CALENDAR TOOL] Could not parse functionName from payload");
+            return fail(toolCallId, "I couldn't parse that tool call. Please try again.");
         }
 
-        // Unknown function
-        return NextResponse.json({
-            results: [
-                {
-                    toolCallId: toolCall?.id,
-                    result: "I'm not sure how to help with that. Let me connect you with someone.",
-                },
-            ],
-        });
+        // ─── 3. Dispatch on function name ───────────────────────────
+        switch (functionName) {
+            case "check_availability": {
+                const result = await getAvailableSlots(clientId, {
+                    preferredDate: args.preferred_date,
+                    daysAhead: args.days_ahead,
+                    durationMinutes: args.duration_minutes,
+                    timeOfDay: args.time_of_day_preference,
+                    earliestTime: args.earliest_time,
+                    latestTime: args.latest_time,
+                });
+
+                if (!result) {
+                    return fail(toolCallId, "Calendar is not connected right now.");
+                }
+
+                if (!result.slots || result.slots.length === 0) {
+                    return ok(
+                        toolCallId,
+                        "I'm not finding open slots in that range. Want me to check a different date or time of day?",
+                    );
+                }
+
+                return ok(
+                    toolCallId,
+                    `Available slots: ${result.formatted}. Which time works best?`,
+                );
+            }
+
+            case "book_appointment": {
+                if (!args.date || !args.time || !args.customer_name || !args.customer_phone) {
+                    return fail(
+                        toolCallId,
+                        "I need the date, time, name, and phone number to book the appointment.",
+                    );
+                }
+
+                const result = await createEvent(clientId, {
+                    date: args.date,
+                    time: args.time,
+                    customerName: args.customer_name,
+                    customerPhone: args.customer_phone,
+                    customerEmail: args.customer_email,
+                    timezone: args.timezone,
+                    serviceType: args.service_type,
+                    notes: args.notes,
+                    vapiCallId,
+                });
+
+                if (result.success) {
+                    return ok(toolCallId, `Booked for ${result.formatted}. You're all set.`);
+                }
+
+                switch (result.code) {
+                    case "duplicate":
+                        return ok(
+                            toolCallId,
+                            "It looks like we already have you down for that time — no need to book again.",
+                        );
+                    case "too_soon":
+                        return ok(
+                            toolCallId,
+                            "That's a bit too soon to book — our earliest slot is a bit later. Want me to check other times?",
+                        );
+                    case "outside_hours":
+                        return ok(
+                            toolCallId,
+                            "That's outside our business hours. Want me to find a slot during business hours?",
+                        );
+                    case "calendar_not_connected":
+                        return fail(toolCallId, "Calendar not connected.");
+                    default:
+                        return fail(
+                            toolCallId,
+                            result.error || "I couldn't book that appointment.",
+                        );
+                }
+            }
+
+            case "lookup_appointment": {
+                if (!args.customer_phone) {
+                    return fail(toolCallId, "I need a phone number to look up the appointment.");
+                }
+
+                const result = await lookupAppointmentByPhone(clientId, args.customer_phone);
+
+                if (!result.found || result.appointments.length === 0) {
+                    return ok(
+                        toolCallId,
+                        "I don't see any appointments on your number. Want to book one?",
+                    );
+                }
+
+                const first = result.appointments[0];
+                const extra = result.appointments.length - 1;
+                const base = `I have you booked for ${first.scheduledAtLocal}.`;
+                const tail = extra > 0 ? ` You also have ${extra} more on file.` : "";
+                return ok(toolCallId, base + tail);
+            }
+
+            case "reschedule_appointment": {
+                if (!args.customer_phone || !args.new_date || !args.new_time) {
+                    return fail(
+                        toolCallId,
+                        "I need a phone number plus the new date and time to reschedule.",
+                    );
+                }
+
+                const result = await rescheduleEvent(
+                    clientId,
+                    args.customer_phone,
+                    args.new_date,
+                    args.new_time,
+                    args.timezone,
+                );
+
+                if (result.success) {
+                    return ok(toolCallId, `Moved to ${result.formatted}.`);
+                }
+
+                switch (result.code) {
+                    case "not_found":
+                        return ok(
+                            toolCallId,
+                            "I don't see an existing appointment on your number. Want to book a new one?",
+                        );
+                    case "duplicate":
+                        return ok(
+                            toolCallId,
+                            "It looks like we already have you down for that time — no need to move it.",
+                        );
+                    case "too_soon":
+                        return ok(
+                            toolCallId,
+                            "That's a bit too soon — our earliest slot is a bit later. Want me to check other times?",
+                        );
+                    case "outside_hours":
+                        return ok(
+                            toolCallId,
+                            "That's outside our business hours. Want me to find a slot during business hours?",
+                        );
+                    case "calendar_not_connected":
+                        return fail(toolCallId, "Calendar not connected.");
+                    default:
+                        return fail(
+                            toolCallId,
+                            result.error || "I couldn't move that appointment.",
+                        );
+                }
+            }
+
+            case "cancel_appointment": {
+                if (!args.customer_phone) {
+                    return fail(toolCallId, "I need a phone number to cancel the appointment.");
+                }
+
+                const result = await cancelEvent(clientId, args.customer_phone);
+
+                if (result.success && (result.cancelled ?? 0) > 0) {
+                    return ok(toolCallId, "Cancelled. Anything else I can help with?");
+                }
+
+                switch (result.code) {
+                    case "not_found":
+                        return ok(
+                            toolCallId,
+                            "I don't see an appointment to cancel on this number.",
+                        );
+                    case "calendar_not_connected":
+                        return fail(toolCallId, "Calendar not connected.");
+                    default:
+                        return fail(
+                            toolCallId,
+                            result.error || "I couldn't cancel that appointment.",
+                        );
+                }
+            }
+
+            default:
+                console.warn("[CALENDAR TOOL] Unknown function:", functionName);
+                return fail(toolCallId, "I'm not sure how to help with that.");
+        }
     } catch (error) {
         console.error("[CALENDAR TOOL] Error:", error);
-        return NextResponse.json({
-            results: [
-                {
-                    result:
-                        "I'm having trouble with our scheduling system right now. Let me take your information and have someone follow up with you.",
-                },
-            ],
-        });
+        return fail(
+            parsedToolCallId,
+            "I'm having trouble with our scheduling system right now.",
+        );
     }
 }

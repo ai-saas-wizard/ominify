@@ -19,6 +19,7 @@ import { umbrellaResolver } from '../lib/umbrella-resolver.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
 import { canPlaceCall } from '../lib/access.js';
+import { getCallTimeVariables } from '../lib/call-variables.js';
 import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
@@ -73,6 +74,15 @@ async function makeVapiCall(
     outboundPhoneNumberId?: string,
     inlineAgent?: InlineVapiAgent
 ): Promise<{ callId: string }> {
+    // Resolve currentDate + tenantTimezone for {{currentDate}} /
+    // {{tenantTimezone}} interpolation in the assistant's system prompt.
+    let callVars: { currentDate: string; tenantTimezone: string } | null = null;
+    try {
+        callVars = await getCallTimeVariables(tenantId);
+    } catch (err) {
+        console.warn('[VAPI] Failed to resolve call-time variables, continuing without:', err);
+    }
+
     const requestBody: any = {
         phoneNumberId: outboundPhoneNumberId || null,
         customer: {
@@ -87,8 +97,41 @@ async function makeVapiCall(
         },
     };
 
+    // Build base assistantOverrides.variableValues — merged into whichever
+    // dispatch path we take below.
+    const baseVariableValues: Record<string, any> = {
+        ...(callVars
+            ? { currentDate: callVars.currentDate, tenantTimezone: callVars.tenantTimezone }
+            : {}),
+    };
+
+    // Always attach assistantOverrides.variableValues when we have any —
+    // VAPI applies these to both `assistant` inline configs and `assistantId`
+    // references, and ignores them otherwise.
+    if (Object.keys(baseVariableValues).length > 0) {
+        requestBody.assistantOverrides = {
+            ...(requestBody.assistantOverrides || {}),
+            variableValues: {
+                ...(requestBody.assistantOverrides?.variableValues || {}),
+                ...baseVariableValues,
+            },
+        };
+    }
+
     if (inlineAgent) {
         // ── PATH 1: Blueprint inline agent (preferred)
+        // Merge per-contact variables (from enrollment.custom_variables) into
+        // assistantOverrides.variableValues so VAPI substitutes {{var}} at call time.
+        if (inlineAgent.variableValues && Object.keys(inlineAgent.variableValues).length > 0) {
+            requestBody.assistantOverrides = {
+                ...(requestBody.assistantOverrides || {}),
+                variableValues: {
+                    ...(requestBody.assistantOverrides?.variableValues || {}),
+                    ...inlineAgent.variableValues,
+                },
+            };
+        }
+
         // Uses tenant's real voice, model, and dynamic prompt from the blueprint
         requestBody.assistant = {
             firstMessage: inlineAgent.firstMessage,
@@ -117,6 +160,8 @@ async function makeVapiCall(
             ...(inlineAgent.voicemailDetection ? {
                 voicemailDetection: inlineAgent.voicemailDetection,
             } : {}),
+            serverMessages: ["status-update", "end-of-call-report"],
+            clientMessages: [],
         };
 
         // Override server URL if blueprint specifies one
@@ -132,8 +177,14 @@ async function makeVapiCall(
 
         const overrides = assistantConfig.override_variables;
         if (overrides && Object.keys(overrides).length > 0) {
+            // Merge user-provided overrides on top of any already-set call-time
+            // variables (currentDate, tenantTimezone) so both survive.
             requestBody.assistantOverrides = {
-                variableValues: overrides,
+                ...(requestBody.assistantOverrides || {}),
+                variableValues: {
+                    ...(requestBody.assistantOverrides?.variableValues || {}),
+                    ...overrides,
+                },
             };
         }
 
@@ -152,6 +203,8 @@ async function makeVapiCall(
                 provider: 'playht',
                 voiceId: 'jennifer',
             },
+            serverMessages: ["status-update", "end-of-call-report"],
+            clientMessages: [],
         };
 
         console.log('[VAPI] Using legacy inline fallback (hardcoded voice/model)');

@@ -118,8 +118,9 @@ export function assembleInlineAgent(params: {
     promptInjections?: Record<string, string>;
     toolOverrides?: { add?: string[]; remove?: string[] };
     firstMessageOverride?: string;
+    variableValues?: Record<string, string>;
 }): InlineVapiAgent {
-    const { blueprint, promptSectionOverrides, promptInjections, toolOverrides, firstMessageOverride } = params;
+    const { blueprint, promptSectionOverrides, promptInjections, toolOverrides, firstMessageOverride, variableValues } = params;
 
     // 1. Assemble system prompt from sections
     const systemPrompt = assemblePrompt(
@@ -156,6 +157,7 @@ export function assembleInlineAgent(params: {
         voicemailMessage: blueprint.settings.voicemailMessage,
         voicemailDetection: blueprint.settings.voicemailDetection,
         serverUrl: blueprint.settings.serverUrl,
+        variableValues,
     };
 }
 

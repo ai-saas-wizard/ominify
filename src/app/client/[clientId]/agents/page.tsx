@@ -83,10 +83,13 @@ export default async function AgentsPage(props: {
                                 className="pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm w-64 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 transition-all placeholder:text-gray-400"
                             />
                         </div>
-                        <button className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/25 transition-all">
+                        <Link
+                            href={`/client/${params.clientId}/agents/new`}
+                            className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/25 transition-all"
+                        >
                             <Plus className="w-4 h-4" />
                             New Agent
-                        </button>
+                        </Link>
                     </div>
                 </div>
 

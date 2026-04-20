@@ -326,6 +326,8 @@ function buildVerticalVapiPayload(
             url: `${overrides.appUrl}/api/webhooks/vapi`,
             timeoutSeconds: 20,
         },
+        serverMessages: ["status-update", "end-of-call-report"],
+        clientMessages: [],
         recordingEnabled: true,
         endCallFunctionEnabled: true,
         dialKeypadFunctionEnabled: true,
@@ -334,15 +336,6 @@ function buildVerticalVapiPayload(
         endCallPhrases: overrides.endCallPhrases,
         startSpeakingPlan: overrides.startSpeakingPlan,
         stopSpeakingPlan: overrides.stopSpeakingPlan,
-        voicemailDetection: {
-            provider: "vapi",
-            backoffPlan: {
-                maxRetries: 6,
-                startAtSeconds: 5,
-                frequencySeconds: 5,
-            },
-            beepMaxAwaitSeconds: 0,
-        },
         messagePlan: {
             idleMessages: ["Are you still there?"],
         },

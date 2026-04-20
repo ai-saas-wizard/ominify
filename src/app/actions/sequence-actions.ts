@@ -4,6 +4,15 @@ import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@clerk/nextjs/server";
 import { autoAdvanceContactStage } from "@/app/actions/pipeline-actions";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
+
+// Normalize any phone input to E.164 (+12223334444). Defaults to US.
+// Returns null for unparseable or invalid numbers.
+function toE164(raw: string, defaultCountry: "US" = "US"): string | null {
+    if (!raw) return null;
+    const parsed = parsePhoneNumberFromString(raw.trim(), defaultCountry);
+    return parsed && parsed.isValid() ? parsed.number : null;
+}
 
 // ─── List all sequences for a client ───────────────────────────────────────────
 
@@ -115,6 +124,25 @@ export async function createSequence(clientId: string, formData: FormData, agent
 
         if (!name) {
             return { success: false, error: "Sequence name is required" };
+        }
+
+        // Gate: if an agent is bound, it must be outbound-capable.
+        if (agentId) {
+            const { data: agent } = await supabase
+                .from("agents")
+                .select("agent_type")
+                .eq("id", agentId)
+                .eq("client_id", clientId)
+                .single();
+            if (!agent) {
+                return { success: false, error: "Selected agent not found" };
+            }
+            if (agent.agent_type !== "outbound") {
+                return {
+                    success: false,
+                    error: "Selected agent is inbound-only. Outbound sequences require an outbound agent.",
+                };
+            }
         }
 
         let parsedConditions = null;
@@ -1361,15 +1389,21 @@ async function checkEmailReadiness(
 async function checkVoiceReadiness(
     clientId: string
 ): Promise<{ ready: boolean; reason?: string }> {
+    // Outbound tasks require an outbound-capable agent. An inbound-only
+    // receptionist assistant can't place calls.
     const { data: agents, error } = await supabase
         .from("agents")
-        .select("id, vapi_id")
+        .select("id, vapi_id, agent_type")
         .eq("client_id", clientId)
+        .eq("agent_type", "outbound")
         .not("vapi_id", "is", null)
         .limit(1);
 
     if (error || !agents || agents.length === 0) {
-        return { ready: false, reason: "No VAPI assistant configured" };
+        return {
+            ready: false,
+            reason: "No outbound agent configured. Create one from the Agents page.",
+        };
     }
 
     return { ready: true };
@@ -1543,6 +1577,17 @@ export async function bulkEnrollFromCSV(
             return { success: false, error: "A phone column mapping is required" };
         }
 
+        // Load sequence pacing — used to stagger next_step_at across a bulk upload.
+        const { data: sequenceRow } = await supabase
+            .from("sequences")
+            .select("pacing_per_minute")
+            .eq("id", sequenceId)
+            .single();
+        const pacingPerMinute = sequenceRow?.pacing_per_minute as number | null | undefined;
+        const pacingIntervalMs =
+            pacingPerMinute && pacingPerMinute > 0 ? Math.floor(60_000 / pacingPerMinute) : 0;
+        const baseTime = Date.now();
+
         const BATCH_SIZE = 50;
         let enrolled = 0;
         const errors: string[] = [];
@@ -1564,9 +1609,14 @@ export async function bulkEnrollFromCSV(
 
                 try {
                     // Extract fields based on column mapping
-                    const phone = (roleToColumns.phone || [])
+                    const rawPhone = (roleToColumns.phone || [])
                         .map((col) => row[col]?.trim())
                         .find((v) => v) || "";
+                    const phone = toE164(rawPhone);
+                    if (rawPhone && !phone) {
+                        errors.push(`Row ${rowIndex}: Invalid phone number "${rawPhone}"`);
+                        continue;
+                    }
                     const email = (roleToColumns.email || [])
                         .map((col) => row[col]?.trim())
                         .find((v) => v) || "";
@@ -1602,10 +1652,17 @@ export async function bulkEnrollFromCSV(
                     let contactId: string;
                     const { data: existingContact } = await supabase
                         .from("contacts")
-                        .select("id, custom_fields")
+                        .select("id, custom_fields, opted_out_at")
                         .eq("client_id", clientId)
                         .eq("phone", phone)
                         .single();
+
+                    if (existingContact?.opted_out_at) {
+                        errors.push(
+                            `Row ${rowIndex}: Contact (${phone}) is opted out — skipped.`
+                        );
+                        continue;
+                    }
 
                     if (existingContact) {
                         contactId = existingContact.id;
@@ -1666,6 +1723,12 @@ export async function bulkEnrollFromCSV(
                         }
                     }
 
+                    // Stagger next_step_at across the batch when pacing is set;
+                    // otherwise fire immediately.
+                    const nextStepAt = pacingIntervalMs
+                        ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
+                        : new Date().toISOString();
+
                     // Enroll the contact
                     const { error: enrollErr } = await supabase
                         .from("sequence_enrollments")
@@ -1677,7 +1740,7 @@ export async function bulkEnrollFromCSV(
                             current_step_order: 1,
                             enrollment_source: "csv_upload",
                             enrolled_at: new Date().toISOString(),
-                            next_step_at: new Date().toISOString(),
+                            next_step_at: nextStepAt,
                             sentiment_trend: "stable",
                             last_emotion: null,
                             recommended_tone: null,

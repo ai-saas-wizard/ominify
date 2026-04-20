@@ -258,6 +258,54 @@ export function CSVColumnMapper({
                 </div>
             </div>
 
+            {/* Live preview — what row 1 looks like after mapping */}
+            {sampleData.length > 0 && hasPhoneMapping && (
+                <div className="mx-6 mb-4 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+                    <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Preview: Row 1
+                        </span>
+                        <span className="text-xs text-gray-400">
+                            What the agent will know about this contact
+                        </span>
+                    </div>
+                    <div className="p-4 space-y-1.5 text-sm">
+                        {Object.entries(mapping)
+                            .filter(([, role]) => role !== "skip")
+                            .map(([col, role]) => {
+                                const raw = sampleData[0]?.[col] || "";
+                                return (
+                                    <div
+                                        key={col}
+                                        className="flex items-start gap-3 font-mono text-xs"
+                                    >
+                                        <code className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded whitespace-nowrap">
+                                            {role === "phone" ||
+                                            role === "email" ||
+                                            role === "first_name" ||
+                                            role === "last_name" ||
+                                            role === "company"
+                                                ? `{{${role}}}`
+                                                : `{{${col}}}`}
+                                        </code>
+                                        <span className="text-gray-400">→</span>
+                                        <span className="text-gray-800 break-all">
+                                            {raw || (
+                                                <span className="italic text-gray-400">
+                                                    (empty)
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                    </div>
+                    <div className="px-4 py-2 border-t border-gray-200 bg-white text-xs text-gray-500">
+                        Reference these in your agent prompt or special instructions — they substitute at call time.
+                    </div>
+                </div>
+            )}
+
             {/* Footer actions */}
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
                 <p className="text-sm text-gray-500">
