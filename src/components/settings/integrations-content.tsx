@@ -1,13 +1,26 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, CheckCircle, XCircle, ExternalLink, Sheet } from "lucide-react";
+import { Calendar, CheckCircle, XCircle, ExternalLink, Sheet, Loader2 } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { staggerContainer, staggerItem, fadeIn } from "@/lib/settings-animations";
+import type { CalendlyEventType } from "@/lib/calendly";
+
+interface CalendlyStatus {
+    is_active?: boolean;
+    connected_at?: string | null;
+    calendly_user_email?: string | null;
+    calendly_user_name?: string | null;
+    selected_event_type_uri?: string | null;
+    selected_event_type_name?: string | null;
+    selected_event_type_duration?: number | null;
+    booking_window_days?: number | null;
+}
 
 interface IntegrationsContentProps {
     clientId: string;
@@ -15,10 +28,16 @@ interface IntegrationsContentProps {
     calendarStatus: any;
     isSheetsConnected: boolean;
     sheetsStatus: any;
+    isCalendlyConnected: boolean;
+    calendlyStatus: CalendlyStatus | null;
+    calendlyEventTypes: CalendlyEventType[];
     searchParams: { success?: string; error?: string };
     handleDisconnect: () => Promise<void>;
     handleUpdateSettings: (formData: FormData) => Promise<void>;
     handleSheetsDisconnect: () => Promise<void>;
+    handleCalendlyConnect: (formData: FormData) => Promise<{ success: boolean; error?: string; qs: string }>;
+    handleCalendlySetEventType: (formData: FormData) => Promise<void>;
+    handleCalendlyDisconnect: () => Promise<void>;
 }
 
 export function IntegrationsContent({
@@ -27,10 +46,16 @@ export function IntegrationsContent({
     calendarStatus,
     isSheetsConnected,
     sheetsStatus,
+    isCalendlyConnected,
+    calendlyStatus,
+    calendlyEventTypes,
     searchParams,
     handleDisconnect,
     handleUpdateSettings,
     handleSheetsDisconnect,
+    handleCalendlyConnect,
+    handleCalendlySetEventType,
+    handleCalendlyDisconnect,
 }: IntegrationsContentProps) {
     return (
         <motion.div
@@ -114,6 +139,14 @@ export function IntegrationsContent({
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {isConnected && isCalendlyConnected && calendlyStatus?.selected_event_type_uri && (
+                <motion.div variants={staggerItem}>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+                        Both Google Calendar and Calendly are connected. <strong>Calendly takes priority</strong> for AI bookings while it&apos;s active — disconnect Calendly to use Google Calendar instead.
+                    </div>
+                </motion.div>
+            )}
 
             {/* Google Calendar Card */}
             <motion.div variants={staggerItem}>
@@ -233,6 +266,18 @@ export function IntegrationsContent({
                 </Card>
             </motion.div>
 
+            {/* Calendly Card */}
+            <motion.div variants={staggerItem}>
+                <CalendlyCard
+                    isConnected={isCalendlyConnected}
+                    status={calendlyStatus}
+                    eventTypes={calendlyEventTypes}
+                    handleConnect={handleCalendlyConnect}
+                    handleSetEventType={handleCalendlySetEventType}
+                    handleDisconnect={handleCalendlyDisconnect}
+                />
+            </motion.div>
+
             {/* Google Sheets Card */}
             <motion.div variants={staggerItem}>
                 <Card className="overflow-hidden">
@@ -315,5 +360,208 @@ export function IntegrationsContent({
                 </Card>
             </motion.div>
         </motion.div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Calendly sub-component
+// ═══════════════════════════════════════════════════════════
+
+function CalendlyCard({
+    isConnected,
+    status,
+    eventTypes,
+    handleConnect,
+    handleSetEventType,
+    handleDisconnect,
+}: {
+    isConnected: boolean;
+    status: CalendlyStatus | null;
+    eventTypes: CalendlyEventType[];
+    handleConnect: (formData: FormData) => Promise<{ success: boolean; error?: string; qs: string }>;
+    handleSetEventType: (formData: FormData) => Promise<void>;
+    handleDisconnect: () => Promise<void>;
+}) {
+    const [pat, setPat] = useState("");
+    const [connectError, setConnectError] = useState<string | null>(null);
+    const [isPending, startTransition] = useTransition();
+
+    const onSubmitConnect = (formData: FormData) => {
+        formData.set("pat", pat);
+        setConnectError(null);
+        startTransition(async () => {
+            const result = await handleConnect(formData);
+            if (!result.success) {
+                setConnectError(result.error || "Failed to connect");
+            } else {
+                setPat("");
+            }
+        });
+    };
+
+    return (
+        <Card className="overflow-hidden">
+            <CardHeader className="border-b border-gray-200 bg-gray-50 flex-row items-center justify-between space-y-0 px-6 py-4">
+                <div className="flex items-center gap-3">
+                    <Calendar className="w-5 h-5 text-[#006BFF]" />
+                    <h2 className="text-lg font-semibold text-gray-900">Calendly</h2>
+                </div>
+                {isConnected ? (
+                    <Badge className="bg-green-100 text-green-700 border-green-200 gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Connected
+                    </Badge>
+                ) : (
+                    <Badge variant="secondary">Not connected</Badge>
+                )}
+            </CardHeader>
+
+            <CardContent className="pt-6">
+                <p className="text-gray-600 mb-6">
+                    Connect Calendly to let your AI agents book appointments on any calendar you&apos;ve
+                    already linked to Calendly — Google, Outlook, iCloud, or Office 365.
+                </p>
+
+                {isConnected ? (
+                    <div className="space-y-6">
+                        <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                            <p className="text-sm text-gray-500">
+                                Connected as:{" "}
+                                <span className="text-gray-900 font-medium">
+                                    {status?.calendly_user_name || status?.calendly_user_email || "Unknown"}
+                                </span>
+                            </p>
+                            <p className="text-sm text-gray-500">
+                                Connected since:{" "}
+                                <span className="text-gray-900 font-medium">
+                                    {status?.connected_at
+                                        ? new Date(status.connected_at).toLocaleDateString()
+                                        : "Unknown"}
+                                </span>
+                            </p>
+                            {status?.selected_event_type_name && (
+                                <p className="text-sm text-gray-500">
+                                    Booking into:{" "}
+                                    <span className="text-gray-900 font-medium">
+                                        {status.selected_event_type_name}
+                                        {status.selected_event_type_duration
+                                            ? ` (${status.selected_event_type_duration} min)`
+                                            : ""}
+                                    </span>
+                                </p>
+                            )}
+                        </div>
+
+                        <form action={handleSetEventType} className="space-y-4">
+                            <h3 className="text-sm font-semibold text-gray-900">
+                                Event Type for AI Bookings
+                            </h3>
+                            <p className="text-sm text-gray-500">
+                                The AI agent will book callers into this Calendly event type.
+                                Duration and buffers come from Calendly.
+                            </p>
+                            {eventTypes.length > 0 ? (
+                                <div className="flex flex-col md:flex-row gap-3 items-start md:items-end">
+                                    <div className="flex-1 w-full">
+                                        <Label htmlFor="eventTypeUri" className="mb-1.5 block text-gray-600">
+                                            Event Type
+                                        </Label>
+                                        <select
+                                            id="eventTypeUri"
+                                            name="eventTypeUri"
+                                            defaultValue={status?.selected_event_type_uri || ""}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="" disabled>
+                                                — Select an event type —
+                                            </option>
+                                            {eventTypes.map((et) => (
+                                                <option key={et.uri} value={et.uri}>
+                                                    {et.name} ({et.duration} min)
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <Button type="submit" variant="secondary">
+                                        Save Event Type
+                                    </Button>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                    No active event types found on your Calendly account. Create one in
+                                    Calendly first, then refresh this page.
+                                </p>
+                            )}
+                        </form>
+
+                        <div className="pt-4 border-t border-gray-200">
+                            <form action={handleDisconnect}>
+                                <Button
+                                    type="submit"
+                                    variant="link"
+                                    className="text-red-600 hover:text-red-800 p-0 h-auto"
+                                >
+                                    Disconnect Calendly
+                                </Button>
+                            </form>
+                        </div>
+                    </div>
+                ) : (
+                    <form action={onSubmitConnect} className="space-y-4">
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+                            <p className="font-semibold mb-1">Requires a paid Calendly plan.</p>
+                            <p>
+                                Get your Personal Access Token from{" "}
+                                <a
+                                    href="https://calendly.com/integrations/api_webhooks"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="underline font-medium"
+                                >
+                                    Integrations → API & Webhooks
+                                </a>
+                                , then paste it below.
+                            </p>
+                        </div>
+
+                        <div>
+                            <Label htmlFor="pat" className="mb-1.5 block text-gray-600">
+                                Calendly API Key
+                            </Label>
+                            <Input
+                                id="pat"
+                                name="pat"
+                                type="password"
+                                placeholder="eyJraWQ..."
+                                value={pat}
+                                onChange={(e) => setPat(e.target.value)}
+                                autoComplete="off"
+                            />
+                        </div>
+
+                        {connectError && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                                <XCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-red-800">{connectError}</p>
+                            </div>
+                        )}
+
+                        <Button type="submit" disabled={!pat || isPending} className="gap-2">
+                            {isPending ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Connecting...
+                                </>
+                            ) : (
+                                <>
+                                    <ExternalLink className="w-4 h-4" />
+                                    Connect Calendly
+                                </>
+                            )}
+                        </Button>
+                    </form>
+                )}
+            </CardContent>
+        </Card>
     );
 }

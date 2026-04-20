@@ -2,6 +2,12 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getCalendarConnectionStatus, disconnectCalendar, updateCalendarSettings } from "@/lib/google-calendar";
 import { getSheetsConnectionStatus, disconnectSheets } from "@/lib/google-sheets";
+import { getCalendlyConnectionStatus, listEventTypes as listCalendlyEventTypesLib } from "@/lib/calendly";
+import {
+    connectCalendlyAction,
+    setCalendlyEventTypeAction,
+    disconnectCalendlyAction,
+} from "@/app/actions/calendly-actions";
 import { revalidatePath } from "next/cache";
 import { PageTransition } from "@/components/ui/page-transition";
 import { IntegrationsContent } from "@/components/settings/integrations-content";
@@ -19,6 +25,12 @@ export default async function IntegrationsPage(props: {
 
     const sheetsStatus = await getSheetsConnectionStatus(clientId);
     const isSheetsConnected = sheetsStatus?.is_active === true;
+
+    const calendlyStatus = await getCalendlyConnectionStatus(clientId);
+    const isCalendlyConnected = calendlyStatus?.is_active === true;
+    const calendlyEventTypes = isCalendlyConnected
+        ? await listCalendlyEventTypesLib(clientId)
+        : [];
 
     async function handleDisconnect() {
         "use server";
@@ -46,6 +58,32 @@ export default async function IntegrationsPage(props: {
         revalidatePath(`/client/${clientId}/settings/integrations`);
     }
 
+    async function handleCalendlyConnect(formData: FormData) {
+        "use server";
+        formData.set("clientId", clientId);
+        const result = await connectCalendlyAction(formData);
+        const qs = result.success
+            ? "success=calendly"
+            : `error=calendly_failed&reason=${encodeURIComponent(result.error || "")}`;
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+        return { success: result.success, error: result.error, qs };
+    }
+
+    async function handleCalendlySetEventType(formData: FormData) {
+        "use server";
+        formData.set("clientId", clientId);
+        await setCalendlyEventTypeAction(formData);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+    }
+
+    async function handleCalendlyDisconnect() {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        await disconnectCalendlyAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+    }
+
     return (
         <PageTransition>
             <div className="p-4 lg:p-8 max-w-4xl mx-auto">
@@ -70,10 +108,16 @@ export default async function IntegrationsPage(props: {
                     calendarStatus={calendarStatus}
                     isSheetsConnected={isSheetsConnected}
                     sheetsStatus={sheetsStatus}
+                    isCalendlyConnected={isCalendlyConnected}
+                    calendlyStatus={calendlyStatus}
+                    calendlyEventTypes={calendlyEventTypes}
                     searchParams={searchParams}
                     handleDisconnect={handleDisconnect}
                     handleUpdateSettings={handleUpdateSettings}
                     handleSheetsDisconnect={handleSheetsDisconnect}
+                    handleCalendlyConnect={handleCalendlyConnect}
+                    handleCalendlySetEventType={handleCalendlySetEventType}
+                    handleCalendlyDisconnect={handleCalendlyDisconnect}
                 />
             </div>
         </PageTransition>

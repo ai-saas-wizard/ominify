@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
-import {
-    getAvailableSlots,
-    createEvent,
-    lookupAppointmentByPhone,
-    rescheduleEvent,
-    cancelEvent,
-} from "@/lib/google-calendar";
+import * as googleCalendar from "@/lib/google-calendar";
+import * as calendly from "@/lib/calendly";
+import { isCalendlyActive } from "@/lib/calendly";
 import { supabase } from "@/lib/supabase";
 
 /**
@@ -128,12 +124,17 @@ export async function POST(request: Request) {
             return fail(toolCallId, "I couldn't parse that tool call. Please try again.");
         }
 
-        // ─── 3. Dispatch on function name ───────────────────────────
+        // ─── 3. Pick provider (Calendly wins if connected + event type set) ─
+        const useCalendly = await isCalendlyActive(clientId);
+        const provider = useCalendly ? calendly : googleCalendar;
+
+        // ─── 4. Dispatch on function name ───────────────────────────
         switch (functionName) {
             case "check_availability": {
-                const result = await getAvailableSlots(clientId, {
+                const result = await provider.getAvailableSlots(clientId, {
                     preferredDate: args.preferred_date,
                     daysAhead: args.days_ahead,
+                    // Google honors this; Calendly ignores it (dictated by Event Type).
                     durationMinutes: args.duration_minutes,
                     timeOfDay: args.time_of_day_preference,
                     earliestTime: args.earliest_time,
@@ -165,7 +166,7 @@ export async function POST(request: Request) {
                     );
                 }
 
-                const result = await createEvent(clientId, {
+                const result = await provider.createEvent(clientId, {
                     date: args.date,
                     time: args.time,
                     customerName: args.customer_name,
@@ -197,6 +198,15 @@ export async function POST(request: Request) {
                             toolCallId,
                             "That's outside our business hours. Want me to find a slot during business hours?",
                         );
+                    case "no_email":
+                        return ok(
+                            toolCallId,
+                            "I'll need your email address to finalize the booking. What's the best email to send the calendar invite to?",
+                        );
+                    case "no_event_type":
+                        return fail(toolCallId, "Booking is not set up — no Calendly event type selected.");
+                    case "paid_plan_required":
+                        return fail(toolCallId, "Calendly booking is unavailable on the connected plan.");
                     case "calendar_not_connected":
                         return fail(toolCallId, "Calendar not connected.");
                     default:
@@ -212,7 +222,7 @@ export async function POST(request: Request) {
                     return fail(toolCallId, "I need a phone number to look up the appointment.");
                 }
 
-                const result = await lookupAppointmentByPhone(clientId, args.customer_phone);
+                const result = await provider.lookupAppointmentByPhone(clientId, args.customer_phone);
 
                 if (!result.found || result.appointments.length === 0) {
                     return ok(
@@ -236,7 +246,7 @@ export async function POST(request: Request) {
                     );
                 }
 
-                const result = await rescheduleEvent(
+                const result = await provider.rescheduleEvent(
                     clientId,
                     args.customer_phone,
                     args.new_date,
@@ -284,7 +294,7 @@ export async function POST(request: Request) {
                     return fail(toolCallId, "I need a phone number to cancel the appointment.");
                 }
 
-                const result = await cancelEvent(clientId, args.customer_phone);
+                const result = await provider.cancelEvent(clientId, args.customer_phone);
 
                 if (result.success && (result.cancelled ?? 0) > 0) {
                     return ok(toolCallId, "Cancelled. Anything else I can help with?");
