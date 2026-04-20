@@ -198,11 +198,6 @@ export async function POST(request: Request) {
                             toolCallId,
                             "That's outside our business hours. Want me to find a slot during business hours?",
                         );
-                    case "no_email":
-                        return ok(
-                            toolCallId,
-                            "I'll need your email address to finalize the booking. What's the best email to send the calendar invite to?",
-                        );
                     case "no_event_type":
                         return fail(toolCallId, "Booking is not set up — no Calendly event type selected.");
                     case "paid_plan_required":

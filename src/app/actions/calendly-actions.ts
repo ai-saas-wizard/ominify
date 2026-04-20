@@ -14,15 +14,19 @@ export async function connectCalendlyAction(formData: FormData) {
     const pat = (formData.get("pat") as string || "").trim();
 
     if (!clientId || !pat) {
-        return { success: false, error: "Missing API key or client ID" };
+        return { success: false as const, error: "Missing API key or client ID" };
     }
 
     const result = await saveConnection(clientId, pat);
     if (result.success) {
         revalidatePath(`/client/${clientId}/settings/integrations`);
-        return { success: true };
+        return {
+            success: true as const,
+            webhookOk: result.webhookOk,
+            webhookError: result.webhookError,
+        };
     }
-    return { success: false, error: result.error };
+    return { success: false as const, error: result.error };
 }
 
 export async function testCalendlyPatAction(pat: string) {

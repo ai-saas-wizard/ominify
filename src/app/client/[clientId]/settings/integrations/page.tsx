@@ -62,11 +62,15 @@ export default async function IntegrationsPage(props: {
         "use server";
         formData.set("clientId", clientId);
         const result = await connectCalendlyAction(formData);
-        const qs = result.success
-            ? "success=calendly"
-            : `error=calendly_failed&reason=${encodeURIComponent(result.error || "")}`;
         revalidatePath(`/client/${clientId}/settings/integrations`);
-        return { success: result.success, error: result.error, qs };
+        if (result.success) {
+            return {
+                success: true as const,
+                webhookOk: result.webhookOk,
+                webhookError: result.webhookError,
+            };
+        }
+        return { success: false as const, error: result.error };
     }
 
     async function handleCalendlySetEventType(formData: FormData) {

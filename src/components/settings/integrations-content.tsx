@@ -35,7 +35,10 @@ interface IntegrationsContentProps {
     handleDisconnect: () => Promise<void>;
     handleUpdateSettings: (formData: FormData) => Promise<void>;
     handleSheetsDisconnect: () => Promise<void>;
-    handleCalendlyConnect: (formData: FormData) => Promise<{ success: boolean; error?: string; qs: string }>;
+    handleCalendlyConnect: (formData: FormData) => Promise<
+        | { success: true; webhookOk: boolean; webhookError?: string }
+        | { success: false; error: string }
+    >;
     handleCalendlySetEventType: (formData: FormData) => Promise<void>;
     handleCalendlyDisconnect: () => Promise<void>;
 }
@@ -378,26 +381,39 @@ function CalendlyCard({
     isConnected: boolean;
     status: CalendlyStatus | null;
     eventTypes: CalendlyEventType[];
-    handleConnect: (formData: FormData) => Promise<{ success: boolean; error?: string; qs: string }>;
+    handleConnect: (formData: FormData) => Promise<
+        | { success: true; webhookOk: boolean; webhookError?: string }
+        | { success: false; error: string }
+    >;
     handleSetEventType: (formData: FormData) => Promise<void>;
     handleDisconnect: () => Promise<void>;
 }) {
     const [pat, setPat] = useState("");
     const [connectError, setConnectError] = useState<string | null>(null);
+    const [webhookWarning, setWebhookWarning] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
 
     const onSubmitConnect = (formData: FormData) => {
         formData.set("pat", pat);
         setConnectError(null);
+        setWebhookWarning(null);
         startTransition(async () => {
             const result = await handleConnect(formData);
             if (!result.success) {
                 setConnectError(result.error || "Failed to connect");
-            } else {
-                setPat("");
+                return;
+            }
+            setPat("");
+            if (!result.webhookOk) {
+                setWebhookWarning(
+                    result.webhookError ||
+                        "Booking works, but we couldn't register a webhook. Cancellations made in Calendly won't sync back automatically.",
+                );
             }
         });
     };
+
+    const hasNoEventType = isConnected && !status?.selected_event_type_uri;
 
     return (
         <Card className="overflow-hidden">
@@ -424,6 +440,24 @@ function CalendlyCard({
 
                 {isConnected ? (
                     <div className="space-y-6">
+                        {hasNoEventType && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                                <XCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-amber-900">
+                                    <p className="font-semibold mb-0.5">Pick an event type to finish setup.</p>
+                                    <p>Your AI agent can&apos;t book appointments until you select which Calendly event type to use.</p>
+                                </div>
+                            </div>
+                        )}
+                        {webhookWarning && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                                <XCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-amber-900">
+                                    <p className="font-semibold mb-0.5">Webhook not registered.</p>
+                                    <p>{webhookWarning}</p>
+                                </div>
+                            </div>
+                        )}
                         <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                             <p className="text-sm text-gray-500">
                                 Connected as:{" "}

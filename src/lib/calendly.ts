@@ -133,7 +133,7 @@ export async function saveConnection(
     clientId: string,
     pat: string
 ): Promise<
-    | { success: true; user: CalendlyUser }
+    | { success: true; user: CalendlyUser; webhookOk: boolean; webhookError?: string }
     | { success: false; error: string }
 > {
     const test = await testConnection(pat);
@@ -210,7 +210,12 @@ export async function saveConnection(
         return { success: false, error: "Failed to save connection" };
     }
 
-    return { success: true, user: test.user };
+    return {
+        success: true,
+        user: test.user,
+        webhookOk: webhookRes.ok,
+        webhookError: webhookRes.ok ? undefined : webhookRes.error,
+    };
 }
 
 /** List active event types for the connected user. */
@@ -380,6 +385,33 @@ function extractUuid(uri: string): string | null {
     return match ? match[1] : null;
 }
 
+/**
+ * Calendly requires an email on every invitee, but voice callers often won't
+ * volunteer one. Synthesize a deliverable-looking placeholder from the E.164
+ * phone so the booking still goes through. The real contact data stays in our
+ * own appointments table; the phone is also appended to the invitee name so
+ * the Calendly user sees it in their dashboard.
+ *
+ * The domain uses RFC 2606's reserved `.invalid` TLD — guaranteed never to
+ * resolve, so Calendly confirmation emails hard-fail at DNS instead of
+ * bouncing through a real mail server. If Calendly rejects `.invalid`, set
+ * CALENDLY_PHONE_FALLBACK_DOMAIN to a domain you control.
+ */
+function synthEmailFromPhone(phoneE164: string): string {
+    const domain = process.env.CALENDLY_PHONE_FALLBACK_DOMAIN || "voice-booking.invalid";
+    const local = phoneE164.replace(/\D+/g, "") || "unknown";
+    return `voice-${local}@${domain}`;
+}
+
+function formatPhoneForDisplay(phoneE164: string): string {
+    // +15551234567 → (555) 123-4567  for US numbers; passthrough otherwise.
+    const digits = phoneE164.replace(/\D+/g, "");
+    if (digits.length === 11 && digits.startsWith("1")) {
+        return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    }
+    return phoneE164;
+}
+
 // ═══════════════════════════════════════════════════════════
 // AVAILABILITY
 // ═══════════════════════════════════════════════════════════
@@ -491,7 +523,7 @@ export async function createEvent(
     appointmentId?: string;
     formatted?: string;
     error?: string;
-    code?: "duplicate" | "calendar_not_connected" | "no_event_type" | "conflict" | "paid_plan_required" | "no_email" | "unknown";
+    code?: "duplicate" | "calendar_not_connected" | "no_event_type" | "conflict" | "paid_plan_required" | "unknown";
 }> {
     const config = await getCalendlyConfig(clientId);
     if (!config) {
@@ -505,19 +537,17 @@ export async function createEvent(
         };
     }
 
-    // Calendly requires an email for every invitee. Voice callers often don't
-    // volunteer one — surface a clear error so the agent can prompt for it.
-    if (!params.customerEmail) {
-        return {
-            success: false,
-            error: "Calendly requires an email address to book the appointment.",
-            code: "no_email",
-        };
-    }
-
     const tz = params.timezone || (await getTenantTimezone(clientId));
     const phoneE164 = normalizeE164(params.customerPhone);
     const duration = config.eventTypeDurationMinutes;
+
+    // If the caller didn't give an email, synthesize one from their phone so
+    // the Calendly booking still completes. The real phone is appended to the
+    // invitee name so the business owner sees it in the Calendly dashboard.
+    const inviteeEmail = params.customerEmail || synthEmailFromPhone(phoneE164);
+    const inviteeName = params.customerEmail
+        ? params.customerName
+        : `${params.customerName} — ${formatPhoneForDisplay(phoneE164)}`;
 
     // Build the start instant in the tenant/caller TZ.
     const startInstant = fromZonedDateTimeToUtc(params.date, params.time, tz);
@@ -555,8 +585,8 @@ export async function createEvent(
             event_type: config.eventTypeUri,
             start_time: startInstant.toISOString(),
             invitee: {
-                name: params.customerName,
-                email: params.customerEmail,
+                name: inviteeName,
+                email: inviteeEmail,
                 timezone: tz,
             },
         }),
@@ -590,7 +620,7 @@ export async function createEvent(
             calendly_invitee_uri: inviteeUri,
             customer_name: params.customerName,
             customer_phone_e164: phoneE164,
-            customer_email: params.customerEmail,
+            customer_email: params.customerEmail || null,
             service_type: params.serviceType || null,
             notes: params.notes || null,
             scheduled_at: startInstant.toISOString(),
@@ -703,7 +733,7 @@ export async function rescheduleEvent(
     success: boolean;
     formatted?: string;
     error?: string;
-    code?: "not_found" | "duplicate" | "calendar_not_connected" | "no_event_type" | "conflict" | "no_email" | "paid_plan_required" | "unknown";
+    code?: "not_found" | "duplicate" | "calendar_not_connected" | "no_event_type" | "conflict" | "paid_plan_required" | "unknown";
 }> {
     const lookup = await lookupAppointmentByPhone(clientId, phone);
     if (!lookup.found) {
@@ -713,19 +743,16 @@ export async function rescheduleEvent(
     const target = lookup.appointments.find((a) => new Date(a.scheduledAt).getTime() > Date.now())
         || lookup.appointments[0];
 
-    // Pull the caller's email from the existing appointment (required by Calendly).
+    // Pull original booking data so we can recreate with the same identity.
+    // Email is optional — createEvent() will synthesize one from phone if missing.
     const { data: existing } = await supabase
         .from("appointments")
         .select("customer_name, customer_email, service_type, notes, vapi_call_id")
         .eq("id", target.id)
         .single();
 
-    if (!existing?.customer_email) {
-        return {
-            success: false,
-            error: "Original booking has no email on file — can't reschedule via Calendly.",
-            code: "no_email",
-        };
+    if (!existing) {
+        return { success: false, error: "Appointment record not found", code: "not_found" };
     }
 
     // Best-effort cancel of the old Calendly event.
@@ -752,7 +779,7 @@ export async function rescheduleEvent(
         time: newTime,
         customerName: existing.customer_name as string,
         customerPhone: phone,
-        customerEmail: existing.customer_email as string,
+        customerEmail: (existing.customer_email as string | null) || undefined,
         timezone,
         serviceType: (existing.service_type as string | null) || undefined,
         notes: (existing.notes as string | null) || undefined,
@@ -763,7 +790,7 @@ export async function rescheduleEvent(
         return {
             success: false,
             error: booked.error || "Failed to book new time",
-            code: (booked.code as "duplicate" | "conflict" | "no_email" | "paid_plan_required" | "unknown") || "unknown",
+            code: (booked.code as "duplicate" | "conflict" | "paid_plan_required" | "unknown") || "unknown",
         };
     }
 
