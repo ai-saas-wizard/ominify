@@ -6,9 +6,7 @@ import {
     Check,
     Plus,
     X,
-    Bell,
     Mail,
-    MessageSquare,
     Phone,
     Smartphone,
 } from "lucide-react";
@@ -200,7 +198,7 @@ export function HandoffRulesScreen({
                                     <Check className="w-3 h-3 text-white" />
                                 </div>
                                 <p className="text-sm text-gray-700 flex-1">
-                                    If they {trigger.label.toLowerCase()}
+                                    {trigger.label}
                                 </p>
                                 <button
                                     onClick={() => {
@@ -220,15 +218,12 @@ export function HandoffRulesScreen({
                 {/* Add custom trigger */}
                 <div className="flex gap-2">
                     <div className="flex-1 relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                            If they
-                        </span>
                         <input
                             value={customTriggerText}
                             onChange={(e) => setCustomTriggerText(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && addCustomTrigger()}
-                            placeholder="ask about financing options..."
-                            className="w-full pl-16 pr-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                            placeholder="Describe the trigger (e.g. asks about financing options, mentions a competitor)..."
+                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
                         />
                     </div>
                     <button
@@ -381,25 +376,6 @@ export function HandoffRulesScreen({
                         />
                     </div>
 
-                    {/* Push Notification */}
-                    <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200">
-                        <div className="flex items-center gap-2">
-                            <Bell className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-700">
-                                Push notification in Omnify
-                            </span>
-                        </div>
-                        <Switch
-                            checked={config.notification.push}
-                            onCheckedChange={(checked) =>
-                                onChange({
-                                    ...config,
-                                    notification: { ...config.notification, push: checked },
-                                })
-                            }
-                        />
-                    </div>
-
                     {/* Urgent call */}
                     <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200">
                         <div className="flex items-center gap-2">
@@ -424,6 +400,7 @@ export function HandoffRulesScreen({
                                     },
                                 })
                             }
+                            className="data-[state=checked]:bg-emerald-500"
                         />
                     </div>
                 </div>

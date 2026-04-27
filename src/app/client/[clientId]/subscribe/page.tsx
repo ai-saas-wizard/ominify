@@ -71,7 +71,7 @@ export default async function SubscribePage({
                     <ul className="mt-6 space-y-3">
                         {[
                             `${plan.monthlyMinutes.toLocaleString()} voice minutes included every month`,
-                            `Unused minutes roll over up to ${plan.rolloverCap.toLocaleString()} total`,
+                            `Unused minutes — rollover for 2 months`,
                             "Top up with extra minute packs anytime",
                             "Cancel, upgrade, or update your card via the Stripe portal",
                         ].map((feature) => (
