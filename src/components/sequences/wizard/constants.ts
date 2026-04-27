@@ -78,6 +78,36 @@ export const GOAL_CARDS: GoalCard[] = [
         },
     },
     {
+        id: "meta_ads_lead",
+        title: "Meta Ads new lead",
+        description: "Auto-enroll leads from Facebook & Instagram Lead Ads",
+        icon: "megaphone",
+        requires: "meta_ads",
+        // Native Meta App Review pending — flip off once approved.
+        comingSoon: true,
+        defaults: {
+            trigger_type: "meta_ads_lead",
+            urgency_tier: "high",
+            cadence: 4,
+            duration: 2,
+            success_conditions: ["appointment_booked", "interest_expressed"],
+        },
+    },
+    {
+        id: "google_ads_lead",
+        title: "Google Ads new lead",
+        description: "Auto-enroll leads from Google Lead Form Assets",
+        icon: "target",
+        requires: "google_ads",
+        defaults: {
+            trigger_type: "google_ads_lead",
+            urgency_tier: "high",
+            cadence: 4,
+            duration: 2,
+            success_conditions: ["appointment_booked", "interest_expressed"],
+        },
+    },
+    {
         id: "custom",
         title: "Custom goal",
         description: "Describe what you want to achieve",

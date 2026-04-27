@@ -58,7 +58,7 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
 }
 
 async function getTenantWizardContext(clientId: string) {
-    const [profileResult, agentResult] = await Promise.all([
+    const [profileResult, agentResult, metaResult, googleAdsResult, metaPagesResult] = await Promise.all([
         supabase
             .from("tenant_profiles")
             .select("industry, emergency_phone, business_name")
@@ -69,6 +69,26 @@ async function getTenantWizardContext(clientId: string) {
             .select("id")
             .eq("client_id", clientId)
             .limit(1),
+        // Tables may not exist on every environment yet — wrap in maybeSingle so a
+        // missing-table error doesn't crash the page during phased rollout.
+        supabase
+            .from("tenant_meta_ads")
+            .select("is_active")
+            .eq("client_id", clientId)
+            .eq("is_active", true)
+            .maybeSingle(),
+        supabase
+            .from("tenant_google_ads")
+            .select("is_active")
+            .eq("client_id", clientId)
+            .eq("is_active", true)
+            .maybeSingle(),
+        supabase
+            .from("tenant_meta_ads_pages")
+            .select("id")
+            .eq("client_id", clientId)
+            .eq("subscription_active", true)
+            .limit(1),
     ]);
 
     // Also get the client email from clients table
@@ -78,8 +98,14 @@ async function getTenantWizardContext(clientId: string) {
         .eq("id", clientId)
         .single();
 
+    const metaAdsConnected =
+        !!metaResult.data && (metaPagesResult.data?.length ?? 0) > 0;
+    const googleAdsConnected = !!googleAdsResult.data;
+
     return {
         hasAgent: (agentResult.data?.length ?? 0) > 0,
+        metaAdsConnected,
+        googleAdsConnected,
         tenantProfile: {
             industry: profileResult.data?.industry || "general",
             phone: profileResult.data?.emergency_phone || "",
@@ -105,6 +131,8 @@ export default async function SequencesPage({
             clientId={clientId}
             sequences={sequences}
             hasAgent={wizardContext.hasAgent}
+            metaAdsConnected={wizardContext.metaAdsConnected}
+            googleAdsConnected={wizardContext.googleAdsConnected}
             tenantProfile={wizardContext.tenantProfile}
         />
     );

@@ -1817,6 +1817,18 @@ const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string;
         trigger_type: "manual",
         urgency_tier: "medium",
     },
+    meta_ads_lead: {
+        name: "Meta Ads — New Lead",
+        description: "Multi-channel outreach for leads captured by Meta Lead Ads",
+        trigger_type: "meta_ads_lead",
+        urgency_tier: "high",
+    },
+    google_ads_lead: {
+        name: "Google Ads — New Lead",
+        description: "Multi-channel outreach for leads captured by Google Lead Form Assets",
+        trigger_type: "google_ads_lead",
+        urgency_tier: "high",
+    },
 };
 
 interface WizardInput {
@@ -1837,7 +1849,7 @@ interface WizardInput {
 export async function createSequenceFromWizard(
     clientId: string,
     input: WizardInput
-): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
+): Promise<{ success: boolean; sequenceId?: string; error?: string; replacedSequenceName?: string }> {
     try {
         const meta = GOAL_TO_SEQUENCE_META[input.goal] || {
             name: input.customGoalDescription?.slice(0, 50) || "Custom Sequence",
@@ -1845,6 +1857,29 @@ export async function createSequenceFromWizard(
             trigger_type: "manual",
             urgency_tier: "medium",
         };
+
+        // Ad-platform triggers are mutually exclusive per client: only one
+        // active sequence may listen to "meta_ads_lead" or "google_ads_lead"
+        // at a time. If one already exists, deactivate it before activating
+        // the new one — otherwise a single ad lead would fan out into
+        // duplicate outreach.
+        let replacedSequenceName: string | undefined;
+        if (meta.trigger_type === "meta_ads_lead" || meta.trigger_type === "google_ads_lead") {
+            const { data: existing } = await supabase
+                .from("sequences")
+                .select("id, name")
+                .eq("client_id", clientId)
+                .eq("trigger_type", meta.trigger_type)
+                .eq("is_active", true)
+                .limit(1);
+            if (existing && existing.length > 0) {
+                replacedSequenceName = existing[0].name;
+                await supabase
+                    .from("sequences")
+                    .update({ is_active: false, updated_at: new Date().toISOString() })
+                    .eq("id", existing[0].id);
+            }
+        }
 
         const enabledChannels = Object.entries(input.channels)
             .filter(([, v]) => v)
@@ -1941,7 +1976,7 @@ export async function createSequenceFromWizard(
 
         revalidatePath(`/client/${clientId}/sequences`);
 
-        return { success: true, sequenceId: seq.id };
+        return { success: true, sequenceId: seq.id, replacedSequenceName };
     } catch (error: any) {
         console.error("createSequenceFromWizard error:", error);
         return { success: false, error: error?.message || "Internal error" };

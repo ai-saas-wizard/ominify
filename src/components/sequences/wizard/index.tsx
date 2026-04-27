@@ -33,6 +33,8 @@ import { createSequenceFromWizard } from "@/app/actions/sequence-actions";
 interface SequenceWizardProps {
     clientId: string;
     hasAgent: boolean;
+    metaAdsConnected: boolean;
+    googleAdsConnected: boolean;
     tenantProfile: {
         industry: string;
         phone: string;
@@ -89,6 +91,8 @@ function getDefaultState(): WizardState {
 export function SequenceWizard({
     clientId,
     hasAgent,
+    metaAdsConnected,
+    googleAdsConnected,
     tenantProfile,
     onClose,
 }: SequenceWizardProps) {
@@ -100,6 +104,7 @@ export function SequenceWizard({
     const [simLoading, setSimLoading] = useState(false);
     const [activating, setActivating] = useState(false);
     const [activated, setActivated] = useState(false);
+    const [replacedSequenceName, setReplacedSequenceName] = useState<string | null>(null);
 
     // Pre-fill notification from tenant profile
     useEffect(() => {
@@ -264,13 +269,16 @@ export function SequenceWizard({
 
             if (result.success) {
                 setActivated(true);
+                if (result.replacedSequenceName) {
+                    setReplacedSequenceName(result.replacedSequenceName);
+                }
                 setTimeout(() => {
                     onClose();
                     if (result.sequenceId) {
                         router.push(`/client/${clientId}/sequences/${result.sequenceId}`);
                     }
                     router.refresh();
-                }, 2000);
+                }, result.replacedSequenceName ? 3500 : 2000);
             } else {
                 alert(result.error || "Failed to activate sequence");
             }
@@ -308,6 +316,13 @@ export function SequenceWizard({
                             : "Your sequence is now active."}{" "}
                         You'll be notified when leads engage.
                     </p>
+                    {replacedSequenceName && (
+                        <div className="mt-4 mx-auto max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Replaced your previous active sequence{" "}
+                            <span className="font-medium">&ldquo;{replacedSequenceName}&rdquo;</span>{" "}
+                            — only one ad-platform sequence can be live at a time.
+                        </div>
+                    )}
                 </motion.div>
             </div>
         );
@@ -386,6 +401,9 @@ export function SequenceWizard({
                                 <GoalSelector
                                     selectedGoal={state.goal}
                                     customDescription={state.customGoalDescription}
+                                    clientId={clientId}
+                                    metaAdsConnected={metaAdsConnected}
+                                    googleAdsConnected={googleAdsConnected}
                                     onSelectGoal={handleSelectGoal}
                                     onCustomDescriptionChange={(desc) =>
                                         setState((s) => ({ ...s, customGoalDescription: desc }))

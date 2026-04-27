@@ -3,11 +3,25 @@ import { ArrowLeft } from "lucide-react";
 import { getCalendarConnectionStatus, disconnectCalendar, updateCalendarSettings } from "@/lib/google-calendar";
 import { getSheetsConnectionStatus, disconnectSheets } from "@/lib/google-sheets";
 import { getCalendlyConnectionStatus, listEventTypes as listCalendlyEventTypesLib } from "@/lib/calendly";
+import { getGoogleAdsConnectionStatus } from "@/lib/google-ads";
+import { getMetaAdsConnectionStatus } from "@/lib/meta-ads";
 import {
     connectCalendlyAction,
     setCalendlyEventTypeAction,
     disconnectCalendlyAction,
 } from "@/app/actions/calendly-actions";
+import {
+    generateGoogleAdsWebhookAction,
+    rotateGoogleAdsKeyAction,
+    disconnectGoogleAdsAction,
+    showGoogleAdsKeyAction,
+} from "@/app/actions/google-ads-actions";
+import {
+    listMetaPagesAction,
+    subscribeMetaPagesAction,
+    unsubscribeMetaPageAction,
+    disconnectMetaAdsAction,
+} from "@/app/actions/meta-ads-actions";
 import { revalidatePath } from "next/cache";
 import { PageTransition } from "@/components/ui/page-transition";
 import { IntegrationsContent } from "@/components/settings/integrations-content";
@@ -31,6 +45,12 @@ export default async function IntegrationsPage(props: {
     const calendlyEventTypes = isCalendlyConnected
         ? await listCalendlyEventTypesLib(clientId)
         : [];
+
+    const googleAdsStatus = await getGoogleAdsConnectionStatus(clientId);
+    const isGoogleAdsConnected = googleAdsStatus?.is_active === true;
+
+    const metaAdsStatus = await getMetaAdsConnectionStatus(clientId);
+    const isMetaAdsConnected = metaAdsStatus?.is_active === true;
 
     async function handleDisconnect() {
         "use server";
@@ -88,6 +108,70 @@ export default async function IntegrationsPage(props: {
         revalidatePath(`/client/${clientId}/settings/integrations`);
     }
 
+    async function handleGenerateGoogleAdsWebhook() {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        const result = await generateGoogleAdsWebhookAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+        return result;
+    }
+
+    async function handleRotateGoogleAdsKey() {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        const result = await rotateGoogleAdsKeyAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+        return result;
+    }
+
+    async function handleShowGoogleAdsKey() {
+        "use server";
+        return showGoogleAdsKeyAction(clientId);
+    }
+
+    async function handleDisconnectGoogleAds() {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        await disconnectGoogleAdsAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+    }
+
+    async function handleListMetaPages() {
+        "use server";
+        return listMetaPagesAction(clientId);
+    }
+
+    async function handleSubscribeMetaPages(pageIds: string[]) {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        for (const id of pageIds) fd.append("pageIds", id);
+        const result = await subscribeMetaPagesAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+        return result;
+    }
+
+    async function handleUnsubscribeMetaPage(pageId: string) {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        fd.set("pageId", pageId);
+        const result = await unsubscribeMetaPageAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+        return result;
+    }
+
+    async function handleDisconnectMetaAds() {
+        "use server";
+        const fd = new FormData();
+        fd.set("clientId", clientId);
+        await disconnectMetaAdsAction(fd);
+        revalidatePath(`/client/${clientId}/settings/integrations`);
+    }
+
     return (
         <PageTransition>
             <div className="p-4 lg:p-8 max-w-4xl mx-auto">
@@ -115,6 +199,10 @@ export default async function IntegrationsPage(props: {
                     isCalendlyConnected={isCalendlyConnected}
                     calendlyStatus={calendlyStatus}
                     calendlyEventTypes={calendlyEventTypes}
+                    isGoogleAdsConnected={isGoogleAdsConnected}
+                    googleAdsStatus={googleAdsStatus}
+                    isMetaAdsConnected={isMetaAdsConnected}
+                    metaAdsStatus={metaAdsStatus}
                     searchParams={searchParams}
                     handleDisconnect={handleDisconnect}
                     handleUpdateSettings={handleUpdateSettings}
@@ -122,6 +210,14 @@ export default async function IntegrationsPage(props: {
                     handleCalendlyConnect={handleCalendlyConnect}
                     handleCalendlySetEventType={handleCalendlySetEventType}
                     handleCalendlyDisconnect={handleCalendlyDisconnect}
+                    handleGenerateGoogleAdsWebhook={handleGenerateGoogleAdsWebhook}
+                    handleRotateGoogleAdsKey={handleRotateGoogleAdsKey}
+                    handleShowGoogleAdsKey={handleShowGoogleAdsKey}
+                    handleDisconnectGoogleAds={handleDisconnectGoogleAds}
+                    handleListMetaPages={handleListMetaPages}
+                    handleSubscribeMetaPages={handleSubscribeMetaPages}
+                    handleUnsubscribeMetaPage={handleUnsubscribeMetaPage}
+                    handleDisconnectMetaAds={handleDisconnectMetaAds}
                 />
             </div>
         </PageTransition>

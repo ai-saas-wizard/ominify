@@ -6,6 +6,8 @@ export type GoalId =
     | "new_lead_nurture"
     | "post_appointment"
     | "win_back_quotes"
+    | "meta_ads_lead"
+    | "google_ads_lead"
     | "custom";
 
 export interface GoalCard {
@@ -13,6 +15,8 @@ export interface GoalCard {
     title: string;
     description: string;
     icon: string;
+    requires?: "meta_ads" | "google_ads";
+    comingSoon?: boolean;
     defaults: {
         trigger_type: string;
         urgency_tier: string;

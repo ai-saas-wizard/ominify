@@ -8,10 +8,15 @@ import {
     CalendarCheck,
     Receipt,
     PencilLine,
+    Megaphone,
+    Target,
     Check,
+    Lock,
+    Clock,
+    ArrowUpRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { GoalId } from "./types";
+import type { GoalId, GoalCard as GoalCardType } from "./types";
 import { GOAL_CARDS } from "./constants";
 
 const ICON_MAP: Record<string, typeof PhoneMissed> = {
@@ -20,6 +25,8 @@ const ICON_MAP: Record<string, typeof PhoneMissed> = {
     sprout: Sprout,
     "calendar-check": CalendarCheck,
     receipt: Receipt,
+    megaphone: Megaphone,
+    target: Target,
     "pencil-line": PencilLine,
 };
 
@@ -29,12 +36,17 @@ const ICON_COLORS: Record<string, { bg: string; text: string }> = {
     sprout: { bg: "bg-emerald-50", text: "text-emerald-500" },
     "calendar-check": { bg: "bg-blue-50", text: "text-blue-500" },
     receipt: { bg: "bg-violet-50", text: "text-violet-500" },
+    megaphone: { bg: "bg-rose-50", text: "text-rose-500" },
+    target: { bg: "bg-sky-50", text: "text-sky-500" },
     "pencil-line": { bg: "bg-gray-50", text: "text-gray-500" },
 };
 
 interface GoalSelectorProps {
     selectedGoal: GoalId | null;
     customDescription: string;
+    clientId: string;
+    metaAdsConnected: boolean;
+    googleAdsConnected: boolean;
     onSelectGoal: (goal: GoalId) => void;
     onCustomDescriptionChange: (desc: string) => void;
 }
@@ -57,12 +69,33 @@ const cardVariants = {
     },
 };
 
+function isGoalLocked(
+    goal: GoalCardType,
+    metaAdsConnected: boolean,
+    googleAdsConnected: boolean
+): boolean {
+    if (goal.requires === "meta_ads") return !metaAdsConnected;
+    if (goal.requires === "google_ads") return !googleAdsConnected;
+    return false;
+}
+
+function lockedLabel(requires: GoalCardType["requires"]): string {
+    if (requires === "meta_ads") return "Connect Meta Ads";
+    if (requires === "google_ads") return "Connect Google Ads";
+    return "Connect integration";
+}
+
 export function GoalSelector({
     selectedGoal,
     customDescription,
+    clientId,
+    metaAdsConnected,
+    googleAdsConnected,
     onSelectGoal,
     onCustomDescriptionChange,
 }: GoalSelectorProps) {
+    const integrationsHref = `/client/${clientId}/settings/integrations`;
+
     return (
         <div className="space-y-6">
             <div>
@@ -84,6 +117,74 @@ export function GoalSelector({
                     const Icon = ICON_MAP[goal.icon] || PencilLine;
                     const colors = ICON_COLORS[goal.icon] || ICON_COLORS["pencil-line"];
                     const isSelected = selectedGoal === goal.id;
+                    const isComingSoon = goal.comingSoon === true;
+                    const isLocked =
+                        !isComingSoon && isGoalLocked(goal, metaAdsConnected, googleAdsConnected);
+
+                    if (isComingSoon) {
+                        return (
+                            <motion.div
+                                key={goal.id}
+                                variants={cardVariants}
+                                aria-disabled="true"
+                                className="relative flex items-start gap-3.5 p-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/40 text-left opacity-80 cursor-not-allowed"
+                            >
+                                <div className={cn("flex-shrink-0 p-2.5 rounded-xl", colors.bg)}>
+                                    <Icon className={cn("w-5 h-5", colors.text)} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                        <p className="font-medium text-gray-700 text-sm">
+                                            {goal.title}
+                                        </p>
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                            <Clock className="w-2.5 h-2.5" />
+                                            Coming soon
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        {goal.description}
+                                    </p>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Verification with the platform is in progress — we&apos;ll
+                                        switch this on as soon as it clears.
+                                    </p>
+                                </div>
+                            </motion.div>
+                        );
+                    }
+
+                    if (isLocked) {
+                        return (
+                            <motion.div
+                                key={goal.id}
+                                variants={cardVariants}
+                                className="relative flex items-start gap-3.5 p-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/40 text-left opacity-80"
+                            >
+                                <div className={cn("flex-shrink-0 p-2.5 rounded-xl", colors.bg)}>
+                                    <Icon className={cn("w-5 h-5", colors.text)} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                        <p className="font-medium text-gray-700 text-sm">
+                                            {goal.title}
+                                        </p>
+                                        <Lock className="w-3 h-3 text-gray-400" />
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        {goal.description}
+                                    </p>
+                                    <a
+                                        href={integrationsHref}
+                                        className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                                    >
+                                        {lockedLabel(goal.requires)}
+                                        <ArrowUpRight className="w-3 h-3" />
+                                    </a>
+                                </div>
+                            </motion.div>
+                        );
+                    }
 
                     return (
                         <motion.button

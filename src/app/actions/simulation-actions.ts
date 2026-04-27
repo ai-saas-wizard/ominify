@@ -76,6 +76,8 @@ const GOAL_LABELS: Record<string, string> = {
     new_lead_nurture: "Nurture new leads",
     post_appointment: "Post-appointment follow-up",
     win_back_quotes: "Win back lost quotes",
+    meta_ads_lead: "Convert Meta Ads leads",
+    google_ads_lead: "Convert Google Ads leads",
     custom: "Custom goal",
 };
 
@@ -85,6 +87,8 @@ const TRIGGER_SOURCE_MAP: Record<string, string> = {
     new_lead_nurture: "Website form submission",
     post_appointment: "Appointment completed",
     win_back_quotes: "Quote sent — no response",
+    meta_ads_lead: "Meta Lead Ad submission",
+    google_ads_lead: "Google Lead Form Asset submission",
     custom: "Manual enrollment",
 };
 

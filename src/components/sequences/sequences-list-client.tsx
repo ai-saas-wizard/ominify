@@ -72,6 +72,8 @@ interface SequencesListClientProps {
     clientId: string;
     sequences: SequenceCardData[];
     hasAgent?: boolean;
+    metaAdsConnected?: boolean;
+    googleAdsConnected?: boolean;
     tenantProfile?: {
         industry: string;
         phone: string;
@@ -97,6 +99,8 @@ const TRIGGER_LABELS: Record<string, string> = {
     tag_added: "Tag Added",
     status_change: "Status Change",
     schedule: "Schedule",
+    meta_ads_lead: "Meta Ads Lead",
+    google_ads_lead: "Google Ads Lead",
 };
 
 const CHANNEL_ICONS: Record<string, { icon: typeof MessageSquare; color: string; label: string }> = {
@@ -485,7 +489,7 @@ function SequenceCard({
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export function SequencesListClient({ clientId, sequences, hasAgent, tenantProfile }: SequencesListClientProps) {
+export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConnected, googleAdsConnected, tenantProfile }: SequencesListClientProps) {
     const router = useRouter();
     const totalSequences = sequences.length;
     const activeSequences = sequences.filter((s) => s.is_active).length;
@@ -599,6 +603,8 @@ export function SequencesListClient({ clientId, sequences, hasAgent, tenantProfi
                         <SequenceWizard
                             clientId={clientId}
                             hasAgent={hasAgent ?? false}
+                            metaAdsConnected={metaAdsConnected ?? false}
+                            googleAdsConnected={googleAdsConnected ?? false}
                             tenantProfile={tenantProfile ?? { industry: "general", phone: "", email: "", business_name: "" }}
                             onClose={() => setWizardOpen(false)}
                         />
