@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Check,
@@ -9,6 +9,7 @@ import {
     Mail,
     Phone,
     Smartphone,
+    ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
@@ -301,25 +302,18 @@ export function HandoffRulesScreen({
                             className="flex items-center gap-2 pl-1"
                         >
                             <span className="text-sm text-gray-500">Re-engage in</span>
-                            <select
+                            <WeeksSelect
                                 value={config.no_response.reengage_weeks || 2}
-                                onChange={(e) =>
+                                onChange={(w) =>
                                     onChange({
                                         ...config,
                                         no_response: {
                                             ...config.no_response,
-                                            reengage_weeks: Number(e.target.value),
+                                            reengage_weeks: w,
                                         },
                                     })
                                 }
-                                className="px-2 py-1 border rounded-lg text-sm bg-white"
-                            >
-                                {[2, 3, 4, 6, 8].map((w) => (
-                                    <option key={w} value={w}>
-                                        {w} weeks
-                                    </option>
-                                ))}
-                            </select>
+                            />
                         </motion.div>
                     )}
                 </div>
@@ -405,6 +399,95 @@ export function HandoffRulesScreen({
                     </div>
                 </div>
             </div>
+        </div>
+    );
+}
+
+// ─── In-app styled week picker (replaces native <select> so the dropdown
+// matches the rest of the wizard instead of the OS popup chrome) ───
+
+const WEEK_OPTIONS = [2, 3, 4, 6, 8];
+
+function WeeksSelect({
+    value,
+    onChange,
+}: {
+    value: number;
+    onChange: (w: number) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        function onDocClick(e: MouseEvent) {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        }
+        function onKey(e: KeyboardEvent) {
+            if (e.key === "Escape") setOpen(false);
+        }
+        document.addEventListener("mousedown", onDocClick);
+        document.addEventListener("keydown", onKey);
+        return () => {
+            document.removeEventListener("mousedown", onDocClick);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [open]);
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-lg text-sm bg-white hover:border-gray-300 transition-colors"
+            >
+                <span>{value} weeks</span>
+                <ChevronDown
+                    className={cn(
+                        "w-3.5 h-3.5 text-gray-400 transition-transform",
+                        open && "rotate-180"
+                    )}
+                />
+            </button>
+            <AnimatePresence>
+                {open && (
+                    <motion.ul
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.12 }}
+                        className="absolute z-20 mt-1 left-0 min-w-full bg-white border border-gray-200 rounded-lg shadow-lg py-1 overflow-hidden"
+                    >
+                        {WEEK_OPTIONS.map((w) => {
+                            const selected = w === value;
+                            return (
+                                <li key={w}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            onChange(w);
+                                            setOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between gap-3 px-3 py-1.5 text-sm text-left transition-colors",
+                                            selected
+                                                ? "bg-emerald-50 text-emerald-700 font-medium"
+                                                : "text-gray-700 hover:bg-gray-50"
+                                        )}
+                                    >
+                                        <span>{w} weeks</span>
+                                        {selected && (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        )}
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </motion.ul>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

@@ -188,6 +188,9 @@ export function SimulationView({
                     <div>
                         <p className="text-sm font-medium text-gray-900">
                             {scenario.fake_contact.name}
+                            <span className="ml-1.5 text-[10px] font-semibold tracking-wide text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase">
+                                Lead
+                            </span>
                         </p>
                         <p className="text-xs text-gray-400">
                             {scenario.fake_contact.source} &middot; {scenario.scenario_name}
@@ -244,7 +247,7 @@ export function SimulationView({
             {/* Timeline */}
             <div
                 ref={scrollRef}
-                className="max-h-[400px] overflow-y-auto pr-2 scrollbar-thin"
+                className="max-h-[calc(100vh-360px)] min-h-[480px] overflow-y-auto pr-2 scrollbar-thin"
             >
                 <div className="relative">
                     <AnimatePresence>

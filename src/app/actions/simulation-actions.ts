@@ -121,7 +121,7 @@ export async function generateSimulation(
             .map((c) => `- ${c.replace(/_/g, " ")}`)
             .join("\n");
 
-        const prompt = `You are generating a realistic simulation of an AI-powered lead follow-up sequence for a business owner to preview.
+        const prompt = `You are generating a realistic simulation of an AI-powered lead follow-up sequence for a business owner to preview. The simulation MUST behave EXACTLY like the production sequencer — same channel selection, same opt-out handling, same handoff behavior. Owners watching this preview need to trust that the live system will act the same way.
 
 BUSINESS CONTEXT:
 - Business: ${tenant.businessName}
@@ -132,7 +132,7 @@ BUSINESS CONTEXT:
 
 SEQUENCE CONFIG:
 - Goal: ${goalLabel}
-- Channels: ${enabledChannels.join(", ")}
+- Enabled channels: ${enabledChannels.join(", ")}
 - Cadence: ${input.cadence} touchpoints/week
 - Duration: ${input.duration} weeks
 - Total touchpoints: ~${totalTouchpoints}
@@ -145,26 +145,39 @@ Handoff triggers (AI must step aside):
 ${handoffTriggersList || "- None specified"}
 
 SCENARIO TYPE: ${scenarioType}
-${scenarioType === "positive" ? "Lead engages positively and moves toward a success condition." : ""}
-${scenarioType === "neutral" ? "Lead never responds. AI backs off gracefully after several attempts." : ""}
-${scenarioType === "negative" ? "Lead is hostile or opts out. AI handles it professionally." : ""}
-${scenarioType === "handoff" ? "Lead triggers one of the handoff rules. AI steps aside and notifies the owner." : ""}
+${scenarioType === "positive" ? "Lead engages positively across 2-3 replies on the same channel and moves toward a success condition (e.g. books an appointment, accepts the offer). End with a confirmation outbound from the AI." : ""}
+${scenarioType === "neutral" ? "Lead never responds. Show 3-4 outbound attempts that alternate channels with growing delays, then the AI backs off gracefully. NO inbound entries at all." : ""}
+${scenarioType === "negative" ? "Lead replies once with a clear opt-out using language like 'stop contacting me', 'don't text me again', 'remove me from your list', or 'not interested'. That inbound reply is the FINAL entry in the timeline. NO outbound entries after it. Set handoff.triggered: true on that final inbound entry with reason: 'opted_out'." : ""}
+${scenarioType === "handoff" ? "Lead's reply triggers one of the configured handoff triggers above (e.g. asks for a human, files a complaint, mentions a sensitive topic). That inbound reply is the FINAL entry. NO outbound entries after it. Set handoff.triggered: true on that final inbound entry with the matching reason." : ""}
 
-Generate a JSON simulation with 5-8 timeline entries. The simulation should feel realistic and demonstrate:
-1. How the AI adapts its messaging based on what happens
-2. The AI's reasoning at each step (shown to the owner as "AI thinking" bubbles)
-3. Natural, brand-appropriate messaging
-4. ${scenarioType === "handoff" ? "At least one handoff trigger firing with a detailed owner notification" : "Appropriate handling of the " + scenarioType + " scenario"}
+DECISION RULES (follow strictly — these match the production sequencer):
 
-IMPORTANT RULES:
+1. CHANNEL STICKINESS (CRITICAL): If an inbound entry has channel "X", the very next outbound entry MUST also have channel "X". Do NOT switch channels while the lead is actively replying. This is non-negotiable — owners specifically asked for this.
+
+2. CHANNEL ALTERNATION: Only alternate channels when the lead has gone SILENT after 1-2 outbound attempts on the current channel. Logical fallbacks: SMS → email, email → voice, voice (no answer) → SMS referencing the missed call.
+
+3. OPT-OUT IS A HARD STOP: If any inbound entry contains opt-out language ("stop", "don't contact me", "remove me", "not interested", "leave me alone", "unsubscribe", or similar), that inbound entry MUST be the LAST entry in the timeline. Set its handoff field to { triggered: true, reason: "opted_out", notification: "<short internal owner notification>" }. Generate ZERO outbound entries after it.
+
+4. HANDOFF ENDS THE SIMULATION: When a handoff fires (lead requests human, complaint, sensitive topic, opt-out, goal achieved, etc.), the inbound entry that triggered it is the LAST entry. NEVER generate outbound after a handoff.
+
+5. VOICEMAIL HANDLING: If a voice outbound goes unanswered (no inbound follows), the next outbound should be SMS referencing the missed call.
+
+6. POSITIVE PROGRESSION: When the lead engages positively, the AI escalates toward the success condition on the SAME channel they replied on, then ends with a confirmation outbound.
+
+CONTENT RULES:
 - Use ONLY channels from the enabled list: ${enabledChannels.join(", ")}
 - Messages should sound natural and match the "${tenant.brandVoice}" brand voice
-- Include a mix of outbound (AI sends) and inbound (lead responds) entries where appropriate
 - For voice entries, write what the agent would say (dialog style)
-- Each outbound entry MUST have ai_reasoning
-- Each inbound entry SHOULD have ai_analysis
-- When the AI adapts its strategy, include an "adaptation" field explaining the change
-- For handoff scenarios, include a handoff object with triggered: true, reason, and a notification message that includes the lead's name, context, and a recommendation
+- Each outbound entry MUST have ai_reasoning explaining WHY this channel/timing/message was chosen (especially when applying channel stickiness or alternation)
+- Each inbound entry SHOULD have ai_analysis describing what the AI inferred
+- When the AI changes strategy, include an "adaptation" field explaining the change
+- For handoff/opt-out scenarios, the notification field should include the lead's name, what happened, and a recommendation for the owner
+
+TIMELINE LENGTH:
+- Positive: 5-7 entries ending in confirmation
+- Neutral: 3-4 outbound entries, no inbound, no handoff
+- Negative: 2-4 entries, ending in the opt-out inbound with handoff
+- Handoff: 3-5 entries, ending in the handoff-triggering inbound with handoff
 
 Return ONLY valid JSON in this exact format:
 {
@@ -188,7 +201,7 @@ Return ONLY valid JSON in this exact format:
             model: "gpt-4o",
             messages: [{ role: "user", content: prompt }],
             response_format: { type: "json_object" },
-            temperature: 0.8,
+            temperature: 0.3,
         });
 
         const raw = response.choices[0]?.message?.content;
@@ -203,9 +216,74 @@ Return ONLY valid JSON in this exact format:
             return { success: false, error: "Invalid simulation format" };
         }
 
+        enforceProductionRules(scenario);
+
         return { success: true, scenario };
     } catch (err: any) {
         console.error("generateSimulation error:", err);
         return { success: false, error: err.message || "Failed to generate simulation" };
+    }
+}
+
+// ─── Defensive Rule Enforcement ───
+// Mirrors the production sequencer's hard rules so the demo never shows
+// behavior that diverges from what users will see live.
+
+const OPT_OUT_PATTERNS = [
+    /\bstop\b/i,
+    /\bdo\s*n[o']?t\s+(contact|text|call|message|email)\b/i,
+    /\bremove\s+me\b/i,
+    /\bnot\s+interested\b/i,
+    /\bleave\s+me\s+alone\b/i,
+    /\bunsubscribe\b/i,
+    /\bopt[- ]?out\b/i,
+];
+
+function looksLikeOptOut(content: string): boolean {
+    return OPT_OUT_PATTERNS.some((re) => re.test(content));
+}
+
+function enforceProductionRules(scenario: SimulationScenario): void {
+    const timeline = scenario.timeline;
+
+    // Rule 1: hard-stop on opt-out / handoff. Drop everything after the first
+    // inbound entry that either has handoff.triggered === true or contains
+    // opt-out language.
+    let stopIdx = -1;
+    for (let i = 0; i < timeline.length; i++) {
+        const entry = timeline[i];
+        if (entry.direction !== "inbound") continue;
+        const hasHandoff = entry.handoff?.triggered === true;
+        const hasOptOut = looksLikeOptOut(entry.content);
+        if (hasHandoff || hasOptOut) {
+            if (hasOptOut && !hasHandoff) {
+                entry.handoff = {
+                    triggered: true,
+                    reason: "opted_out",
+                    notification:
+                        entry.handoff?.notification ||
+                        `${scenario.fake_contact.name} opted out. Sequence stopped — do not contact again.`,
+                };
+            }
+            stopIdx = i;
+            break;
+        }
+    }
+    if (stopIdx >= 0 && stopIdx < timeline.length - 1) {
+        scenario.timeline = timeline.slice(0, stopIdx + 1);
+    }
+
+    // Rule 2: channel stickiness. Any outbound that immediately follows an
+    // inbound on a different channel gets snapped to the inbound's channel.
+    for (let i = 1; i < scenario.timeline.length; i++) {
+        const prev = scenario.timeline[i - 1];
+        const cur = scenario.timeline[i];
+        if (
+            prev.direction === "inbound" &&
+            cur.direction === "outbound" &&
+            prev.channel !== cur.channel
+        ) {
+            cur.channel = prev.channel;
+        }
     }
 }
