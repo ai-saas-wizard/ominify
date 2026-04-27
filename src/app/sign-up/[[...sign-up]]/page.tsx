@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { SignUp } from "@clerk/nextjs";
 import { AuthLayout } from "@/components/auth/auth-layout";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 
 export default function SignUpPage() {
     const [accepted, setAccepted] = useState(false);
+    const [expanded, setExpanded] = useState(false);
 
     return (
         <AuthLayout
@@ -14,55 +15,11 @@ export default function SignUpPage() {
             subtitle="Get started with Omnify today"
         >
             <div className="space-y-5">
-                <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50/60 cursor-pointer hover:border-emerald-300 transition-colors">
-                    <button
-                        type="button"
-                        onClick={() => setAccepted((v) => !v)}
-                        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                            accepted
-                                ? "border-emerald-500 bg-emerald-500"
-                                : "border-gray-300 bg-white"
-                        }`}
-                        aria-pressed={accepted}
-                        aria-label="Accept compliance terms"
-                    >
-                        {accepted && <Check className="w-3 h-3 text-white" />}
-                    </button>
-                    <span className="text-xs text-gray-600 leading-relaxed select-none">
-                        I confirm that I have obtained prior express written
-                        consent from every contact my AI agents will call or
-                        message, and that I am solely responsible for compliance
-                        with the TCPA, state and federal Do-Not-Call (DNC)
-                        registries, and all other applicable communications
-                        laws. Omnify is a software platform and assumes no
-                        liability for outreach I conduct using the service. I
-                        agree to the{" "}
-                        <a
-                            href="/legal/terms"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-emerald-700 underline hover:text-emerald-800"
-                        >
-                            Terms of Service
-                        </a>{" "}
-                        and{" "}
-                        <a
-                            href="/legal/privacy"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-emerald-700 underline hover:text-emerald-800"
-                        >
-                            Privacy Policy
-                        </a>
-                        .
-                    </span>
-                </label>
-
                 <div
                     className={
                         accepted
                             ? ""
-                            : "pointer-events-none opacity-50 select-none"
+                            : "pointer-events-none opacity-60 select-none transition-opacity"
                     }
                     aria-disabled={!accepted}
                 >
@@ -101,11 +58,74 @@ export default function SignUpPage() {
                         forceRedirectUrl="/"
                     />
                 </div>
-                {!accepted && (
-                    <p className="text-xs text-gray-500 text-center">
-                        Please accept the compliance terms above to create your account.
-                    </p>
-                )}
+
+                {/* Compliance acknowledgment — expandable */}
+                <div className="border-t border-gray-200 pt-4">
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setAccepted((v) => !v)}
+                            className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                                accepted
+                                    ? "border-emerald-500 bg-emerald-500"
+                                    : "border-gray-300 bg-white hover:border-emerald-400"
+                            }`}
+                            aria-pressed={accepted}
+                            aria-label="Accept compliance terms"
+                        >
+                            {accepted && <Check className="w-3 h-3 text-white" />}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setExpanded((v) => !v)}
+                            className="flex-1 flex items-center justify-between text-left text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                        >
+                            <span>
+                                I agree to the Terms, Privacy &amp; compliance acknowledgment
+                                {!accepted && (
+                                    <span className="text-emerald-700 text-xs ml-1.5 font-medium">
+                                        (required)
+                                    </span>
+                                )}
+                            </span>
+                            <ChevronDown
+                                className={`w-4 h-4 text-gray-400 transition-transform ${
+                                    expanded ? "rotate-180" : ""
+                                }`}
+                            />
+                        </button>
+                    </div>
+                    {expanded && (
+                        <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 leading-relaxed">
+                            I confirm that I have obtained prior express written
+                            consent from every contact my AI agents will call or
+                            message, and that I am solely responsible for
+                            compliance with the TCPA, state and federal
+                            Do-Not-Call (DNC) registries, and all other
+                            applicable communications laws. Omnify is a software
+                            platform and assumes no liability for outreach I
+                            conduct using the service. I agree to the{" "}
+                            <a
+                                href="/legal/terms"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-700 underline hover:text-emerald-800"
+                            >
+                                Terms of Service
+                            </a>{" "}
+                            and{" "}
+                            <a
+                                href="/legal/privacy"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-700 underline hover:text-emerald-800"
+                            >
+                                Privacy Policy
+                            </a>
+                            .
+                        </div>
+                    )}
+                </div>
             </div>
         </AuthLayout>
     );
