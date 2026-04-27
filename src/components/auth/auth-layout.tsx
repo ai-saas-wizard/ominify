@@ -205,9 +205,22 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
     return (
         <div className="min-h-screen flex bg-white text-gray-900 overflow-hidden">
             {/* Left side - Auth form */}
-            <div className="w-full lg:w-[45%] flex flex-col relative z-20 bg-white border-r border-gray-200">
+            <div className="w-full lg:w-[45%] flex flex-col relative z-20 border-r border-gray-200 bg-gradient-to-b from-white via-white to-emerald-50/30 overflow-hidden">
+                {/* Soft accent orbs */}
+                <div className="pointer-events-none absolute -top-32 -left-32 w-80 h-80 rounded-full bg-emerald-200/30 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-40 -right-24 w-96 h-96 rounded-full bg-emerald-300/20 blur-3xl" />
+                {/* Faint dot grid */}
+                <svg className="pointer-events-none absolute inset-0 w-full h-full opacity-[0.18]">
+                    <defs>
+                        <pattern id="authDotPattern" width="28" height="28" patternUnits="userSpaceOnUse">
+                            <circle cx="2" cy="2" r="1" fill="#059669" opacity="0.5" />
+                        </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#authDotPattern)" />
+                </svg>
+
                 {/* Logo */}
-                <div className="p-8">
+                <div className="p-8 relative">
                     <div className="flex items-center gap-2.5">
                         <Image
                             src="/omnify-logo.png"
@@ -223,9 +236,9 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
                 </div>
 
                 {/* Form container */}
-                <div className="flex-1 flex items-center justify-center p-8 sm:p-12">
-                    <div className="w-full max-w-[400px]">
-                        <div className="mb-8 text-center sm:text-left">
+                <div className="flex-1 flex items-center justify-center p-6 sm:p-10 relative">
+                    <div className="w-full max-w-[420px] bg-white/90 backdrop-blur-sm border border-gray-200/80 rounded-2xl shadow-xl shadow-emerald-900/[0.04] p-8 sm:p-10">
+                        <div className="mb-7 text-center sm:text-left">
                             <h1 className="text-3xl font-semibold tracking-tight text-gray-900 mb-2">{title}</h1>
                             <p className="text-gray-500 text-base">{subtitle}</p>
                         </div>
@@ -234,7 +247,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
                 </div>
 
                 {/* Footer */}
-                <div className="p-8 text-center sm:text-left space-y-1">
+                <div className="p-8 text-center sm:text-left space-y-1 relative">
                     <p className="text-gray-400 text-xs">
                         © {new Date().getFullYear()} Omnify. All rights reserved.
                     </p>
