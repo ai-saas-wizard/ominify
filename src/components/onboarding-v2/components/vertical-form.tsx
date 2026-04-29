@@ -51,7 +51,14 @@ export function VerticalForm({
         dealTypes: initialData?.dealTypes ?? [],
         timezone: initialData?.timezone ?? "",
         appointmentType: initialData?.appointmentType ?? "in_person",
-        transferPhone: initialData?.transferPhone ?? "",
+        inboundTransferFirstName:
+            initialData?.inboundTransfer?.firstName ?? "",
+        inboundTransferRole:
+            initialData?.inboundTransfer?.role ?? "lead manager",
+        inboundTransferPhone:
+            initialData?.inboundTransfer?.phone ?? "",
+        inboundTransferMode:
+            initialData?.inboundTransfer?.mode ?? "warm-summary",
         businessPhone: initialData?.businessPhone ?? "",
     });
 
@@ -59,7 +66,8 @@ export function VerticalForm({
     const [openSections, setOpenSections] = useState<Record<string, boolean>>({
         company: true,
         operations: true,
-        contact: true,
+        inbound_transfer: true,
+        callback: true,
     });
 
     const updateField = useCallback(
@@ -148,9 +156,32 @@ export function VerticalForm({
                 severity: "error",
             });
         }
-        if (!fields.transferPhone || !isValidPhone(fields.transferPhone as string)) {
+        if (
+            !fields.inboundTransferFirstName ||
+            (fields.inboundTransferFirstName as string).trim().length < 1
+        ) {
             newErrors.push({
-                field: "transferPhone",
+                field: "inboundTransferFirstName",
+                message: "First name of the transfer specialist is required",
+                severity: "error",
+            });
+        }
+        if (
+            !fields.inboundTransferRole ||
+            (fields.inboundTransferRole as string).trim().length < 1
+        ) {
+            newErrors.push({
+                field: "inboundTransferRole",
+                message: "Role of the transfer specialist is required",
+                severity: "error",
+            });
+        }
+        if (
+            !fields.inboundTransferPhone ||
+            !isValidPhone(fields.inboundTransferPhone as string)
+        ) {
+            newErrors.push({
+                field: "inboundTransferPhone",
                 message: "Valid 10-digit phone number is required",
                 severity: "error",
             });
@@ -170,7 +201,13 @@ export function VerticalForm({
             const sectionMap: Record<string, string[]> = {
                 company: ["companyName", "ownerName", "ownerEmail", "agentPersonaName"],
                 operations: ["markets", "dealTypes", "timezone", "appointmentType"],
-                contact: ["transferPhone", "businessPhone"],
+                inbound_transfer: [
+                    "inboundTransferFirstName",
+                    "inboundTransferRole",
+                    "inboundTransferPhone",
+                    "inboundTransferMode",
+                ],
+                callback: ["businessPhone"],
             };
             for (const [sectionId, sectionFields] of Object.entries(sectionMap)) {
                 if (newErrors.some((e) => sectionFields.includes(e.field))) {
@@ -185,6 +222,13 @@ export function VerticalForm({
     const handleContinue = useCallback(() => {
         if (!validate()) return;
 
+        const inboundTransferFirstName = (
+            fields.inboundTransferFirstName as string
+        ).trim();
+        const inboundTransferPhone = (
+            fields.inboundTransferPhone as string
+        ).trim();
+
         const formData: REInvestorFormData = {
             companyName: (fields.companyName as string).trim(),
             ownerName: (fields.ownerName as string).trim(),
@@ -194,11 +238,32 @@ export function VerticalForm({
             dealTypes: fields.dealTypes as string[],
             timezone: fields.timezone as string,
             appointmentType: fields.appointmentType as string,
-            transferPhone: (fields.transferPhone as string).trim(),
             businessPhone: (fields.businessPhone as string).trim(),
+            inboundTransfer: {
+                firstName: inboundTransferFirstName,
+                role: (fields.inboundTransferRole as string).trim(),
+                phone: inboundTransferPhone,
+                mode:
+                    (fields.inboundTransferMode as
+                        | "warm-summary"
+                        | "cold") || "warm-summary",
+            },
+            // Outbound transfer config — collected on the outbound-config phase.
+            // Default it to mirror inbound so deploy works even if the user clicks
+            // straight through; they can change it on the outbound phase.
+            outboundTransfer: initialData?.outboundTransfer ?? {
+                firstName: inboundTransferFirstName,
+                role: (fields.inboundTransferRole as string).trim(),
+                phone: inboundTransferPhone,
+                mode:
+                    (fields.inboundTransferMode as
+                        | "warm-summary"
+                        | "cold") || "warm-summary",
+            },
             // Outbound config — collected on the next phase. Carry through any
             // values from initialData so going back/forward doesn't wipe edits.
             outboundGoal: initialData?.outboundGoal ?? "re_engage_prior_offer",
+            outboundScenario: initialData?.outboundScenario ?? "",
             outboundPrompt: initialData?.outboundPrompt ?? "",
             outboundFirstMessage: initialData?.outboundFirstMessage ?? "",
         };

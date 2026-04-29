@@ -1,5 +1,6 @@
 import type { REInvestorFormData } from "../types";
 import { formatPhoneForSpeech } from "./phone-format";
+import { transferToolNameFor } from "./tools";
 
 /**
  * Builds the RE Investor inbound receptionist system prompt.
@@ -21,12 +22,18 @@ export function buildREInboundPrompt(formData: REInvestorFormData): {
         dealTypes,
         timezone,
         appointmentType,
-        transferPhone,
         businessPhone,
+        inboundTransfer,
     } = formData;
 
     // Format phone for spoken reading (digit by digit with dashes)
     const spokenBusinessPhone = formatPhoneForSpeech(businessPhone);
+
+    // Personalized transfer tool name — keeps prompt + tool definition in lockstep.
+    // Per the VAPI prompting guide, prompts should reference tools by their
+    // exact function name so the LLM picks the right one to call.
+    const transferToolName = transferToolNameFor(inboundTransfer);
+    const transferFirstName = inboundTransfer.firstName || "the team";
 
     // Build appointment type context for prompt injection
     const appointmentTypeContext =
@@ -780,10 +787,10 @@ ${appointmentConfirmLine}
 
 ## WARNINGS
 
-- Never say "function," "tool," or tool names
+- Never say the words "function," "tool," or any tool name out loud to the caller
 - Never say "ending the call"
 - Pass user input directly to functions without modification
-- For transfers, trigger tool silently without text response
+- For transfers, silently invoke the \`${transferToolName}\` tool without any text response — the tool plays its own connect message
 - Never invent a date. Always resolve relative dates ("tomorrow", "Tuesday", "next week") from {{currentDate}}.
 - Before booking, always re-confirm the full date and time back to the caller in natural language (e.g. "So that's Tuesday, April twenty-second at two o'clock in the afternoon, correct?") and wait for their confirmation before calling book_appointment.
 
@@ -833,10 +840,13 @@ ${appointmentConfirmLine}
 
 ### Second time asked if AI:
 "I... I'm so sorry I'm this nervous. I want to make sure we do our best for you, and you deserve to talk with my team lead. Can I put you on hold while I initiate the transfer?"
-<wait>
+<wait for user response>
 
-- If yes: Trigger transfer function silently, then say "Okay, just give me two seconds and I'll get them on the line."
+- If yes: silently invoke the \`${transferToolName}\` function (do NOT send any text response — the tool will play its own connect message), then say "Okay, just give me two seconds and I'll get them on the line."
 - If no: Continue with conversation flow
+
+### Caller explicitly asks for a human / to be transferred:
+- Silently invoke the \`${transferToolName}\` function. Do NOT send any text response before invoking — the tool plays its own connect message. After invoking, say "Of course, just give me one second and I'll get someone on the line."
 
 ---
 

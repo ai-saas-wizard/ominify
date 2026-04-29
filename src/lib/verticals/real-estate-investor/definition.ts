@@ -104,19 +104,63 @@ export const reInvestorDefinition: VerticalDefinition = {
             ],
         },
         {
-            id: "contact",
-            title: "Contact & Routing",
-            description: "How calls should be handled and escalated",
+            id: "inbound_transfer",
+            title: "Inbound Transfer Specialist",
+            description:
+                "Who should the AI warm-transfer inbound calls to when a seller asks to speak to a human? The AI tool will be named after this person (e.g. \"gary_transfer\") and the AI will brief them on the call before connecting.",
             fields: [
                 {
-                    key: "transferPhone",
-                    label: "Escalation Phone Number",
+                    key: "inboundTransferFirstName",
+                    label: "First name",
+                    type: "text",
+                    required: true,
+                    placeholder: "e.g., Gary",
+                    helpText:
+                        "Used to name the transfer tool the AI invokes (gary_transfer, rhonda_transfer, etc.)",
+                },
+                {
+                    key: "inboundTransferRole",
+                    label: "Their role",
+                    type: "text",
+                    required: true,
+                    placeholder: "e.g., lead manager",
+                    helpText:
+                        "Surfaced in the warm-transfer summary the AI speaks to them",
+                },
+                {
+                    key: "inboundTransferPhone",
+                    label: "Their phone number",
                     type: "phone",
                     required: true,
                     placeholder: "e.g., (615) 647-9393",
-                    helpText:
-                        "Calls transfer here when a caller insists on speaking to a real person",
+                    helpText: "Where inbound transfers route to",
                 },
+                {
+                    key: "inboundTransferMode",
+                    label: "Transfer style",
+                    type: "single-select",
+                    required: true,
+                    options: [
+                        {
+                            value: "warm-summary",
+                            label: "Warm transfer with AI-spoken summary (recommended)",
+                        },
+                        {
+                            value: "cold",
+                            label: "Cold transfer (connect immediately, no summary)",
+                        },
+                    ],
+                    defaultValue: "warm-summary",
+                    helpText:
+                        "Warm transfers brief the operator on the call before connecting; cold transfers connect immediately.",
+                },
+            ],
+        },
+        {
+            id: "callback",
+            title: "Callback Number",
+            description: "Number the AI leaves in voicemail messages",
+            fields: [
                 {
                     key: "businessPhone",
                     label: "Business Callback Number",

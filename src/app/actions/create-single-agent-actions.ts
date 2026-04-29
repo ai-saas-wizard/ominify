@@ -356,7 +356,12 @@ async function createREAgent(
                     markets: formData.markets,
                     deal_types: formData.dealTypes,
                     appointment_type: formData.appointmentType,
-                    transfer_phone: formData.transferPhone,
+                    transfer: {
+                        first_name: formData.inboundTransfer.firstName,
+                        role: formData.inboundTransfer.role,
+                        phone: formData.inboundTransfer.phone,
+                        mode: formData.inboundTransfer.mode,
+                    },
                     business_phone: formData.businessPhone,
                 },
                 auto_created: false,

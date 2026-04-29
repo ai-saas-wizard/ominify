@@ -102,6 +102,26 @@ export type REOutboundGoal =
     | "custom";
 
 /**
+ * VAPI transfer modes we surface to onboarding.
+ * - warm-summary: warm-transfer-wait-for-operator-to-speak-first-and-then-say-summary
+ *                 (LLM briefs the operator before connecting the seller)
+ * - cold: blind-transfer (connect immediately, no summary)
+ */
+export type TransferMode = "warm-summary" | "cold";
+
+/**
+ * Per-direction transfer specialist configuration.
+ * Drives the transferCall tool's name (`${firstName.toLowerCase()}_transfer`),
+ * destination phone, and transferPlan mode.
+ */
+export interface TransferSpecialist {
+    firstName: string;          // e.g. "Gary" — used to derive `gary_transfer` tool name
+    role: string;               // e.g. "lead manager" — surfaced in tool description + summary briefing
+    phone: string;              // E.164 destination
+    mode: TransferMode;
+}
+
+/**
  * Typed form data specific to Real Estate Investor vertical.
  * Used by prompt builders and deployment actions.
  */
@@ -114,10 +134,15 @@ export interface REInvestorFormData {
     dealTypes: string[];
     timezone: string;
     appointmentType: string;
-    transferPhone: string;
     businessPhone: string;
+    // Per-agent transfer specialists. Inbound is collected on the main form;
+    // outbound on the dedicated outbound-config phase so users can configure
+    // each independently (e.g. inbound → owner; outbound → lead manager).
+    inboundTransfer: TransferSpecialist;
+    outboundTransfer: TransferSpecialist;
     // Outbound agent config (collected on a separate phase, not via formSections)
     outboundGoal: REOutboundGoal;
+    outboundScenario: string;   // optional free-text scenario description for AI generation
     outboundPrompt: string;
     outboundFirstMessage: string;
 }

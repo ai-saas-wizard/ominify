@@ -7,7 +7,10 @@ import { revalidatePath } from "next/cache";
 import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import { getVertical } from "@/lib/verticals/registry";
 import { buildREInboundPrompt } from "@/lib/verticals/real-estate-investor/prompts";
-import { buildREInboundTools } from "@/lib/verticals/real-estate-investor/tools";
+import {
+    buildREInboundTools,
+    buildREOutboundTools,
+} from "@/lib/verticals/real-estate-investor/tools";
 import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
@@ -71,7 +74,7 @@ export async function deployVerticalAgents(
             }),
             timezone: formData.timezone,
             brand_voice: "friendly",
-            emergency_phone: formData.transferPhone,
+            emergency_phone: formData.inboundTransfer.phone,
             primary_goal: "book_appointment",
             onboarding_vertical: "real_estate_investor",
         };
@@ -135,8 +138,11 @@ export async function deployVerticalAgents(
                 firstMessage = built.firstMessage;
             }
 
-            // 4b. Tools — same set for both directions in V1
-            const tools = buildREInboundTools(clientId, appUrl, formData);
+            // 4b. Tools — calendar surface is identical for both directions, but
+            // the transferCall uses direction-specific specialist config.
+            const tools = isOutbound
+                ? buildREOutboundTools(clientId, appUrl, formData)
+                : buildREInboundTools(clientId, appUrl, formData);
 
             // 4c. Defaults source depends on direction
             const directionDefaults = isOutbound
@@ -224,6 +230,9 @@ export async function deployVerticalAgents(
             }
 
             // 4f. Save agent row to DB
+            const transferConfig = isOutbound
+                ? formData.outboundTransfer
+                : formData.inboundTransfer;
             const agentConfig: Record<string, any> = {
                 voice_id: agentDef.voiceId,
                 voice_name: "Sam (RE)",
@@ -232,11 +241,17 @@ export async function deployVerticalAgents(
                 markets: formData.markets,
                 deal_types: formData.dealTypes,
                 appointment_type: formData.appointmentType,
-                transfer_phone: formData.transferPhone,
+                transfer: {
+                    first_name: transferConfig.firstName,
+                    role: transferConfig.role,
+                    phone: transferConfig.phone,
+                    mode: transferConfig.mode,
+                },
                 business_phone: formData.businessPhone,
             };
             if (isOutbound) {
                 agentConfig.outbound_goal = formData.outboundGoal;
+                agentConfig.outbound_scenario = formData.outboundScenario || null;
             }
 
             const { data: agentRecord, error: agentError } = await supabase
