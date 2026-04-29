@@ -15,6 +15,7 @@ export type OnboardingV2Phase =
     | "profile_review"
     | "agent_fleet"
     | "vertical_form"
+    | "vertical_outbound_config"
     | "vertical_review"
     | "deploying"
     | "success";

@@ -33,7 +33,7 @@ export async function POST(
 
     try {
         const body = await request.json();
-        const { name, field_type, is_required } = body;
+        const { name, field_type, is_required, description } = body;
 
         if (!name || !field_type) {
             return NextResponse.json({ error: 'Name and field_type are required' }, { status: 400 });
@@ -61,7 +61,8 @@ export async function POST(
                 field_key,
                 field_type,
                 is_required: is_required || false,
-                display_order
+                display_order,
+                description: typeof description === 'string' ? description.trim() || null : null,
             })
             .select()
             .single();

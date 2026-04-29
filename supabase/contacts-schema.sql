@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS contact_fields (
   field_type TEXT NOT NULL CHECK (field_type IN ('text', 'number', 'email', 'url', 'date', 'checkbox', 'address')),
   is_required BOOLEAN DEFAULT FALSE,
   display_order INT DEFAULT 0,
+  description TEXT,             -- Human-friendly explanation. Surfaced to outbound voice agents in {{contact_field_legend}}.
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

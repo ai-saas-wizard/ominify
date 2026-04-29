@@ -169,5 +169,43 @@ export const reInvestorDefinition: VerticalDefinition = {
             },
             endCallPhrases: ["goodbye", "talk to you soon"],
         },
+        {
+            id: "re_outbound_follow_up",
+            name: "Outbound Follow-Up",
+            direction: "outbound",
+            category: "outbound_follow_up",
+            description:
+                "Outbound calls to re-engage sellers, follow up on missed appointments, or run cold outreach. Reads each seller's contact_data JSON at call time, pitches a prior offer if known, transfers to a specialist on demand, and books appointments via Google Calendar.",
+            icon: "PhoneOutgoing",
+            // Mirror the inbound voice/transcriber config exactly (Samantha)
+            voiceId: "ZRwrL4id6j1HPGFkeCzO",
+            voiceProvider: "11labs",
+            voiceModel: "eleven_flash_v2_5",
+            voiceConfig: {
+                speed: 1.1,
+                stability: 0.4,
+                similarityBoost: 0.6,
+                style: 0.2,
+                useSpeakerBoost: false,
+            },
+            llmModel: "gpt-4o-mini",
+            llmTemperature: 0.65,
+            llmMaxTokens: 250,
+            transcriberModel: "nova-3",
+            firstMessageMode: "assistant-speaks-first",
+            maxDurationSeconds: 600,
+            startSpeakingPlan: {
+                waitSeconds: 0.7,
+                smartEndpointingPlan: {
+                    provider: "livekit",
+                    waitFunction:
+                        "(20 + 500 * sqrt(x) + 2500 * x^3 + 700 + 4000 * max(0, x-0.5)) / 2",
+                },
+            },
+            stopSpeakingPlan: {
+                numWords: 3,
+            },
+            endCallPhrases: ["goodbye", "talk to you soon"],
+        },
     ],
 };

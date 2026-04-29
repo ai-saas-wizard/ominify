@@ -196,10 +196,15 @@ export function VerticalForm({
             appointmentType: fields.appointmentType as string,
             transferPhone: (fields.transferPhone as string).trim(),
             businessPhone: (fields.businessPhone as string).trim(),
+            // Outbound config — collected on the next phase. Carry through any
+            // values from initialData so going back/forward doesn't wipe edits.
+            outboundGoal: initialData?.outboundGoal ?? "re_engage_prior_offer",
+            outboundPrompt: initialData?.outboundPrompt ?? "",
+            outboundFirstMessage: initialData?.outboundFirstMessage ?? "",
         };
 
         onContinue(formData);
-    }, [fields, validate, onContinue]);
+    }, [fields, validate, onContinue, initialData]);
 
     if (!vertical) {
         return <div className="p-8 text-center text-red-600">Vertical not found</div>;

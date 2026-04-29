@@ -97,12 +97,87 @@ async function makeVapiCall(
         },
     };
 
+    // Resolve contact-level variables for this enrollment. The outbound RE
+    // agent (and any other tenant-shaped agent) reads {{contact_data}} as a
+    // JSON blob of everything we know about this seller, plus
+    // {{contact_field_legend}} describing what each key means (pulled from the
+    // tenant's contact_fields definitions). We also expose top-level
+    // {{contact_name}} / {{contact_phone}} / {{contact_email}}.
+    let contactVariables: Record<string, string> = {};
+    try {
+        const { data: enrollmentRow } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id')
+            .eq('id', enrollmentId)
+            .single();
+
+        if (enrollmentRow?.contact_id) {
+            const [{ data: contact }, { data: fieldDefs }] = await Promise.all([
+                supabase
+                    .from('contacts')
+                    .select('name, phone, email, custom_fields')
+                    .eq('id', enrollmentRow.contact_id)
+                    .single(),
+                supabase
+                    .from('contact_fields')
+                    .select('field_key, name, description, field_type')
+                    .eq('client_id', tenantId),
+            ]);
+
+            if (contact) {
+                const customFields =
+                    (contact.custom_fields as Record<string, any>) || {};
+                const fieldKeys = Object.keys(customFields);
+
+                // Build a key → {name, description, type} map from definitions
+                const defByKey = new Map<
+                    string,
+                    { name: string; description: string | null; type: string }
+                >();
+                for (const def of (fieldDefs as any[]) || []) {
+                    defByKey.set(def.field_key, {
+                        name: def.name,
+                        description: def.description,
+                        type: def.field_type,
+                    });
+                }
+
+                // Legend lines: prefer "- key (Display Name, type): description"
+                // when a definition exists; fall back to bare key for keys
+                // that haven't been described yet.
+                const legendLines = fieldKeys.map((k) => {
+                    const def = defByKey.get(k);
+                    if (!def) return `- ${k}`;
+                    const head = def.name
+                        ? `${k} (${def.name}${def.type ? `, ${def.type}` : ''})`
+                        : k;
+                    return def.description
+                        ? `- ${head}: ${def.description}`
+                        : `- ${head}`;
+                });
+
+                contactVariables = {
+                    contact_data: JSON.stringify(customFields),
+                    contact_field_legend: legendLines.length
+                        ? legendLines.join('\n')
+                        : '(no custom fields populated for this contact)',
+                    contact_name: (contact.name as string) || '',
+                    contact_phone: (contact.phone as string) || '',
+                    contact_email: (contact.email as string) || '',
+                };
+            }
+        }
+    } catch (err) {
+        console.warn('[VAPI] Failed to resolve contact variables, continuing without:', err);
+    }
+
     // Build base assistantOverrides.variableValues — merged into whichever
     // dispatch path we take below.
     const baseVariableValues: Record<string, any> = {
         ...(callVars
             ? { currentDate: callVars.currentDate, tenantTimezone: callVars.tenantTimezone }
             : {}),
+        ...contactVariables,
     };
 
     // Always attach assistantOverrides.variableValues when we have any —

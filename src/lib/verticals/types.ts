@@ -92,6 +92,16 @@ export interface VerticalFormData {
 }
 
 /**
+ * Outbound agent goal options for Real Estate vertical.
+ * Each goal maps to a starter system prompt that the user can edit during onboarding.
+ */
+export type REOutboundGoal =
+    | "re_engage_prior_offer"
+    | "cold_outreach_motivated_seller"
+    | "missed_appointment_followup"
+    | "custom";
+
+/**
  * Typed form data specific to Real Estate Investor vertical.
  * Used by prompt builders and deployment actions.
  */
@@ -106,6 +116,10 @@ export interface REInvestorFormData {
     appointmentType: string;
     transferPhone: string;
     businessPhone: string;
+    // Outbound agent config (collected on a separate phase, not via formSections)
+    outboundGoal: REOutboundGoal;
+    outboundPrompt: string;
+    outboundFirstMessage: string;
 }
 
 // ─── VALIDATION ───

@@ -11,6 +11,7 @@ import { DeploySequence } from "./components/deploy-sequence";
 import { DeploySuccess } from "./components/deploy-success";
 import { PathSelectionScreen } from "./components/path-selection-screen";
 import { VerticalForm } from "./components/vertical-form";
+import { VerticalOutboundConfig } from "./components/vertical-outbound-config";
 import { VerticalReview } from "./components/vertical-review";
 import { useAIAnalysisV2 } from "./hooks/use-ai-analysis-v2";
 import { useProfileForm } from "./hooks/use-profile-form";
@@ -103,11 +104,24 @@ export function OnboardingV2Wizard({
     const handleVerticalFormContinue = useCallback((data: REInvestorFormData) => {
         setVerticalFormData(data);
         setBusinessName(data.companyName);
-        setPhase("vertical_review");
+        setPhase("vertical_outbound_config");
     }, []);
 
     const handleVerticalFormBack = useCallback(() => {
         setPhase("path_selection");
+    }, []);
+
+    // ─── VERTICAL OUTBOUND CONFIG ───
+    const handleOutboundConfigContinue = useCallback(
+        (updated: REInvestorFormData) => {
+            setVerticalFormData(updated);
+            setPhase("vertical_review");
+        },
+        []
+    );
+
+    const handleOutboundConfigBack = useCallback(() => {
+        setPhase("vertical_form");
     }, []);
 
     // ─── VERTICAL DEPLOY ───
@@ -117,9 +131,9 @@ export function OnboardingV2Wizard({
         setVerticalDeploying(true);
         setPhase("deploying");
 
-        // Set up progress tracking for vertical deployment
+        // Set up progress tracking for vertical deployment (inbound + outbound)
         setVerticalDeployProgress({
-            totalAgents: 1,
+            totalAgents: 2,
             completedAgents: 0,
             currentAgent: "Inbound Receptionist",
             steps: [
@@ -134,48 +148,58 @@ export function OnboardingV2Wizard({
                         { label: "Saving to database", status: "pending" },
                     ],
                 },
+                {
+                    id: "re_outbound_follow_up",
+                    agentTypeId: "re_outbound_follow_up",
+                    label: `${verticalFormData.companyName} - Outbound Follow-Up`,
+                    status: "pending",
+                    substeps: [
+                        { label: "Building system prompt from template", status: "pending" },
+                        { label: "Creating VAPI assistant", status: "pending" },
+                        { label: "Saving to database", status: "pending" },
+                    ],
+                },
             ],
             error: null,
         });
 
         try {
-            // Step 1: Building prompt (already done — static template, instant)
-            await new Promise((r) => setTimeout(r, 800)); // Brief visual delay
-            setVerticalDeployProgress((prev) => {
-                if (!prev) return prev;
-                const steps = [...prev.steps];
-                steps[0] = {
-                    ...steps[0],
-                    substeps: [
-                        { label: "Building system prompt from template", status: "completed" },
-                        { label: "Creating VAPI assistant", status: "in_progress" },
-                        { label: "Saving to database", status: "pending" },
-                    ],
-                };
-                return { ...prev, steps };
-            });
+            // Brief visual delay so the user sees the in_progress state before the deploy returns.
+            await new Promise((r) => setTimeout(r, 800));
 
-            // Step 2+3: Deploy (creates VAPI assistant + saves to DB)
+            // Deploy: creates BOTH VAPI assistants + saves both to DB
             const result = await deployVerticalAgents(clientId, verticalFormData);
 
             if (result.success) {
+                const completedSteps = result.agents.map((a) => ({
+                    id: a.type_id,
+                    agentTypeId: a.type_id,
+                    label: a.name,
+                    status: (a.error ? "failed" : "completed") as "completed" | "failed",
+                    substeps: [
+                        { label: "Building system prompt from template", status: "completed" as const },
+                        {
+                            label: "Creating VAPI assistant",
+                            status: (a.error ? "failed" : "completed") as
+                                | "completed"
+                                | "failed",
+                        },
+                        {
+                            label: "Saving to database",
+                            status: (a.error ? "failed" : "completed") as
+                                | "completed"
+                                | "failed",
+                        },
+                    ],
+                }));
+
                 setVerticalDeployProgress((prev) => {
                     if (!prev) return prev;
                     return {
                         ...prev,
-                        completedAgents: 1,
+                        completedAgents: completedSteps.filter((s) => s.status === "completed").length,
                         currentAgent: null,
-                        steps: [
-                            {
-                                ...prev.steps[0],
-                                status: "completed",
-                                substeps: [
-                                    { label: "Building system prompt from template", status: "completed" },
-                                    { label: "Creating VAPI assistant", status: "completed" },
-                                    { label: "Saving to database", status: "completed" },
-                                ],
-                            },
-                        ],
+                        steps: completedSteps.length > 0 ? completedSteps : prev.steps,
                     };
                 });
                 setTimeout(() => setPhase("success"), 1500);
@@ -185,17 +209,15 @@ export function OnboardingV2Wizard({
                     return {
                         ...prev,
                         error: result.error || "Deployment failed",
-                        steps: [
-                            {
-                                ...prev.steps[0],
-                                status: "failed",
-                                substeps: prev.steps[0].substeps.map((s) =>
-                                    s.status === "in_progress"
-                                        ? { ...s, status: "failed" as const }
-                                        : s
-                                ),
-                            },
-                        ],
+                        steps: prev.steps.map((step) => ({
+                            ...step,
+                            status: "failed" as const,
+                            substeps: step.substeps.map((s) =>
+                                s.status === "in_progress" || s.status === "pending"
+                                    ? { ...s, status: "failed" as const }
+                                    : s
+                            ),
+                        })),
                     };
                 });
             }
@@ -206,17 +228,15 @@ export function OnboardingV2Wizard({
                 return {
                     ...prev,
                     error: err.message || "Unexpected error during deployment",
-                    steps: [
-                        {
-                            ...prev.steps[0],
-                            status: "failed",
-                            substeps: prev.steps[0].substeps.map((s) =>
-                                s.status === "in_progress"
-                                    ? { ...s, status: "failed" as const }
-                                    : s
-                            ),
-                        },
-                    ],
+                    steps: prev.steps.map((step) => ({
+                        ...step,
+                        status: "failed" as const,
+                        substeps: step.substeps.map((s) =>
+                            s.status === "in_progress" || s.status === "pending"
+                                ? { ...s, status: "failed" as const }
+                                : s
+                        ),
+                    })),
                 };
             });
         } finally {
@@ -225,7 +245,7 @@ export function OnboardingV2Wizard({
     }, [clientId, verticalFormData, verticalDeploying]);
 
     const handleVerticalReviewBack = useCallback(() => {
-        setPhase("vertical_form");
+        setPhase("vertical_outbound_config");
     }, []);
 
     // ─── PHASE 1: URL LAUNCH ───
@@ -620,6 +640,22 @@ export function OnboardingV2Wizard({
                             initialData={verticalFormData || undefined}
                             onContinue={handleVerticalFormContinue}
                             onBack={handleVerticalFormBack}
+                        />
+                    </motion.div>
+                )}
+
+                {phase === "vertical_outbound_config" && selectedVerticalId && verticalFormData && (
+                    <motion.div
+                        key="vertical_outbound_config"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        <VerticalOutboundConfig
+                            formData={verticalFormData}
+                            onContinue={handleOutboundConfigContinue}
+                            onBack={handleOutboundConfigBack}
                         />
                     </motion.div>
                 )}

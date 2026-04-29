@@ -1,4 +1,5 @@
 import type { REInvestorFormData } from "../types";
+import { formatPhoneForSpeech } from "./phone-format";
 
 /**
  * Builds the RE Investor inbound receptionist system prompt.
@@ -868,11 +869,3 @@ Proceed to Call Closing`;
 
 // ─── HELPERS ───
 
-/**
- * Format a phone number for spoken digit-by-digit reading.
- * "6158634486" → "6-1-5-8-6-3-4-4-8-6"
- */
-function formatPhoneForSpeech(phone: string): string {
-    const digits = phone.replace(/\D/g, "");
-    return digits.split("").join("-");
-}

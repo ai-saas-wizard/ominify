@@ -100,122 +100,187 @@ export async function deployVerticalAgents(
             };
         }
 
-        // 3. Fetch default settings for inbound agent
+        // 3. Fetch default settings for both inbound and outbound agents
         const defaultSettings = await getAllAgentDefaultSettings();
-        const inboundDefaults = defaultSettings?.inbound;
 
-        // 4. Build prompt from static template (NO GPT call)
-        const { systemPrompt, firstMessage } =
-            buildREInboundPrompt(formData);
+        // 4. Deploy each agent defined on the vertical (inbound + outbound)
+        const deployedAgents: DeploymentResult["agents"] = [];
 
-        // 5. Build tools
-        const tools = buildREInboundTools(clientId, appUrl, formData);
+        for (const agentDef of vertical.agents) {
+            const isOutbound = agentDef.direction === "outbound";
+            const agentName = `${formData.companyName} - ${agentDef.name}`;
 
-        // 6. Get agent definition from vertical
-        const agentDef = vertical.agents[0]; // Inbound receptionist
-
-        // 7. Build VAPI payload — matching Samantha's exact config
-        const vapiPayload = buildVerticalVapiPayload(
-            inboundDefaults?.settings || null,
-            {
-                name: `${formData.companyName} - ${agentDef.name}`,
-                systemPrompt,
-                firstMessage,
-                tools,
-                voiceId: agentDef.voiceId,
-                voiceProvider: agentDef.voiceProvider,
-                voiceModel: agentDef.voiceModel,
-                voiceConfig: agentDef.voiceConfig,
-                llmModel: agentDef.llmModel,
-                llmTemperature: agentDef.llmTemperature,
-                llmMaxTokens: agentDef.llmMaxTokens,
-                transcriberModel: agentDef.transcriberModel,
-                firstMessageMode: agentDef.firstMessageMode,
-                maxDurationSeconds: agentDef.maxDurationSeconds,
-                startSpeakingPlan: agentDef.startSpeakingPlan,
-                stopSpeakingPlan: agentDef.stopSpeakingPlan,
-                endCallPhrases: agentDef.endCallPhrases,
-                clientId,
-                agentType: "inbound",
-                agentCategory: "inbound",
-                templateVersion: "vertical-re-v1",
-                appUrl,
+            // 4a. Build prompt
+            //    - Inbound: static template interpolation
+            //    - Outbound: user-edited prompt from the onboarding outbound-config phase
+            let systemPrompt: string;
+            let firstMessage: string;
+            if (isOutbound) {
+                if (!formData.outboundPrompt || !formData.outboundFirstMessage) {
+                    deployedAgents.push({
+                        type_id: agentDef.id,
+                        name: agentName,
+                        agent_id: null,
+                        vapi_id: null,
+                        sequence_id: null,
+                        error: "Outbound prompt or first message is empty",
+                    });
+                    continue;
+                }
+                systemPrompt = formData.outboundPrompt;
+                firstMessage = formData.outboundFirstMessage;
+            } else {
+                const built = buildREInboundPrompt(formData);
+                systemPrompt = built.systemPrompt;
+                firstMessage = built.firstMessage;
             }
-        );
 
-        // 8. Create VAPI assistant
-        let vapiAssistant: { id: string } | null = null;
-        try {
-            vapiAssistant = await createAssistant(
-                vapiPayload,
-                clientVapiKey
+            // 4b. Tools — same set for both directions in V1
+            const tools = buildREInboundTools(clientId, appUrl, formData);
+
+            // 4c. Defaults source depends on direction
+            const directionDefaults = isOutbound
+                ? defaultSettings?.outbound
+                : defaultSettings?.inbound;
+
+            // 4d. Build VAPI payload
+            const vapiPayload = buildVerticalVapiPayload(
+                directionDefaults?.settings || null,
+                {
+                    name: agentName,
+                    systemPrompt,
+                    firstMessage,
+                    tools,
+                    voiceId: agentDef.voiceId,
+                    voiceProvider: agentDef.voiceProvider,
+                    voiceModel: agentDef.voiceModel,
+                    voiceConfig: agentDef.voiceConfig,
+                    llmModel: agentDef.llmModel,
+                    llmTemperature: agentDef.llmTemperature,
+                    llmMaxTokens: agentDef.llmMaxTokens,
+                    transcriberModel: agentDef.transcriberModel,
+                    firstMessageMode: agentDef.firstMessageMode,
+                    maxDurationSeconds: agentDef.maxDurationSeconds,
+                    startSpeakingPlan: agentDef.startSpeakingPlan,
+                    stopSpeakingPlan: agentDef.stopSpeakingPlan,
+                    endCallPhrases: agentDef.endCallPhrases,
+                    clientId,
+                    agentType: agentDef.direction,
+                    agentCategory: agentDef.category,
+                    templateVersion: "vertical-re-v1",
+                    appUrl,
+                    voicemailDetection: isOutbound
+                        ? {
+                              provider: "twilio",
+                              enabled: true,
+                              voicemailDetectionTypes: [
+                                  "machine_end_beep",
+                                  "machine_end_silence",
+                              ],
+                          }
+                        : undefined,
+                    voicemailMessage: isOutbound
+                        ? undefined
+                        : `You've reached ${formData.companyName}. Please leave a message and we will get back to you as soon as possible.`,
+                    endCallMessage: isOutbound
+                        ? undefined
+                        : "Thank you for calling. Have a great day!",
+                }
             );
-        } catch (vapiError: any) {
-            console.error("[VERTICAL] VAPI creation error:", vapiError);
-            return {
-                success: false,
-                agents: [
-                    {
-                        type_id: agentDef.id,
-                        name: agentDef.name,
-                        agent_id: null,
-                        vapi_id: null,
-                        sequence_id: null,
-                        error: vapiError.message || "VAPI assistant creation failed",
-                    },
-                ],
-                error: "Failed to create VAPI assistant",
-            };
-        }
 
-        if (!vapiAssistant) {
-            return {
-                success: false,
-                agents: [
-                    {
-                        type_id: agentDef.id,
-                        name: agentDef.name,
-                        agent_id: null,
-                        vapi_id: null,
-                        sequence_id: null,
-                        error: "VAPI assistant creation returned null",
-                    },
-                ],
-                error: "VAPI assistant creation returned null",
-            };
-        }
+            // 4e. Create VAPI assistant (per-agent try/catch so one failure doesn't abort the other)
+            let vapiAssistant: { id: string } | null = null;
+            try {
+                vapiAssistant = await createAssistant(
+                    vapiPayload,
+                    clientVapiKey
+                );
+            } catch (vapiError: any) {
+                console.error(
+                    `[VERTICAL] VAPI creation error for ${agentDef.id}:`,
+                    vapiError
+                );
+                deployedAgents.push({
+                    type_id: agentDef.id,
+                    name: agentName,
+                    agent_id: null,
+                    vapi_id: null,
+                    sequence_id: null,
+                    error: vapiError.message || "VAPI assistant creation failed",
+                });
+                continue;
+            }
 
-        // 9. Save agent to DB
-        const { data: agentRecord, error: agentError } = await supabase
-            .from("agents")
-            .insert({
-                client_id: clientId,
+            if (!vapiAssistant) {
+                deployedAgents.push({
+                    type_id: agentDef.id,
+                    name: agentName,
+                    agent_id: null,
+                    vapi_id: null,
+                    sequence_id: null,
+                    error: "VAPI assistant creation returned null",
+                });
+                continue;
+            }
+
+            // 4f. Save agent row to DB
+            const agentConfig: Record<string, any> = {
+                voice_id: agentDef.voiceId,
+                voice_name: "Sam (RE)",
+                vertical: "real_estate_investor",
+                persona_name: formData.agentPersonaName,
+                markets: formData.markets,
+                deal_types: formData.dealTypes,
+                appointment_type: formData.appointmentType,
+                transfer_phone: formData.transferPhone,
+                business_phone: formData.businessPhone,
+            };
+            if (isOutbound) {
+                agentConfig.outbound_goal = formData.outboundGoal;
+            }
+
+            const { data: agentRecord, error: agentError } = await supabase
+                .from("agents")
+                .insert({
+                    client_id: clientId,
+                    vapi_id: vapiAssistant.id,
+                    name: agentName,
+                    agent_type: agentDef.direction,
+                    agent_type_id: agentDef.id,
+                    agent_config: agentConfig,
+                    auto_created: true,
+                    template_version: "vertical-re-v1",
+                })
+                .select("id")
+                .single();
+
+            if (agentError) {
+                console.error(
+                    `[VERTICAL] Agent save error for ${agentDef.id}:`,
+                    agentError
+                );
+            }
+
+            deployedAgents.push({
+                type_id: agentDef.id,
+                name: agentName,
+                agent_id: agentRecord?.id || null,
                 vapi_id: vapiAssistant.id,
-                name: `${formData.companyName} - ${agentDef.name}`,
-                agent_type: "inbound",
-                agent_type_id: agentDef.id,
-                agent_config: {
-                    voice_id: agentDef.voiceId,
-                    voice_name: "Sam (RE)",
-                    vertical: "real_estate_investor",
-                    persona_name: formData.agentPersonaName,
-                    markets: formData.markets,
-                    deal_types: formData.dealTypes,
-                    appointment_type: formData.appointmentType,
-                    transfer_phone: formData.transferPhone,
-                    business_phone: formData.businessPhone,
-                },
-                auto_created: true,
-                template_version: "vertical-re-v1",
-            })
-            .select("id")
-            .single();
-
-        if (agentError) {
-            console.error("[VERTICAL] Agent save error:", agentError);
+                sequence_id: null,
+                error: null,
+            });
         }
 
-        // 10. Mark onboarding complete
+        const anyDeployed = deployedAgents.some((a) => !a.error);
+        if (!anyDeployed) {
+            return {
+                success: false,
+                agents: deployedAgents,
+                error: "Failed to create any agents",
+            };
+        }
+
+        // 5. Mark onboarding complete
         await supabase
             .from("tenant_profiles")
             .update({
@@ -226,23 +291,14 @@ export async function deployVerticalAgents(
             })
             .eq("client_id", clientId);
 
-        // 11. Revalidate paths
+        // 6. Revalidate paths
         revalidatePath(`/client/${clientId}/onboarding`);
         revalidatePath(`/client/${clientId}/agents`);
         revalidatePath(`/client/${clientId}`);
 
         return {
             success: true,
-            agents: [
-                {
-                    type_id: agentDef.id,
-                    name: `${formData.companyName} - ${agentDef.name}`,
-                    agent_id: agentRecord?.id || null,
-                    vapi_id: vapiAssistant.id,
-                    sequence_id: null,
-                    error: null,
-                },
-            ],
+            agents: deployedAgents,
         };
     } catch (err: any) {
         console.error("[VERTICAL] Deployment error:", err);
@@ -289,6 +345,13 @@ function buildVerticalVapiPayload(
         agentCategory: string;
         templateVersion: string;
         appUrl: string;
+        voicemailDetection?: {
+            provider: string;
+            enabled: boolean;
+            voicemailDetectionTypes: string[];
+        };
+        voicemailMessage?: string;
+        endCallMessage?: string;
     }
 ): CreateAssistantPayload {
     // Build the payload with Samantha's exact settings as the base,
@@ -350,6 +413,15 @@ function buildVerticalVapiPayload(
             structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
             minMessagesThreshold: 5,
         },
+        ...(overrides.voicemailDetection
+            ? { voicemailDetection: overrides.voicemailDetection }
+            : {}),
+        ...(overrides.voicemailMessage
+            ? { voicemailMessage: overrides.voicemailMessage }
+            : {}),
+        ...(overrides.endCallMessage
+            ? { endCallMessage: overrides.endCallMessage }
+            : {}),
     };
 
     // If DB defaults exist, overlay non-critical settings from them
