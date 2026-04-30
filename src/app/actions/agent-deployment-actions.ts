@@ -73,6 +73,7 @@ function buildVapiPayload(
             server: {
                 url: `${overrides.appUrl}/api/webhooks/vapi`,
             },
+            serverMessages: ["status-update", "end-of-call-report"],
             maxDurationSeconds: overrides.maxDurationSeconds || 300,
             backgroundSound: overrides.backgroundSound || "office",
             voicemailDetection: overrides.voicemailDetection,
