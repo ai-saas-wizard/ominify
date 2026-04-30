@@ -12,6 +12,7 @@ import {
     Shield,
     MessageSquare,
     PhoneCall,
+    AlertTriangle,
 } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ import {
 import {
     assignPhoneNumberToAgent,
     unassignPhoneNumberFromAgent,
+    syncPhoneNumberToVapi,
 } from "@/app/actions/phone-assignment-actions";
 import {
     Select,
@@ -73,6 +75,9 @@ export function PhoneNumbersList({
     // Agent assignment
     const [assigning, setAssigning] = useState<string | null>(null); // phone number id being assigned
 
+    // VAPI sync (repair) state
+    const [syncing, setSyncing] = useState<string | null>(null); // phone number id being synced
+
     // Payment
     const [paymentRequired, setPaymentRequired] = useState(false);
     const [paymentMessage, setPaymentMessage] = useState("");
@@ -100,6 +105,12 @@ export function PhoneNumbersList({
                 setAvailableNumbers((prev) =>
                     prev.filter((n) => n.phoneNumber !== phoneNumber)
                 );
+                if ((result as any).warning) {
+                    alert(
+                        `Number purchased, but VAPI registration failed: ${(result as any).warning}\n\n` +
+                        `The number is in your account. Click "Sync to VAPI" on the row to retry.`
+                    );
+                }
                 router.refresh();
             } else if (result.error === "PAYMENT_REQUIRED") {
                 setPaymentRequired(true);
@@ -145,6 +156,22 @@ export function PhoneNumbersList({
             alert(err.message);
         } finally {
             setAssigning(null);
+        }
+    }, [clientId, router]);
+
+    const handleSyncToVapi = useCallback(async (phoneNumberId: string) => {
+        setSyncing(phoneNumberId);
+        try {
+            const result = await syncPhoneNumberToVapi(clientId, phoneNumberId);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to sync phone number to VAPI");
+            }
+        } catch (err: any) {
+            alert(err.message);
+        } finally {
+            setSyncing(null);
         }
     }, [clientId, router]);
 
@@ -232,7 +259,24 @@ export function PhoneNumbersList({
                             {phoneNumbers.map((number: any) => (
                                 <TableRow key={number.id}>
                                     <TableCell className="font-mono font-medium">
-                                        {number.phone_number}
+                                        <div className="flex flex-col gap-1">
+                                            <span>{number.phone_number}</span>
+                                            {!number.vapi_phone_number_id && (
+                                                <button
+                                                    onClick={() => handleSyncToVapi(number.id)}
+                                                    disabled={syncing === number.id}
+                                                    className="inline-flex items-center gap-1 self-start text-[10px] font-sans font-medium px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
+                                                    title="This number is not registered with VAPI. Inbound calls will fail until it is synced."
+                                                >
+                                                    {syncing === number.id ? (
+                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                    ) : (
+                                                        <AlertTriangle className="w-3 h-3" />
+                                                    )}
+                                                    {syncing === number.id ? "Syncing..." : "Sync to VAPI"}
+                                                </button>
+                                            )}
+                                        </div>
                                     </TableCell>
                                     <TableCell className="text-gray-500">
                                         {number.friendly_name || "\u2014"}

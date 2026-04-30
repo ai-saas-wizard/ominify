@@ -169,19 +169,30 @@ export async function assignPhoneNumberToAgent(
             vapiPhoneNumberId = importResult.vapiPhoneNumberId;
         }
 
-        // Set assistantId on VAPI phone number
-        if (vapiPhoneNumberId && agent.vapi_id) {
-            const updated = await updatePhoneNumber(
-                vapiPhoneNumberId,
-                { assistantId: agent.vapi_id },
-                vapiKey
-            );
-            if (!updated) {
-                return { success: false, error: "Failed to link phone number to agent in VAPI" };
-            }
+        if (!vapiPhoneNumberId) {
+            return { success: false, error: "Phone number is not registered with VAPI" };
         }
 
-        // Update DB
+        if (!agent.vapi_id) {
+            return {
+                success: false,
+                error: "Agent has not been deployed to VAPI yet. Deploy the agent first, then assign the number.",
+            };
+        }
+
+        // Set assistantId on VAPI phone number — must succeed before we
+        // touch the DB, otherwise the UI shows "assigned" but VAPI is unaware
+        // and inbound calls have no destination.
+        const updated = await updatePhoneNumber(
+            vapiPhoneNumberId,
+            { assistantId: agent.vapi_id },
+            vapiKey
+        );
+        if (!updated) {
+            return { success: false, error: "Failed to link phone number to agent in VAPI" };
+        }
+
+        // Update DB only after VAPI confirms the link
         await supabase
             .from("tenant_phone_numbers")
             .update({ agent_id: agentDbId, purpose: "dedicated" })
@@ -234,6 +245,65 @@ export async function unassignPhoneNumberFromAgent(clientId: string, phoneNumber
     } catch (err: any) {
         console.error("unassignPhoneNumberFromAgent error:", err);
         return { success: false, error: err.message || "Failed to unassign phone number" };
+    }
+}
+
+// ─── Repair: Sync Phone Number to VAPI ───────────────────────────────────────
+// Imports the number to VAPI if not yet imported, and re-applies the assigned
+// agent's assistantId. Used by the UI's "Sync to VAPI" button to recover rows
+// that were created/assigned before the eager-import flow shipped, or whose
+// initial import failed.
+export async function syncPhoneNumberToVapi(clientId: string, phoneNumberDbId: string) {
+    try {
+        const importResult = await importPhoneNumberToVapi(clientId, phoneNumberDbId);
+        if (!importResult.success) {
+            return { success: false, error: importResult.error || "Failed to import to VAPI" };
+        }
+
+        const { data: phone } = await supabase
+            .from("tenant_phone_numbers")
+            .select("agent_id, vapi_phone_number_id")
+            .eq("id", phoneNumberDbId)
+            .eq("client_id", clientId)
+            .single();
+
+        if (!phone?.vapi_phone_number_id) {
+            return { success: false, error: "Phone number is not registered with VAPI" };
+        }
+
+        // If a row has agent_id set but the assistant link was never made (or got lost),
+        // reapply it.
+        if (phone.agent_id) {
+            const { data: agent } = await supabase
+                .from("agents")
+                .select("vapi_id")
+                .eq("id", phone.agent_id)
+                .eq("client_id", clientId)
+                .single();
+
+            if (!agent?.vapi_id) {
+                return {
+                    success: false,
+                    error: "Assigned agent has not been deployed to VAPI yet. Deploy the agent or unassign the number.",
+                };
+            }
+
+            const vapiKey = (await getClientVapiKey(clientId)) || undefined;
+            const updated = await updatePhoneNumber(
+                phone.vapi_phone_number_id,
+                { assistantId: agent.vapi_id },
+                vapiKey
+            );
+            if (!updated) {
+                return { success: false, error: "Failed to link phone number to agent in VAPI" };
+            }
+        }
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+        return { success: true };
+    } catch (err: any) {
+        console.error("syncPhoneNumberToVapi error:", err);
+        return { success: false, error: err.message || "Failed to sync phone number" };
     }
 }
 

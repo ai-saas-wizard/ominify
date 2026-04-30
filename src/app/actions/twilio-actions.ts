@@ -35,6 +35,7 @@ import {
 } from "@/lib/twilio";
 import { deleteVapiPhoneNumber } from "@/lib/vapi";
 import { getClientVapiKey } from "@/lib/client-secrets";
+import { importPhoneNumberToVapi } from "./phone-assignment-actions";
 import { revalidatePath } from "next/cache";
 
 // ─── Account Credentials Helper ────────────────────────────────────────────
@@ -313,18 +314,22 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
         );
 
         // Store in DB
-        const { error } = await supabase.from("tenant_phone_numbers").insert({
-            client_id: clientId,
-            phone_number: purchased.phoneNumber,
-            phone_number_sid: purchased.sid,
-            friendly_name: purchased.friendlyName,
-            capabilities: { sms: true, voice: true },
-            status: "active",
-        });
+        const { data: insertedRow, error } = await supabase
+            .from("tenant_phone_numbers")
+            .insert({
+                client_id: clientId,
+                phone_number: purchased.phoneNumber,
+                phone_number_sid: purchased.sid,
+                friendly_name: purchased.friendlyName,
+                capabilities: { sms: true, voice: true },
+                status: "active",
+            })
+            .select("id")
+            .single();
 
-        if (error) {
+        if (error || !insertedRow) {
             console.error("purchasePhoneNumberForClient DB error:", error);
-            return { success: false, error: error.message };
+            return { success: false, error: error?.message || "Failed to store phone number" };
         }
 
         // If messaging service exists, add number to it
@@ -341,7 +346,19 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
             }
         }
 
+        // Eagerly register the number with VAPI so its voice webhook is
+        // pointed at VAPI from the moment of purchase. Without this, calls
+        // to the number land on Twilio's default routing (no app) and the
+        // caller hears "this number doesn't exist".
+        const importResult = await importPhoneNumberToVapi(clientId, insertedRow.id);
+
         revalidatePath(`/client/${clientId}/phone-numbers`);
+
+        if (!importResult.success) {
+            // Don't fail the purchase — the Twilio number is real and billed.
+            // Surface the VAPI error so the UI can prompt the user to retry.
+            return { success: true, warning: importResult.error };
+        }
         return { success: true };
     } catch (err: any) {
         console.error("purchasePhoneNumberForClient error:", err);
