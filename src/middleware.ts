@@ -6,6 +6,7 @@ import { hasActiveSubscriptionEdge, isAdminEdge } from "@/lib/access-edge";
 const isPublicRoute = createRouteMatcher([
     '/sign-in(.*)',
     '/sign-up(.*)',
+    '/legal/(.*)',
     '/api/stripe/webhook',
     '/api/webhooks/vapi',
     '/api/vapi/tools/(.*)',
