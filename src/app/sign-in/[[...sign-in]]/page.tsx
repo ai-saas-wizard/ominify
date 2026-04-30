@@ -4,11 +4,10 @@ import { useState } from "react";
 import { SignIn } from "@clerk/nextjs";
 import { AuthLayout } from "@/components/auth/auth-layout";
 import { dark } from "@clerk/themes";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 
 export default function SignInPage() {
     const [accepted, setAccepted] = useState(false);
-    const [expanded, setExpanded] = useState(false);
 
     return (
         <AuthLayout
@@ -61,52 +60,50 @@ export default function SignInPage() {
                     />
                 </div>
 
-                {/* Compliance acknowledgment — expandable */}
+                {/* Terms & Privacy acknowledgment */}
                 <div className="border-t border-slate-800 pt-4">
-                    <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-3 cursor-pointer group">
                         <button
                             type="button"
                             onClick={() => setAccepted((v) => !v)}
                             className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
                                 accepted
                                     ? "border-emerald-500 bg-emerald-500"
-                                    : "border-slate-600 bg-slate-800/40 hover:border-emerald-500/60"
+                                    : "border-slate-600 bg-slate-800/40 group-hover:border-emerald-500/60"
                             }`}
                             aria-pressed={accepted}
-                            aria-label="Reaffirm compliance terms"
+                            aria-label="Accept Terms and Privacy"
                         >
                             {accepted && <Check className="w-3 h-3 text-white" />}
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => setExpanded((v) => !v)}
-                            className="flex-1 flex items-center justify-between text-left text-sm text-slate-300 hover:text-white transition-colors"
-                        >
-                            <span>
-                                I confirm TCPA, DNC &amp; recording-law compliance
-                                {!accepted && (
-                                    <span className="text-emerald-400 text-xs ml-1.5 font-medium">
-                                        (required)
-                                    </span>
-                                )}
-                            </span>
-                            <ChevronDown
-                                className={`w-4 h-4 text-slate-500 transition-transform ${
-                                    expanded ? "rotate-180" : ""
-                                }`}
-                            />
-                        </button>
-                    </div>
-                    {expanded && (
-                        <p className="mt-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700/50 text-xs text-slate-300 leading-relaxed">
-                            I reaffirm that I have prior express written consent
-                            from every contact my AI agents will reach, and that
-                            I am solely responsible for TCPA, DNC, and other
-                            applicable communications-law compliance. Omnify is
-                            not liable for any outreach I conduct using the
-                            platform.
-                        </p>
-                    )}
+                        <span className="text-sm text-slate-300 leading-snug select-none">
+                            I agree to the{" "}
+                            <a
+                                href="/legal/terms"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-400 underline hover:text-emerald-300"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                Terms of Service
+                            </a>{" "}
+                            and{" "}
+                            <a
+                                href="/legal/privacy"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-emerald-400 underline hover:text-emerald-300"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                Privacy Policy
+                            </a>
+                            {!accepted && (
+                                <span className="text-emerald-400 text-xs ml-1.5 font-medium">
+                                    (required)
+                                </span>
+                            )}
+                        </span>
+                    </label>
                 </div>
             </div>
         </AuthLayout>
