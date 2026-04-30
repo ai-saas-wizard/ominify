@@ -33,7 +33,12 @@ interface Contact {
     total_calls: number;
     last_call_at: string | null;
     custom_fields: Record<string, any>;
+    last_outbound_reason: string | null;
+    last_outbound_at: string | null;
+    last_outbound_call_id: string | null;
 }
+
+const RECENT_OUTBOUND_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function POST(request: Request) {
     try {
@@ -104,6 +109,18 @@ export async function POST(request: Request) {
             return NextResponse.json({});
         }
 
+        // Detect a recent outbound call so the inbound agent can acknowledge
+        // why we reached out, rather than starting cold.
+        let recentOutboundReason: string | null = null;
+        let hoursSinceOutbound: number | null = null;
+        if (contact.last_outbound_reason && contact.last_outbound_at) {
+            const elapsed = Date.now() - new Date(contact.last_outbound_at).getTime();
+            if (elapsed >= 0 && elapsed < RECENT_OUTBOUND_WINDOW_MS) {
+                recentOutboundReason = contact.last_outbound_reason;
+                hoursSinceOutbound = Math.round(elapsed / (60 * 60 * 1000));
+            }
+        }
+
         // Build customer context for AI
         const isReturningCaller = contact.total_calls > 0;
         let customerContext = '';
@@ -130,6 +147,12 @@ This is their first time calling. Be welcoming and gather basic information.
 `.trim();
         }
 
+        if (recentOutboundReason) {
+            customerContext = `RECENT OUTBOUND: We reached out to this contact ${hoursSinceOutbound} hour(s) ago about: ${recentOutboundReason}. They may be calling back about this — confirm naturally before assuming.
+
+${customerContext}`;
+        }
+
         // Return assistant configuration with variable values
         // These can be referenced in the assistant's prompt as {{customer_name}}, {{customer_context}}, etc.
         return NextResponse.json({
@@ -140,7 +163,9 @@ This is their first time calling. Be welcoming and gather basic information.
                 customer_context: customerContext,
                 is_returning_caller: isReturningCaller,
                 total_previous_calls: contact.total_calls,
-                contact_id: contact.id
+                contact_id: contact.id,
+                recent_outbound_reason: recentOutboundReason || '',
+                hours_since_outbound: hoursSinceOutbound ?? '',
             }
         });
     } catch (error) {

@@ -413,6 +413,42 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
                 outcome: 'delivered',
                 providerId: result.callId,
             });
+
+            // Persist the reason for this outbound call onto the contact so
+            // that if they call back, the inbound agent can reference it.
+            // Priority: step.voice_context > agent.config.outbound_scenario.
+            // If both are empty, leave existing values untouched.
+            try {
+                const { data: stepRow } = await supabase
+                    .from('sequence_steps')
+                    .select('voice_context, voice_agent_id')
+                    .eq('id', stepId)
+                    .single();
+
+                let reason = (stepRow?.voice_context as string | null)?.trim() || '';
+                if (!reason && stepRow?.voice_agent_id) {
+                    const { data: agentRow } = await supabase
+                        .from('agents')
+                        .select('config')
+                        .eq('id', stepRow.voice_agent_id)
+                        .single();
+                    const scenario = (agentRow?.config as any)?.outbound_scenario;
+                    if (typeof scenario === 'string') reason = scenario.trim();
+                }
+
+                if (reason) {
+                    await supabase
+                        .from('contacts')
+                        .update({
+                            last_outbound_reason: reason,
+                            last_outbound_at: new Date().toISOString(),
+                            last_outbound_call_id: result.callId,
+                        })
+                        .eq('id', enrollment.contact_id);
+                }
+            } catch (err) {
+                console.warn('[VAPI] Failed to persist last_outbound_reason on contact:', err);
+            }
         }
 
         // Note: Concurrency slot will be released by the webhook when call ends

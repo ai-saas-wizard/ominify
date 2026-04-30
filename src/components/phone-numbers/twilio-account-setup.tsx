@@ -12,7 +12,10 @@ import {
     ArrowRight,
     ShieldCheck,
     Zap,
+    Clock,
 } from "lucide-react";
+
+const COMING_SOON_MANAGED_TWILIO = true;
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -166,28 +169,55 @@ export function TwilioAccountSetup({ clientId }: Props) {
                             className="grid grid-cols-1 md:grid-cols-2 gap-4"
                         >
                             {/* Option 1: Managed by Omnify */}
-                            <button
-                                onClick={() => setMode("provision")}
-                                className="group text-left border-2 border-gray-200 rounded-xl p-6 hover:border-emerald-300 hover:bg-emerald-50/30 transition-all duration-200"
-                            >
-                                <div className="flex items-center gap-3 mb-4">
-                                    <div className="p-2.5 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors">
-                                        <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                            {COMING_SOON_MANAGED_TWILIO ? (
+                                <div
+                                    aria-disabled="true"
+                                    className="text-left border-2 border-gray-200 rounded-xl p-6 bg-gray-50 opacity-60 cursor-not-allowed"
+                                >
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <div className="p-2.5 bg-emerald-100 rounded-xl">
+                                            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                                        </div>
+                                        <Badge className="bg-amber-50 text-amber-700 border-amber-200 gap-1.5">
+                                            <Clock className="w-3.5 h-3.5" />
+                                            Coming soon
+                                        </Badge>
                                     </div>
-                                    <Badge>Recommended</Badge>
+                                    <h3 className="font-semibold text-gray-900 mb-1">
+                                        Managed by Omnify
+                                    </h3>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        We create and manage a Twilio subaccount for you.
+                                        No Twilio account needed.
+                                    </p>
+                                    <div className="flex items-center text-sm text-gray-400 font-medium gap-1">
+                                        Available soon
+                                    </div>
                                 </div>
-                                <h3 className="font-semibold text-gray-900 mb-1">
-                                    Managed by Omnify
-                                </h3>
-                                <p className="text-sm text-gray-500 mb-4">
-                                    We create and manage a Twilio subaccount for you.
-                                    No Twilio account needed.
-                                </p>
-                                <div className="flex items-center text-sm text-emerald-600 font-medium gap-1">
-                                    Get started
-                                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </button>
+                            ) : (
+                                <button
+                                    onClick={() => setMode("provision")}
+                                    className="group text-left border-2 border-gray-200 rounded-xl p-6 hover:border-emerald-300 hover:bg-emerald-50/30 transition-all duration-200"
+                                >
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <div className="p-2.5 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors">
+                                            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                                        </div>
+                                        <Badge>Recommended</Badge>
+                                    </div>
+                                    <h3 className="font-semibold text-gray-900 mb-1">
+                                        Managed by Omnify
+                                    </h3>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        We create and manage a Twilio subaccount for you.
+                                        No Twilio account needed.
+                                    </p>
+                                    <div className="flex items-center text-sm text-emerald-600 font-medium gap-1">
+                                        Get started
+                                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </div>
+                                </button>
+                            )}
 
                             {/* Option 2: BYOT */}
                             <button
@@ -198,9 +228,13 @@ export function TwilioAccountSetup({ clientId }: Props) {
                                     <div className="p-2.5 bg-blue-100 rounded-xl group-hover:bg-blue-200 transition-colors">
                                         <KeyRound className="w-5 h-5 text-blue-600" />
                                     </div>
-                                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">
-                                        Advanced
-                                    </Badge>
+                                    {COMING_SOON_MANAGED_TWILIO ? (
+                                        <Badge>Recommended</Badge>
+                                    ) : (
+                                        <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                                            Advanced
+                                        </Badge>
+                                    )}
                                 </div>
                                 <h3 className="font-semibold text-gray-900 mb-1">
                                     Bring Your Own Twilio

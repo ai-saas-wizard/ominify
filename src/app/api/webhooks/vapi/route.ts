@@ -136,9 +136,10 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
         if (!clientId) return null;
 
         // Get or create contact
+        const contactSelect = 'id, name, email, conversation_summary, total_calls, last_call_at, last_outbound_reason, last_outbound_at, last_outbound_call_id';
         let { data: contact } = await supabase
             .from('contacts')
-            .select('id, name, email, conversation_summary, total_calls, last_call_at')
+            .select(contactSelect)
             .eq('client_id', clientId)
             .eq('phone', phone)
             .single();
@@ -148,7 +149,7 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
             const { data: newContact } = await supabase
                 .from('contacts')
                 .insert({ client_id: clientId, phone, total_calls: 0 })
-                .select('id, name, email, conversation_summary, total_calls, last_call_at')
+                .select(contactSelect)
                 .single();
             contact = newContact;
         }
@@ -156,6 +157,19 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
         if (!contact) return null;
 
         const isReturningCaller = (contact.total_calls || 0) > 0;
+
+        // Detect a recent outbound call so the inbound agent can acknowledge
+        // why we reached out, rather than starting cold.
+        const RECENT_OUTBOUND_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+        let recentOutboundReason: string | null = null;
+        let hoursSinceOutbound: number | null = null;
+        if (contact.last_outbound_reason && contact.last_outbound_at) {
+            const elapsed = Date.now() - new Date(contact.last_outbound_at).getTime();
+            if (elapsed >= 0 && elapsed < RECENT_OUTBOUND_WINDOW_MS) {
+                recentOutboundReason = contact.last_outbound_reason;
+                hoursSinceOutbound = Math.round(elapsed / (60 * 60 * 1000));
+            }
+        }
 
         // Build context string for AI
         let customerContext = '';
@@ -165,7 +179,11 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
             customerContext = `NEW CALLER\nPhone: ${phone}\nThis is their first time calling. Be welcoming and gather basic information.`;
         }
 
-        console.log('[VAPI WEBHOOK] Returning context for', isReturningCaller ? 'returning' : 'new', 'caller:', phone);
+        if (recentOutboundReason) {
+            customerContext = `RECENT OUTBOUND: We reached out to this contact ${hoursSinceOutbound} hour(s) ago about: ${recentOutboundReason}. They may be calling back about this — confirm naturally before assuming.\n\n${customerContext}`;
+        }
+
+        console.log('[VAPI WEBHOOK] Returning context for', isReturningCaller ? 'returning' : 'new', 'caller:', phone, recentOutboundReason ? `(recent outbound: ${hoursSinceOutbound}h)` : '');
 
         return {
             variableValues: {
@@ -175,7 +193,9 @@ async function getContactContext(call: NonNullable<VapiWebhookPayload['message']
                 customer_context: customerContext,
                 is_returning_caller: isReturningCaller,
                 total_previous_calls: contact.total_calls || 0,
-                contact_id: contact.id
+                contact_id: contact.id,
+                recent_outbound_reason: recentOutboundReason || '',
+                hours_since_outbound: hoursSinceOutbound ?? '',
             }
         };
     } catch (error) {
