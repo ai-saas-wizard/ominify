@@ -147,18 +147,39 @@ export async function createUmbrella(formData: FormData) {
         // Non-fatal — org ID can be populated later
     }
 
-    const { error } = await supabase.from("vapi_umbrellas").insert({
-        name,
-        umbrella_type: umbrellaType,
-        vapi_api_key_encrypted: encrypt(vapiApiKey),
-        vapi_org_id: vapiOrgId,
-        concurrency_limit: concurrencyLimit,
-        notes,
-    });
+    const { data: inserted, error } = await supabase
+        .from("vapi_umbrellas")
+        .insert({
+            name,
+            umbrella_type: umbrellaType,
+            vapi_api_key_encrypted: encrypt(vapiApiKey),
+            vapi_org_id: vapiOrgId,
+            concurrency_limit: concurrencyLimit,
+            notes,
+        })
+        .select("id")
+        .single();
 
     if (error) {
         console.error("createUmbrella error:", error);
         return { success: false, error: error.message };
+    }
+
+    // Register the 5 reusable calendar tools on this umbrella's VAPI account
+    // so subsequent UMBRELLA agent deploys can reference them via toolIds
+    // instead of inlining ~250 lines of identical JSON. Non-fatal: if this
+    // fails, agent deploys self-heal by calling ensure again lazily.
+    if (inserted?.id) {
+        const { ensureUmbrellaCalendarTools } = await import(
+            "./umbrella-tools-actions"
+        );
+        const ensureResult = await ensureUmbrellaCalendarTools(inserted.id);
+        if (!ensureResult.success) {
+            console.warn(
+                "[UMBRELLA] Calendar-tool bootstrap failed (non-fatal):",
+                ensureResult.error
+            );
+        }
     }
 
     await auditLog(
@@ -195,7 +216,13 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
 
     // Encrypt the new VAPI key before storing it.
     const encryptedVapiKey = vapiApiKey ? encrypt(vapiApiKey) : null;
-    if (encryptedVapiKey) updateData.vapi_api_key_encrypted = encryptedVapiKey;
+    if (encryptedVapiKey) {
+        updateData.vapi_api_key_encrypted = encryptedVapiKey;
+        // Rotating the VAPI key invalidates any previously-registered tool IDs
+        // — they live on the old account. Clear the map so the next deploy
+        // re-bootstraps against the new key.
+        updateData.calendar_tool_ids = null;
+    }
 
     const { error } = await supabase
         .from("vapi_umbrellas")
@@ -224,6 +251,19 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
                 .update({ vapi_key: encryptedVapiKey })
                 .in("id", clientIds);
             propagatedClientCount = clientIds.length;
+        }
+
+        // Re-register reusable calendar tools against the new VAPI account.
+        // Non-fatal: agent deploys will self-heal via the lazy ensure path.
+        const { ensureUmbrellaCalendarTools } = await import(
+            "./umbrella-tools-actions"
+        );
+        const ensureResult = await ensureUmbrellaCalendarTools(umbrellaId);
+        if (!ensureResult.success) {
+            console.warn(
+                "[UMBRELLA] Calendar-tool re-bootstrap after key rotation failed (non-fatal):",
+                ensureResult.error
+            );
         }
     }
 

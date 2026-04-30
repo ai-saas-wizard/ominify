@@ -495,3 +495,106 @@ export async function listVoices(apiKey?: string): Promise<VapiVoice[]> {
         previewUrl: v.previewUrl,
     }));
 }
+
+// ─── REUSABLE TOOLS (VAPI /tool) ───
+// Tools created here live in the VAPI account and can be referenced by any
+// assistant via `model.toolIds`. Lets us define a tool once per umbrella
+// instead of inlining identical JSON into every assistant's payload.
+
+export interface VapiTool {
+    id: string;
+    orgId?: string;
+    type: string;
+    function?: {
+        name?: string;
+        description?: string;
+        parameters?: Record<string, unknown>;
+    };
+    server?: { url: string; timeoutSeconds?: number };
+    messages?: unknown[];
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export async function createTool(
+    payload: Record<string, unknown>,
+    apiKey: string
+): Promise<VapiTool | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/tool`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            console.error("Failed to create tool:", res.status, await res.text());
+            return null;
+        }
+        return (await res.json()) as VapiTool;
+    } catch (error) {
+        console.error("Vapi Client Error (createTool):", error);
+        return null;
+    }
+}
+
+export async function getTool(
+    id: string,
+    apiKey: string
+): Promise<VapiTool | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/tool/${id}`, {
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as VapiTool;
+    } catch (error) {
+        console.error("Vapi Client Error (getTool):", error);
+        return null;
+    }
+}
+
+export async function listTools(apiKey: string): Promise<VapiTool[]> {
+    if (!apiKey) return [];
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/tool`, {
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? (data as VapiTool[]) : [];
+    } catch (error) {
+        console.error("Vapi Client Error (listTools):", error);
+        return [];
+    }
+}
+
+export async function deleteTool(
+    id: string,
+    apiKey: string
+): Promise<boolean> {
+    if (!apiKey) return false;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/tool/${id}`, {
+            method: "DELETE",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+        });
+        return res.ok;
+    } catch (error) {
+        console.error("Vapi Client Error (deleteTool):", error);
+        return false;
+    }
+}

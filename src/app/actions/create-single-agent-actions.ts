@@ -20,6 +20,7 @@ import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
+import { getCalendarToolIdsForClient } from "@/app/actions/umbrella-tools-actions";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 import { revalidatePath } from "next/cache";
 
@@ -288,7 +289,15 @@ async function createREAgent(
 
     try {
         const { systemPrompt, firstMessage } = buildREInboundPrompt(formData);
-        const tools = buildREInboundTools(clientId, appUrl, formData);
+        const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const tools = buildREInboundTools(clientId, appUrl, formData, {
+            calendarToolIds: calendarToolIds ?? undefined,
+        });
+        const toolIdRefs = calendarToolIds
+            ? Object.values(calendarToolIds).filter(
+                  (v): v is string => !!v
+              )
+            : [];
 
         const assistant = await createAssistant(
             {
@@ -299,6 +308,7 @@ async function createREAgent(
                     model: agentDef.llmModel,
                     messages: [{ role: "system", content: systemPrompt }],
                     tools: [...tools, { type: "endCall" }],
+                    ...(toolIdRefs.length > 0 ? { toolIds: toolIdRefs } : {}),
                     temperature: agentDef.llmTemperature,
                     maxTokens: agentDef.llmMaxTokens,
                 },
@@ -437,7 +447,15 @@ async function createREOutboundAgent(
     }
 
     try {
-        const tools = buildREOutboundTools(clientId, appUrl, formData);
+        const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const tools = buildREOutboundTools(clientId, appUrl, formData, {
+            calendarToolIds: calendarToolIds ?? undefined,
+        });
+        const toolIdRefs = calendarToolIds
+            ? Object.values(calendarToolIds).filter(
+                  (v): v is string => !!v
+              )
+            : [];
 
         const assistant = await createAssistant(
             {
@@ -450,6 +468,7 @@ async function createREOutboundAgent(
                         { role: "system", content: formData.outboundPrompt },
                     ],
                     tools: [...tools, { type: "endCall" }],
+                    ...(toolIdRefs.length > 0 ? { toolIds: toolIdRefs } : {}),
                     temperature: agentDef.llmTemperature,
                     maxTokens: agentDef.llmMaxTokens,
                 },

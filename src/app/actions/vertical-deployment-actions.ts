@@ -15,6 +15,7 @@ import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
+import { getCalendarToolIdsForClient } from "./umbrella-tools-actions";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import type { CreateAssistantPayload } from "@/lib/vapi";
@@ -106,6 +107,15 @@ export async function deployVerticalAgents(
         // 3. Fetch default settings for both inbound and outbound agents
         const defaultSettings = await getAllAgentDefaultSettings();
 
+        // 3b. Resolve umbrella-scoped calendar tool IDs (UMBRELLA only).
+        // Returns null for CUSTOM accounts → tools fall through to inline.
+        const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const calendarToolIdRefs = calendarToolIds
+            ? Object.values(calendarToolIds).filter(
+                  (v): v is string => !!v
+              )
+            : [];
+
         // 4. Deploy each agent defined on the vertical (inbound + outbound)
         const deployedAgents: DeploymentResult["agents"] = [];
 
@@ -140,9 +150,15 @@ export async function deployVerticalAgents(
 
             // 4b. Tools — calendar surface is identical for both directions, but
             // the transferCall uses direction-specific specialist config.
+            // For UMBRELLA clients, calendar tools live on the umbrella's VAPI
+            // account and are referenced via `toolIds` below — the builder
+            // returns transfer-only when calendarToolIds is supplied.
+            const builderOpts = {
+                calendarToolIds: calendarToolIds ?? undefined,
+            };
             const tools = isOutbound
-                ? buildREOutboundTools(clientId, appUrl, formData)
-                : buildREInboundTools(clientId, appUrl, formData);
+                ? buildREOutboundTools(clientId, appUrl, formData, builderOpts)
+                : buildREInboundTools(clientId, appUrl, formData, builderOpts);
 
             // 4c. Defaults source depends on direction
             const directionDefaults = isOutbound
@@ -157,6 +173,7 @@ export async function deployVerticalAgents(
                     systemPrompt,
                     firstMessage,
                     tools,
+                    toolIds: calendarToolIdRefs,
                     voiceId: agentDef.voiceId,
                     voiceProvider: agentDef.voiceProvider,
                     voiceModel: agentDef.voiceModel,
@@ -336,6 +353,7 @@ function buildVerticalVapiPayload(
         systemPrompt: string;
         firstMessage: string;
         tools: any[];
+        toolIds?: string[];
         voiceId: string;
         voiceProvider: string;
         voiceModel: string;
@@ -381,6 +399,9 @@ function buildVerticalVapiPayload(
                 { role: "system", content: overrides.systemPrompt },
             ],
             tools: [...overrides.tools, { type: "endCall" }],
+            ...(overrides.toolIds && overrides.toolIds.length > 0
+                ? { toolIds: overrides.toolIds }
+                : {}),
             temperature: overrides.llmTemperature,
             maxTokens: overrides.llmMaxTokens,
         },
