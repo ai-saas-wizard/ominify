@@ -12,7 +12,10 @@ import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 import { buildCalendarTools } from "@/lib/calendar-tools";
 import { getVertical } from "@/lib/verticals/registry";
 import { buildREInboundPrompt } from "@/lib/verticals/real-estate-investor/prompts";
-import { buildREInboundTools } from "@/lib/verticals/real-estate-investor/tools";
+import {
+    buildREInboundTools,
+    buildREOutboundTools,
+} from "@/lib/verticals/real-estate-investor/tools";
 import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
@@ -37,6 +40,11 @@ export type CreateSingleAgentInput =
       }
     | {
           kind: "vertical_re";
+          agentName: string;
+          formData: REInvestorFormData;
+      }
+    | {
+          kind: "vertical_re_outbound";
           agentName: string;
           formData: REInvestorFormData;
       };
@@ -77,6 +85,10 @@ export async function createSingleAgent(
 
     if (input.kind === "generic") {
         return createGenericAgent(clientId, client.name, input, vapiKey, appUrl);
+    }
+
+    if (input.kind === "vertical_re_outbound") {
+        return createREOutboundAgent(clientId, input, vapiKey, appUrl);
     }
 
     return createREAgent(clientId, input, vapiKey, appUrl);
@@ -393,6 +405,167 @@ async function createREAgent(
         return {
             success: false,
             error: error.message || "Unexpected error creating agent",
+        };
+    }
+}
+
+// ─── REAL ESTATE OUTBOUND PATH ───
+
+async function createREOutboundAgent(
+    clientId: string,
+    input: Extract<CreateSingleAgentInput, { kind: "vertical_re_outbound" }>,
+    vapiKey: string,
+    appUrl: string
+): Promise<CreateSingleAgentResult> {
+    const vertical = getVertical("real_estate_investor");
+    if (!vertical)
+        return { success: false, error: "Vertical definition not found" };
+
+    const agentDef = vertical.agents.find(
+        (a) => a.id === "re_outbound_follow_up"
+    );
+    if (!agentDef)
+        return { success: false, error: "Outbound agent definition not found" };
+
+    const { formData, agentName } = input;
+
+    if (!formData.outboundPrompt || !formData.outboundFirstMessage) {
+        return {
+            success: false,
+            error: "Outbound prompt or first message is empty",
+        };
+    }
+
+    try {
+        const tools = buildREOutboundTools(clientId, appUrl, formData);
+
+        const assistant = await createAssistant(
+            {
+                name: agentName,
+                firstMessage: formData.outboundFirstMessage,
+                model: {
+                    provider: "openai",
+                    model: agentDef.llmModel,
+                    messages: [
+                        { role: "system", content: formData.outboundPrompt },
+                    ],
+                    tools: [...tools, { type: "endCall" }],
+                    temperature: agentDef.llmTemperature,
+                    maxTokens: agentDef.llmMaxTokens,
+                },
+                voice: {
+                    provider: agentDef.voiceProvider,
+                    voiceId: agentDef.voiceId,
+                    model: agentDef.voiceModel,
+                    speed: agentDef.voiceConfig.speed,
+                    stability: agentDef.voiceConfig.stability,
+                    similarityBoost: agentDef.voiceConfig.similarityBoost,
+                    style: agentDef.voiceConfig.style,
+                    useSpeakerBoost: agentDef.voiceConfig.useSpeakerBoost,
+                },
+                transcriber: {
+                    provider: "deepgram",
+                    language: "en",
+                    model: agentDef.transcriberModel,
+                    numerals: true,
+                },
+                server: {
+                    url: `${appUrl}/api/webhooks/vapi`,
+                    timeoutSeconds: 20,
+                },
+                serverMessages: ["status-update", "end-of-call-report"],
+                clientMessages: [],
+                recordingEnabled: true,
+                endCallFunctionEnabled: true,
+                dialKeypadFunctionEnabled: true,
+                firstMessageMode: agentDef.firstMessageMode,
+                maxDurationSeconds: agentDef.maxDurationSeconds,
+                endCallPhrases: agentDef.endCallPhrases,
+                startSpeakingPlan: agentDef.startSpeakingPlan,
+                stopSpeakingPlan: agentDef.stopSpeakingPlan,
+                messagePlan: { idleMessages: ["Are you still there?"] },
+                voicemailDetection: {
+                    provider: "twilio",
+                    enabled: true,
+                    voicemailDetectionTypes: [
+                        "machine_end_beep",
+                        "machine_end_silence",
+                    ],
+                },
+                metadata: {
+                    clientId,
+                    agentType: "outbound",
+                    agentCategory: agentDef.category,
+                    templateVersion: "vertical-re-outbound-v1-adhoc",
+                },
+                analysisPlan: {
+                    structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
+                    structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
+                    minMessagesThreshold: 5,
+                },
+            },
+            vapiKey
+        );
+
+        if (!assistant) {
+            return { success: false, error: "VAPI assistant creation failed" };
+        }
+
+        const { data: agent, error: insertError } = await supabase
+            .from("agents")
+            .insert({
+                client_id: clientId,
+                vapi_id: assistant.id,
+                name: agentName,
+                agent_type: "outbound",
+                agent_type_id: agentDef.id,
+                agent_config: {
+                    voice_id: agentDef.voiceId,
+                    voice_name: "Sam (RE)",
+                    vertical: "real_estate_investor",
+                    persona_name: formData.agentPersonaName,
+                    markets: formData.markets,
+                    deal_types: formData.dealTypes,
+                    appointment_type: formData.appointmentType,
+                    transfer: {
+                        first_name: formData.outboundTransfer.firstName,
+                        role: formData.outboundTransfer.role,
+                        phone: formData.outboundTransfer.phone,
+                        mode: formData.outboundTransfer.mode,
+                    },
+                    business_phone: formData.businessPhone,
+                    outbound_goal: formData.outboundGoal,
+                    outbound_scenario: formData.outboundScenario || null,
+                },
+                auto_created: false,
+                template_version: "vertical-re-outbound-v1-adhoc",
+            })
+            .select("id")
+            .single();
+
+        if (insertError) {
+            console.error(
+                "[CREATE SINGLE AGENT] DB insert failed:",
+                insertError
+            );
+            return {
+                success: false,
+                error: `Agent created on VAPI but DB save failed: ${insertError.message}`,
+                vapiId: assistant.id,
+            };
+        }
+
+        revalidatePath(`/client/${clientId}/agents`);
+        return {
+            success: true,
+            agentId: agent?.id,
+            vapiId: assistant.id,
+        };
+    } catch (error: any) {
+        console.error("[CREATE SINGLE AGENT] RE outbound error:", error);
+        return {
+            success: false,
+            error: error.message || "Unexpected error creating outbound agent",
         };
     }
 }

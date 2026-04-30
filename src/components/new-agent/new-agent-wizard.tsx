@@ -1,24 +1,36 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { PathSelectionScreen } from "@/components/onboarding-v2/components/path-selection-screen";
 import { VerticalForm } from "@/components/onboarding-v2/components/vertical-form";
+import { VerticalOutboundConfig } from "@/components/onboarding-v2/components/vertical-outbound-config";
+import { VerticalAgentSelect } from "./vertical-agent-select";
+import { VerticalOutboundGoalSelect } from "./vertical-outbound-goal-select";
+import { VerticalOutboundSharedForm } from "./vertical-outbound-shared-form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
     createSingleAgent,
     type CreateSingleAgentInput,
 } from "@/app/actions/create-single-agent-actions";
-import type { REInvestorFormData } from "@/lib/verticals/types";
+import { RE_OUTBOUND_GOALS } from "@/lib/verticals/real-estate-investor/outbound-prompt-templates";
+import type {
+    REInvestorFormData,
+    REOutboundGoal,
+} from "@/lib/verticals/types";
 
 type Phase =
     | "path_selection"
     | "generic_form"
-    | "vertical_form"
+    | "vertical_agent_select"
+    | "vertical_inbound_form"
+    | "vertical_outbound_goal_select"
+    | "vertical_outbound_shared"
+    | "vertical_outbound_config"
     | "deploying"
     | "error";
 
@@ -26,18 +38,69 @@ interface NewAgentWizardProps {
     clientId: string;
     clientName: string;
     tenantTimezone: string;
+    outboundDefaults?: Partial<REInvestorFormData>;
 }
+
+const EMPTY_RE_FORM_DATA: REInvestorFormData = {
+    companyName: "",
+    ownerName: "",
+    ownerEmail: "",
+    agentPersonaName: "Sam",
+    markets: "",
+    dealTypes: [],
+    timezone: "",
+    appointmentType: "in_person",
+    businessPhone: "",
+    inboundTransfer: {
+        firstName: "",
+        role: "lead manager",
+        phone: "",
+        mode: "warm-summary",
+    },
+    outboundTransfer: {
+        firstName: "",
+        role: "lead manager",
+        phone: "",
+        mode: "warm-summary",
+    },
+    outboundGoal: "re_engage_prior_offer",
+    outboundScenario: "",
+    outboundPrompt: "",
+    outboundFirstMessage: "",
+};
 
 export function NewAgentWizard({
     clientId,
     clientName,
     tenantTimezone,
+    outboundDefaults,
 }: NewAgentWizardProps) {
     const router = useRouter();
     const [phase, setPhase] = useState<Phase>("path_selection");
     const [selectedVerticalId, setSelectedVerticalId] = useState<string | null>(
         null
     );
+    const [outboundFormData, setOutboundFormData] =
+        useState<REInvestorFormData>(() => ({
+            ...EMPTY_RE_FORM_DATA,
+            companyName: outboundDefaults?.companyName ?? clientName,
+            agentPersonaName:
+                outboundDefaults?.agentPersonaName ??
+                EMPTY_RE_FORM_DATA.agentPersonaName,
+            markets: outboundDefaults?.markets ?? "",
+            dealTypes: outboundDefaults?.dealTypes ?? [],
+            timezone: outboundDefaults?.timezone ?? tenantTimezone,
+            appointmentType:
+                outboundDefaults?.appointmentType ??
+                EMPTY_RE_FORM_DATA.appointmentType,
+            businessPhone: outboundDefaults?.businessPhone ?? "",
+            inboundTransfer:
+                outboundDefaults?.inboundTransfer ??
+                EMPTY_RE_FORM_DATA.inboundTransfer,
+            outboundTransfer:
+                outboundDefaults?.outboundTransfer ??
+                EMPTY_RE_FORM_DATA.outboundTransfer,
+        }));
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
 
@@ -55,6 +118,55 @@ export function NewAgentWizard({
         });
     };
 
+    const goalLabel = useMemo(() => {
+        const found = RE_OUTBOUND_GOALS.find(
+            (g) => g.value === outboundFormData.outboundGoal
+        );
+        return found?.label ?? "Outbound";
+    }, [outboundFormData.outboundGoal]);
+
+    const handleSelectVertical = (verticalId: string) => {
+        setSelectedVerticalId(verticalId);
+        setPhase("vertical_agent_select");
+    };
+
+    const handleSelectInbound = () => {
+        setPhase("vertical_inbound_form");
+    };
+
+    const handleSelectOutbound = () => {
+        setPhase("vertical_outbound_goal_select");
+    };
+
+    const handleSelectGoal = (goal: REOutboundGoal) => {
+        setOutboundFormData((prev) => ({
+            ...prev,
+            outboundGoal: goal,
+            // Clear any previously generated prompt so the next phase
+            // re-derives the starter for the new goal.
+            outboundPrompt: "",
+            outboundFirstMessage: "",
+        }));
+        setPhase("vertical_outbound_shared");
+    };
+
+    const handleSharedFormContinue = (
+        partial: Partial<REInvestorFormData>
+    ) => {
+        setOutboundFormData((prev) => ({ ...prev, ...partial }));
+        setPhase("vertical_outbound_config");
+    };
+
+    const handleOutboundConfigContinue = (updated: REInvestorFormData) => {
+        setOutboundFormData(updated);
+        const agentName = `${updated.companyName} - ${goalLabel}`;
+        deploy({
+            kind: "vertical_re_outbound",
+            formData: updated,
+            agentName,
+        });
+    };
+
     return (
         <div className="fixed inset-0 z-50 overflow-auto bg-gray-50">
             {/* Close button */}
@@ -69,10 +181,7 @@ export function NewAgentWizard({
             {phase === "path_selection" && (
                 <PathSelectionScreen
                     onSelectAutoGenerated={() => setPhase("generic_form")}
-                    onSelectVertical={(verticalId) => {
-                        setSelectedVerticalId(verticalId);
-                        setPhase("vertical_form");
-                    }}
+                    onSelectVertical={handleSelectVertical}
                 />
             )}
 
@@ -87,14 +196,23 @@ export function NewAgentWizard({
                 />
             )}
 
-            {phase === "vertical_form" && selectedVerticalId && (
+            {phase === "vertical_agent_select" && selectedVerticalId && (
+                <VerticalAgentSelect
+                    verticalId={selectedVerticalId}
+                    onSelectInbound={handleSelectInbound}
+                    onSelectOutbound={handleSelectOutbound}
+                    onBack={() => setPhase("path_selection")}
+                />
+            )}
+
+            {phase === "vertical_inbound_form" && selectedVerticalId && (
                 <VerticalForm
                     verticalId={selectedVerticalId}
                     initialData={{
                         companyName: clientName,
                         timezone: tenantTimezone,
                     }}
-                    onBack={() => setPhase("path_selection")}
+                    onBack={() => setPhase("vertical_agent_select")}
                     onContinue={(formData: REInvestorFormData) =>
                         deploy({
                             kind: "vertical_re",
@@ -102,6 +220,29 @@ export function NewAgentWizard({
                             agentName: `${formData.companyName} - Inbound Receptionist`,
                         })
                     }
+                />
+            )}
+
+            {phase === "vertical_outbound_goal_select" && (
+                <VerticalOutboundGoalSelect
+                    onSelect={handleSelectGoal}
+                    onBack={() => setPhase("vertical_agent_select")}
+                />
+            )}
+
+            {phase === "vertical_outbound_shared" && (
+                <VerticalOutboundSharedForm
+                    initialData={outboundFormData}
+                    onContinue={handleSharedFormContinue}
+                    onBack={() => setPhase("vertical_outbound_goal_select")}
+                />
+            )}
+
+            {phase === "vertical_outbound_config" && (
+                <VerticalOutboundConfig
+                    formData={outboundFormData}
+                    onContinue={handleOutboundConfigContinue}
+                    onBack={() => setPhase("vertical_outbound_shared")}
                 />
             )}
 
