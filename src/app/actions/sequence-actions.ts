@@ -1703,17 +1703,30 @@ export async function bulkEnrollFromCSV(
                         contactId = newContact.id;
                     }
 
-                    // Check if already actively enrolled
+                    // Check for an existing enrollment for this (sequence, contact)
+                    // — the table has a UNIQUE constraint on that pair, so we
+                    // upsert: if the contact is being re-uploaded and either
+                    // hasn't engaged yet OR was completed/failed, we reset the
+                    // row so the operator can dial them again.
                     const { data: existingEnrollment } = await supabase
                         .from("sequence_enrollments")
                         .select("id, status")
                         .eq("sequence_id", sequenceId)
                         .eq("contact_id", contactId)
-                        .in("status", ["active", "paused"])
-                        .limit(1);
+                        .maybeSingle();
 
-                    if (existingEnrollment && existingEnrollment.length > 0) {
-                        errors.push(`Row ${rowIndex}: Contact (${phone}) already enrolled`);
+                    const ENGAGED = new Set([
+                        "replied",
+                        "booked",
+                        "converted",
+                        "manual_stop",
+                        "unenrolled",
+                    ]);
+
+                    if (existingEnrollment && ENGAGED.has(existingEnrollment.status)) {
+                        errors.push(
+                            `Row ${rowIndex}: Contact (${phone}) has status ${existingEnrollment.status} — won't re-dial someone who already engaged`
+                        );
                         continue;
                     }
 
@@ -1734,36 +1747,61 @@ export async function bulkEnrollFromCSV(
                           ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
                           : new Date().toISOString();
 
-                    // Enroll the contact
-                    const { error: enrollErr } = await supabase
-                        .from("sequence_enrollments")
-                        .insert({
-                            sequence_id: sequenceId,
-                            contact_id: contactId,
-                            tenant_id: clientId,
-                            status: "active",
-                            current_step_order: 0,
-                            enrollment_source: "csv_upload",
-                            enrolled_at: new Date().toISOString(),
-                            next_step_at: nextStepAt,
-                            is_test: isTest,
-                            sentiment_trend: "stable",
-                            last_emotion: null,
-                            recommended_tone: null,
-                            is_hot_lead: false,
-                            is_at_risk: false,
-                            engagement_score: 50,
-                            needs_human_intervention: false,
-                            custom_variables: customVariables,
-                            contact_replied: false,
-                            contact_answered_call: false,
-                            appointment_booked: false,
-                            channel_overrides: {},
-                        });
+                    if (existingEnrollment) {
+                        // Reset the existing row instead of inserting a duplicate.
+                        const { error: updateErr } = await supabase
+                            .from("sequence_enrollments")
+                            .update({
+                                status: "active",
+                                current_step_order: 0,
+                                next_step_at: nextStepAt,
+                                is_test: isTest,
+                                completed_at: null,
+                                custom_variables: customVariables,
+                                enrollment_source: "csv_upload",
+                                contact_replied: false,
+                                contact_answered_call: false,
+                                appointment_booked: false,
+                            })
+                            .eq("id", existingEnrollment.id);
 
-                    if (enrollErr) {
-                        errors.push(`Row ${rowIndex}: Enrollment failed — ${enrollErr.message}`);
-                        continue;
+                        if (updateErr) {
+                            errors.push(
+                                `Row ${rowIndex}: Re-enroll failed — ${updateErr.message}`
+                            );
+                            continue;
+                        }
+                    } else {
+                        const { error: enrollErr } = await supabase
+                            .from("sequence_enrollments")
+                            .insert({
+                                sequence_id: sequenceId,
+                                contact_id: contactId,
+                                tenant_id: clientId,
+                                status: "active",
+                                current_step_order: 0,
+                                enrollment_source: "csv_upload",
+                                enrolled_at: new Date().toISOString(),
+                                next_step_at: nextStepAt,
+                                is_test: isTest,
+                                sentiment_trend: "stable",
+                                last_emotion: null,
+                                recommended_tone: null,
+                                is_hot_lead: false,
+                                is_at_risk: false,
+                                engagement_score: 50,
+                                needs_human_intervention: false,
+                                custom_variables: customVariables,
+                                contact_replied: false,
+                                contact_answered_call: false,
+                                appointment_booked: false,
+                                channel_overrides: {},
+                            });
+
+                        if (enrollErr) {
+                            errors.push(`Row ${rowIndex}: Enrollment failed — ${enrollErr.message}`);
+                            continue;
+                        }
                     }
 
                     // Auto-advance pipeline: new contact → New Lead, enrolled → Contacted
@@ -1873,6 +1911,56 @@ export async function enrollTestPhones(
                     if (rest.length) customVariables.last_name = rest.join(" ");
                 }
 
+                // (sequence_id, contact_id) is unique — if a row already
+                // exists (e.g. completed by the off-by-one bug, or active from
+                // a prior CSV upload), reset it instead of failing on the
+                // unique constraint.
+                const { data: existingEnroll } = await supabase
+                    .from("sequence_enrollments")
+                    .select("id, status")
+                    .eq("sequence_id", sequenceId)
+                    .eq("contact_id", contactId)
+                    .maybeSingle();
+
+                if (existingEnroll) {
+                    const ENGAGED = new Set([
+                        "replied",
+                        "booked",
+                        "converted",
+                        "manual_stop",
+                        "unenrolled",
+                    ]);
+                    if (ENGAGED.has(existingEnroll.status)) {
+                        errors.push(
+                            `${label}: contact has status ${existingEnroll.status} — won't retest someone who already engaged`
+                        );
+                        continue;
+                    }
+                    const { error: updateErr } = await supabase
+                        .from("sequence_enrollments")
+                        .update({
+                            status: "active",
+                            current_step_order: 0,
+                            next_step_at: now,
+                            is_test: true,
+                            completed_at: null,
+                            custom_variables: customVariables,
+                            enrollment_source: "test_now",
+                            contact_replied: false,
+                            contact_answered_call: false,
+                            appointment_booked: false,
+                        })
+                        .eq("id", existingEnroll.id);
+                    if (updateErr) {
+                        errors.push(
+                            `${label}: re-test reset failed — ${updateErr.message}`
+                        );
+                        continue;
+                    }
+                    enrolled++;
+                    continue;
+                }
+
                 const { error: enrollErr } = await supabase
                     .from("sequence_enrollments")
                     .insert({
@@ -1954,47 +2042,84 @@ export async function convertEnrollmentsToTest(
         }
 
         const skipped: { id: string; reason: string }[] = [];
-        const eligible: string[] = [];
+        const continuable: string[] = []; // active/paused — flip + reschedule
+        const restartable: string[] = []; // completed/failed — reset to step 0
         let sequenceId: string | null = null;
+
+        // Don't re-test contacts who already engaged — that would be spam.
+        const ENGAGED = new Set([
+            "replied",
+            "booked",
+            "converted",
+            "manual_stop",
+            "unenrolled",
+        ]);
 
         for (const row of rows || []) {
             if (row.tenant_id !== clientId) {
                 skipped.push({ id: row.id, reason: "wrong tenant" });
                 continue;
             }
-            if (!["active", "paused"].includes(row.status)) {
-                skipped.push({ id: row.id, reason: `status is ${row.status} (re-enroll via Manual to retest)` });
+            if (ENGAGED.has(row.status)) {
+                skipped.push({
+                    id: row.id,
+                    reason: `status is ${row.status} — won't retest a contact who already engaged`,
+                });
                 continue;
             }
             sequenceId = row.sequence_id;
-            eligible.push(row.id);
+            if (["completed", "failed"].includes(row.status)) {
+                restartable.push(row.id);
+            } else {
+                continuable.push(row.id);
+            }
         }
 
-        if (eligible.length === 0) {
-            return {
-                success: true,
-                data: { converted: 0, skipped },
-            };
+        if (continuable.length === 0 && restartable.length === 0) {
+            return { success: true, data: { converted: 0, skipped } };
         }
 
         const now = new Date().toISOString();
-        const { error: updateErr } = await supabase
-            .from("sequence_enrollments")
-            .update({
-                is_test: true,
-                next_step_at: now,
-                status: "active",
-            })
-            .in("id", eligible);
 
-        if (updateErr) {
-            return { success: false, error: updateErr.message };
+        if (continuable.length > 0) {
+            const { error: contErr } = await supabase
+                .from("sequence_enrollments")
+                .update({
+                    is_test: true,
+                    next_step_at: now,
+                    status: "active",
+                })
+                .in("id", continuable);
+            if (contErr) return { success: false, error: contErr.message };
+        }
+
+        if (restartable.length > 0) {
+            // Re-test from step 1: reset current_step_order and clear
+            // completed_at so the worker fetches step_order=1 and
+            // analytics don't double-count.
+            const { error: restErr } = await supabase
+                .from("sequence_enrollments")
+                .update({
+                    is_test: true,
+                    next_step_at: now,
+                    status: "active",
+                    current_step_order: 0,
+                    completed_at: null,
+                })
+                .in("id", restartable);
+            if (restErr) return { success: false, error: restErr.message };
         }
 
         if (sequenceId) {
             revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
         }
-        return { success: true, data: { converted: eligible.length, skipped } };
+        return {
+            success: true,
+            data: {
+                converted: continuable.length + restartable.length,
+                skipped,
+            },
+        };
     } catch (error: any) {
         console.error("convertEnrollmentsToTest error:", error);
         return { success: false, error: error?.message || "Internal error" };
