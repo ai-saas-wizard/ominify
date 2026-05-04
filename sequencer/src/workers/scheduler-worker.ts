@@ -236,7 +236,12 @@ function renderTemplate(
 }
 
 /**
- * Fetch due enrollments with all context
+ * Fetch due enrollments with all context.
+ *
+ * NOTE: sequence_enrollments.tenant_id is misnamed — it actually FKs to
+ * clients(id), not tenant_profiles(id). PostgREST has no direct FK from
+ * sequence_enrollments to tenant_profiles, so we fetch profiles in a
+ * second batched query keyed by client_id.
  */
 async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
     const { data, error } = await supabase
@@ -244,8 +249,7 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
         .select(`
             *,
             sequences (*),
-            contacts (*),
-            tenant_profiles!sequence_enrollments_tenant_id_fkey (*)
+            contacts (*)
         `)
         .eq('status', 'active')
         .lte('next_step_at', new Date().toISOString())
@@ -261,6 +265,28 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
         return [];
     }
 
+    // Batch-load tenant profiles for every distinct client (tenant_id) in
+    // this poll's results. One extra round-trip per tick instead of N.
+    const clientIds = Array.from(
+        new Set(data.map((row: any) => row.tenant_id as string).filter(Boolean))
+    );
+
+    const profilesByClientId = new Map<string, TenantProfile>();
+    if (clientIds.length > 0) {
+        const { data: profiles, error: profileErr } = await supabase
+            .from('tenant_profiles')
+            .select('*')
+            .in('client_id', clientIds);
+
+        if (profileErr) {
+            console.error('[SCHEDULER] Error fetching tenant profiles:', profileErr);
+        } else if (profiles) {
+            for (const p of profiles as any[]) {
+                if (p.client_id) profilesByClientId.set(p.client_id, p as TenantProfile);
+            }
+        }
+    }
+
     // Fetch the next step for each enrollment
     const results: EnrollmentWithContext[] = [];
 
@@ -268,8 +294,15 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
         const enrollment = row as SequenceEnrollment & {
             sequences: Sequence;
             contacts: Contact;
-            tenant_profiles: TenantProfile;
         };
+
+        const tenantProfile = profilesByClientId.get(enrollment.tenant_id as string);
+        if (!tenantProfile) {
+            console.warn(
+                `[SCHEDULER] No tenant_profile for client ${enrollment.tenant_id} (enrollment ${enrollment.id}) — skipping.`
+            );
+            continue;
+        }
 
         // Get the next step
         const { data: stepData, error: stepError } = await supabase
@@ -293,7 +326,7 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
             step: stepData as SequenceStep,
             sequence: enrollment.sequences,
             contact: enrollment.contacts,
-            tenantProfile: enrollment.tenant_profiles,
+            tenantProfile,
         });
     }
 
