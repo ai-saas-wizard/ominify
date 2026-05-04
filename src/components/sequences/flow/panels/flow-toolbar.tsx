@@ -45,6 +45,7 @@ interface FlowToolbarProps {
     sequenceId: string;
     sequence: any;
     isActive: boolean;
+    enrollments?: any[];
     sidebarTab: string | null;
     onSidebarToggle: (tab: string | null) => void;
     onOpenAIDialog: () => void;
@@ -55,6 +56,7 @@ export function FlowToolbar({
     sequenceId,
     sequence,
     isActive,
+    enrollments = [],
     sidebarTab,
     onSidebarToggle,
     onOpenAIDialog,
@@ -303,6 +305,7 @@ export function FlowToolbar({
                 onOpenChange={setTestOpen}
                 sequenceId={sequenceId}
                 clientId={clientId}
+                enrollments={enrollments}
             />
         </Panel>
     );

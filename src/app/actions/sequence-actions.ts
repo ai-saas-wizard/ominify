@@ -1917,6 +1917,90 @@ export async function enrollTestPhones(
     }
 }
 
+// ─── Convert existing enrollments to test mode + fire immediately ───────────
+// Used by the "Test now → From sequence" path. Picks live enrollments that
+// were created by CSV upload (or any other source), flips is_test=true and
+// schedules next_step_at=NOW() so the scheduler-worker dispatches them on
+// the next 5s tick — bypassing pacing + business-hours + TCPA gates per
+// the worker's isTestEnrollment branch.
+//
+// Only converts enrollments in active/paused state. Completed/failed flows
+// can't be retested in-place because current_step_order is past the last
+// step; the user should re-enroll the phone via the Manual tab to start
+// over.
+
+export async function convertEnrollmentsToTest(
+    enrollmentIds: string[],
+    clientId: string
+): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { converted: number; skipped: { id: string; reason: string }[] };
+}> {
+    try {
+        if (!enrollmentIds || enrollmentIds.length === 0) {
+            return { success: false, error: "No enrollments selected" };
+        }
+
+        // Load + scope-check the rows up-front so we don't touch enrollments
+        // outside this client.
+        const { data: rows, error: readErr } = await supabase
+            .from("sequence_enrollments")
+            .select("id, status, tenant_id, sequence_id")
+            .in("id", enrollmentIds);
+
+        if (readErr) {
+            return { success: false, error: readErr.message };
+        }
+
+        const skipped: { id: string; reason: string }[] = [];
+        const eligible: string[] = [];
+        let sequenceId: string | null = null;
+
+        for (const row of rows || []) {
+            if (row.tenant_id !== clientId) {
+                skipped.push({ id: row.id, reason: "wrong tenant" });
+                continue;
+            }
+            if (!["active", "paused"].includes(row.status)) {
+                skipped.push({ id: row.id, reason: `status is ${row.status} (re-enroll via Manual to retest)` });
+                continue;
+            }
+            sequenceId = row.sequence_id;
+            eligible.push(row.id);
+        }
+
+        if (eligible.length === 0) {
+            return {
+                success: true,
+                data: { converted: 0, skipped },
+            };
+        }
+
+        const now = new Date().toISOString();
+        const { error: updateErr } = await supabase
+            .from("sequence_enrollments")
+            .update({
+                is_test: true,
+                next_step_at: now,
+                status: "active",
+            })
+            .in("id", eligible);
+
+        if (updateErr) {
+            return { success: false, error: updateErr.message };
+        }
+
+        if (sequenceId) {
+            revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
+        }
+        return { success: true, data: { converted: eligible.length, skipped } };
+    } catch (error: any) {
+        console.error("convertEnrollmentsToTest error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}
+
 // ─── Create sequence from Goal-First Wizard ──────────────────────────────────
 
 const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string; trigger_type: string; urgency_tier: string }> = {

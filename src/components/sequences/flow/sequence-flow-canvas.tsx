@@ -207,6 +207,7 @@ export function SequenceFlowCanvas({
                     sequenceId={sequenceId}
                     sequence={sequence}
                     isActive={isActive}
+                    enrollments={enrollments}
                     sidebarTab={sidebarTab}
                     onSidebarToggle={setSidebarTab}
                     onOpenAIDialog={() => setShowAIDialog(true)}
