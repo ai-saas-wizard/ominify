@@ -7,6 +7,7 @@ const isPublicRoute = createRouteMatcher([
     '/sign-in(.*)',
     '/sign-up(.*)',
     '/legal/(.*)',
+    '/walkthrough-realestate',
     '/api/stripe/webhook',
     '/api/webhooks/vapi',
     '/api/vapi/tools/(.*)',
