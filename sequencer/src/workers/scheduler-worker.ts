@@ -894,13 +894,14 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
     }
 
     try {
-        // Load tenant profile if not joined
+        // Load tenant profile if not joined. tenant_profiles is keyed by
+        // client_id; sequence_enrollments.tenant_id stores the same value.
         let tenantProfile = enrollment.tenant_profiles || null;
         if (!tenantProfile) {
             const { data: tp } = await supabase
                 .from('tenant_profiles')
                 .select('*')
-                .eq('tenant_id', enrollment.tenant_id)
+                .eq('client_id', enrollment.tenant_id)
                 .single();
             tenantProfile = tp as TenantProfile | null;
         }
@@ -990,9 +991,13 @@ async function tick(): Promise<void> {
         }
 
         // ── Dynamic sequence timeout polling
+        // Same FK-hint pitfall as fetchDueEnrollments — sequence_enrollments
+        // has no FK to tenant_profiles. handleDynamicTimeout loads the
+        // profile itself via client_id (see line 900 area) so we just
+        // skip it from the embed.
         const { data: timedOutEnrollments } = await supabase
             .from('sequence_enrollments')
-            .select('*, sequences(*), contacts(*), tenant_profiles!sequence_enrollments_tenant_id_fkey(*)')
+            .select('*, sequences(*), contacts(*)')
             .eq('status', 'awaiting_outcome')
             .lte('outcome_timeout_at', new Date().toISOString())
             .limit(BATCH_SIZE);
