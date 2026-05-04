@@ -180,6 +180,20 @@ export async function createUmbrella(formData: FormData) {
                 ensureResult.error
             );
         }
+
+        // Bootstrap the global RE structured output for this umbrella so all
+        // future RE assistants can reference it via artifactPlan.structuredOutputIds.
+        // Non-fatal: agent deploys self-heal via the lazy ensure path.
+        const { ensureUmbrellaREStructuredOutput } = await import(
+            "./umbrella-structured-outputs-actions"
+        );
+        const soResult = await ensureUmbrellaREStructuredOutput(inserted.id);
+        if (!soResult.success) {
+            console.warn(
+                "[UMBRELLA] RE structured-output bootstrap failed (non-fatal):",
+                soResult.error
+            );
+        }
     }
 
     await auditLog(
@@ -220,8 +234,10 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
         updateData.vapi_api_key_encrypted = encryptedVapiKey;
         // Rotating the VAPI key invalidates any previously-registered tool IDs
         // — they live on the old account. Clear the map so the next deploy
-        // re-bootstraps against the new key.
+        // re-bootstraps against the new key. Same for the RE structured
+        // output — its ID belongs to the old VAPI org.
         updateData.calendar_tool_ids = null;
+        updateData.re_structured_output_id = null;
     }
 
     const { error } = await supabase
@@ -263,6 +279,19 @@ export async function updateUmbrella(umbrellaId: string, formData: FormData) {
             console.warn(
                 "[UMBRELLA] Calendar-tool re-bootstrap after key rotation failed (non-fatal):",
                 ensureResult.error
+            );
+        }
+
+        // Same posture for the RE structured output — recreate it on the
+        // new VAPI org. Non-fatal: agent deploys self-heal lazily.
+        const { ensureUmbrellaREStructuredOutput } = await import(
+            "./umbrella-structured-outputs-actions"
+        );
+        const soResult = await ensureUmbrellaREStructuredOutput(umbrellaId);
+        if (!soResult.success) {
+            console.warn(
+                "[UMBRELLA] RE structured-output re-bootstrap after key rotation failed (non-fatal):",
+                soResult.error
             );
         }
     }

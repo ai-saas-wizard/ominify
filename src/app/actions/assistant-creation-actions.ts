@@ -234,7 +234,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
     // 3. Create Inbound Agent
     try {
         const inboundPrompt = await buildInboundPrompt(client.name, profileData);
-        const inboundAssistant = await createAssistant(
+        const { data: inboundAssistant, error: inboundVapiErr } = await createAssistant(
             {
                 name: `${client.name} - Inbound`,
                 firstMessage: inboundPrompt.firstMessage,
@@ -285,6 +285,12 @@ export async function createTenantAssistants(clientId: string): Promise<{
             vapiKey
         );
 
+        if (!inboundAssistant) {
+            console.error("[ASSISTANT CREATION] VAPI rejected inbound:", {
+                status: inboundVapiErr?.status,
+                body: inboundVapiErr?.body,
+            });
+        }
         if (inboundAssistant) {
             // Build blueprint for sequencer dispatch
             const inboundBlueprint = buildAgentBlueprint({
@@ -327,7 +333,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
     // 4. Create Outbound Agent
     try {
         const outboundPrompt = await buildOutboundPrompt(client.name, profileData);
-        const outboundAssistant = await createAssistant(
+        const { data: outboundAssistant, error: outboundVapiErr } = await createAssistant(
             {
                 name: `${client.name} - Outbound`,
                 firstMessage: outboundPrompt.firstMessage,
@@ -364,6 +370,12 @@ export async function createTenantAssistants(clientId: string): Promise<{
             vapiKey
         );
 
+        if (!outboundAssistant) {
+            console.error("[ASSISTANT CREATION] VAPI rejected outbound:", {
+                status: outboundVapiErr?.status,
+                body: outboundVapiErr?.body,
+            });
+        }
         if (outboundAssistant) {
             // Build blueprint for sequencer dispatch
             const outboundBlueprint = buildAgentBlueprint({

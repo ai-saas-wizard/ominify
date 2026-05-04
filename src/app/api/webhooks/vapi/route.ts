@@ -80,6 +80,13 @@ interface VapiWebhookPayload {
             artifact?: {
                 recordingUrl?: string;
                 stereoRecordingUrl?: string;
+                // Per-output map keyed by structured-output UUID. Each entry's
+                // `result` holds the extracted object. Populated when the
+                // assistant has `artifactPlan.structuredOutputIds` set.
+                structuredOutputs?: Record<
+                    string,
+                    { name?: string; result?: Record<string, any> }
+                >;
             };
         };
         assistant?: {
@@ -92,6 +99,56 @@ interface VapiWebhookPayload {
             message?: string;
         }>;
     };
+}
+
+/**
+ * Normalize VAPI's two structured-data shapes into a single flat object.
+ *
+ * - New (preferred): `call.artifact.structuredOutputs[<uuid>].result` —
+ *   populated when the assistant has `artifactPlan.structuredOutputIds` set
+ *   (every UMBRELLA RE assistant from now on).
+ * - Legacy: `call.analysis.structuredData` — populated when the assistant
+ *   uses inline `analysisPlan.structuredDataSchema` (CUSTOM accounts and
+ *   already-deployed pre-migration agents).
+ *
+ * We only attach one structured output per assistant, so we take the first
+ * artifact entry. Also synthesizes `caller_name`/`name`/`email` aliases from
+ * the new schema's split fields so downstream code that reads the legacy
+ * field names (buildSheetRow, contact extraction) keeps working without
+ * branching.
+ */
+function extractStructuredData(
+    call: NonNullable<VapiWebhookPayload["message"]["call"]>
+): Record<string, any> {
+    const fromArtifact = call.artifact?.structuredOutputs;
+    let result: Record<string, any> = {};
+
+    if (fromArtifact && typeof fromArtifact === "object") {
+        for (const entry of Object.values(fromArtifact)) {
+            if (entry?.result && typeof entry.result === "object") {
+                result = { ...entry.result };
+                break;
+            }
+        }
+    }
+
+    if (Object.keys(result).length === 0) {
+        result = { ...(call.analysis?.structuredData || {}) };
+    }
+
+    // Legacy aliases: downstream code (buildSheetRow, contact extraction)
+    // reads `caller_name`/`name`/`email`. New RE schema splits caller_name
+    // into first+last and uses `caller_email`. Backfill so we don't have to
+    // touch every read site.
+    if (!result.caller_name) {
+        const parts = [result.caller_first_name, result.caller_last_name]
+            .filter((p): p is string => typeof p === "string" && p.length > 0);
+        if (parts.length) result.caller_name = parts.join(" ").trim();
+    }
+    if (!result.name && result.caller_name) result.name = result.caller_name;
+    if (!result.email && result.caller_email) result.email = result.caller_email;
+
+    return result;
 }
 
 // Helper to get Client ID from Vapi Org ID
@@ -422,7 +479,7 @@ async function persistCallRecord(
             type: call.type || 'inboundPhoneCall',
             ended_reason: finalEndedReason,
             summary: call.analysis?.summary || null,
-            structured_data: call.analysis?.structuredData || {},
+            structured_data: extractStructuredData(call),
             raw_payload: rawPayload || null,
             updated_at: new Date().toISOString()
         };
@@ -462,7 +519,7 @@ async function appendCallToSheet(
         if (!sheetsStatus?.is_active || !sheetsStatus?.google_sheet_id) return;
 
         // Only log calls with structured data (meaningful conversations)
-        const structuredData = call.analysis?.structuredData;
+        const structuredData = extractStructuredData(call);
         if (!structuredData || Object.keys(structuredData).length === 0) {
             console.log('[VAPI WEBHOOK] No structured data for sheets, skipping:', call.id);
             return;
@@ -587,6 +644,8 @@ async function updateContactAfterCall(
             .eq('phone', call.customer.number)
             .single();
 
+        const sd = extractStructuredData(call);
+
         if (!contact) {
             // Create new contact
             const { data: newContact } = await supabase
@@ -594,8 +653,8 @@ async function updateContactAfterCall(
                 .insert({
                     client_id: clientId,
                     phone: call.customer.number,
-                    name: call.analysis?.structuredData?.name || null,
-                    email: call.analysis?.structuredData?.email || null,
+                    name: sd.name || null,
+                    email: sd.email || null,
                     total_calls: 0
                 })
                 .select('id, conversation_summary, total_calls')
@@ -645,10 +704,8 @@ async function updateContactAfterCall(
         if (newSummary) updateData.conversation_summary = updatedSummary;
 
         // Extract name/email - try VAPI's built-in extraction first, then OpenAI fallback
-        let extractedName = call.analysis?.structuredData?.name ||
-            call.analysis?.structuredData?.caller_name || null;
-        let extractedEmail = call.analysis?.structuredData?.email ||
-            call.analysis?.structuredData?.caller_email || null;
+        let extractedName = sd.name || sd.caller_name || null;
+        let extractedEmail = sd.email || sd.caller_email || null;
 
         // Use OpenAI extraction as fallback if transcript exists and we're missing data
         if ((!extractedName || !extractedEmail) && transcript && transcript.length > 100) {

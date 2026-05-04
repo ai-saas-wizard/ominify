@@ -21,6 +21,9 @@ import {
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
 import { getCalendarToolIdsForClient } from "@/app/actions/umbrella-tools-actions";
+import { getREStructuredOutputIdForClient } from "@/app/actions/umbrella-structured-outputs-actions";
+import { getAppUrl } from "@/lib/app-url";
+import { formatVapiError } from "@/lib/vapi-errors";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 import { revalidatePath } from "next/cache";
 
@@ -55,15 +58,6 @@ export interface CreateSingleAgentResult {
     agentId?: string;
     vapiId?: string;
     error?: string;
-}
-
-function getAppUrl(): string {
-    return (
-        process.env.NEXT_PUBLIC_APP_URL ||
-        (process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : "http://localhost:3000")
-    );
 }
 
 export async function createSingleAgent(
@@ -142,7 +136,7 @@ async function createGenericAgent(
                   ]
                 : [];
 
-        const assistant = await createAssistant(
+        const { data: assistant, error: vapiErr } = await createAssistant(
             {
                 name: agentName,
                 firstMessage: prompt.firstMessage,
@@ -194,7 +188,11 @@ async function createGenericAgent(
         );
 
         if (!assistant) {
-            return { success: false, error: "VAPI assistant creation failed" };
+            console.error("[CREATE SINGLE AGENT] VAPI rejected generic assistant:", {
+                status: vapiErr?.status,
+                body: vapiErr?.body,
+            });
+            return { success: false, error: formatVapiError(vapiErr) };
         }
 
         const blueprint = buildAgentBlueprint({
@@ -290,6 +288,8 @@ async function createREAgent(
     try {
         const { systemPrompt, firstMessage } = buildREInboundPrompt(formData);
         const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const reStructuredOutputId =
+            await getREStructuredOutputIdForClient(clientId);
         const tools = buildREInboundTools(clientId, appUrl, formData, {
             calendarToolIds: calendarToolIds ?? undefined,
         });
@@ -299,7 +299,7 @@ async function createREAgent(
               )
             : [];
 
-        const assistant = await createAssistant(
+        const { data: assistant, error: vapiErr } = await createAssistant(
             {
                 name: agentName,
                 firstMessage,
@@ -349,17 +349,32 @@ async function createREAgent(
                     agentCategory: "inbound",
                     templateVersion: "vertical-re-v1-adhoc",
                 },
-                analysisPlan: {
-                    structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
-                    structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
-                    minMessagesThreshold: 5,
-                },
+                // UMBRELLA: attach the global per-umbrella RE structured output.
+                // CUSTOM (or umbrella bootstrap not yet run): fall back to the
+                // inline analysisPlan so extraction still happens.
+                ...(reStructuredOutputId
+                    ? {
+                          artifactPlan: {
+                              structuredOutputIds: [reStructuredOutputId],
+                          },
+                      }
+                    : {
+                          analysisPlan: {
+                              structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
+                              structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
+                              minMessagesThreshold: 5,
+                          },
+                      }),
             },
             vapiKey
         );
 
         if (!assistant) {
-            return { success: false, error: "VAPI assistant creation failed" };
+            console.error("[CREATE SINGLE AGENT] VAPI rejected RE inbound assistant:", {
+                status: vapiErr?.status,
+                body: vapiErr?.body,
+            });
+            return { success: false, error: formatVapiError(vapiErr) };
         }
 
         const { data: agent, error: insertError } = await supabase
@@ -448,6 +463,8 @@ async function createREOutboundAgent(
 
     try {
         const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const reStructuredOutputId =
+            await getREStructuredOutputIdForClient(clientId);
         const tools = buildREOutboundTools(clientId, appUrl, formData, {
             calendarToolIds: calendarToolIds ?? undefined,
         });
@@ -457,7 +474,7 @@ async function createREOutboundAgent(
               )
             : [];
 
-        const assistant = await createAssistant(
+        const { data: assistant, error: vapiErr } = await createAssistant(
             {
                 name: agentName,
                 firstMessage: formData.outboundFirstMessage,
@@ -517,17 +534,29 @@ async function createREOutboundAgent(
                     agentCategory: agentDef.category,
                     templateVersion: "vertical-re-outbound-v1-adhoc",
                 },
-                analysisPlan: {
-                    structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
-                    structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
-                    minMessagesThreshold: 5,
-                },
+                ...(reStructuredOutputId
+                    ? {
+                          artifactPlan: {
+                              structuredOutputIds: [reStructuredOutputId],
+                          },
+                      }
+                    : {
+                          analysisPlan: {
+                              structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
+                              structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
+                              minMessagesThreshold: 5,
+                          },
+                      }),
             },
             vapiKey
         );
 
         if (!assistant) {
-            return { success: false, error: "VAPI assistant creation failed" };
+            console.error("[CREATE SINGLE AGENT] VAPI rejected RE outbound assistant:", {
+                status: vapiErr?.status,
+                body: vapiErr?.body,
+            });
+            return { success: false, error: formatVapiError(vapiErr) };
         }
 
         const { data: agent, error: insertError } = await supabase

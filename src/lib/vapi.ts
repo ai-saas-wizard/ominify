@@ -126,14 +126,29 @@ export interface CreateAssistantPayload {
         successEvaluationRubric?: string;
         minMessagesThreshold?: number;
     };
+    artifactPlan?: {
+        structuredOutputIds?: string[];
+        recordingEnabled?: boolean;
+        videoRecordingEnabled?: boolean;
+    };
+}
+
+export interface CreateAssistantResult {
+    data: VapiAgent | null;
+    error?: { status: number; body: string };
 }
 
 export async function createAssistant(
     payload: CreateAssistantPayload,
     apiKey?: string
-): Promise<VapiAgent | null> {
+): Promise<CreateAssistantResult> {
     const token = apiKey;
-    if (!token) return null;
+    if (!token) {
+        return {
+            data: null,
+            error: { status: 0, body: "No VAPI API key available" },
+        };
+    }
 
     try {
         const res = await fetch(`${VAPI_BASE_URL}/assistant`, {
@@ -146,14 +161,18 @@ export async function createAssistant(
         });
 
         if (!res.ok) {
-            console.error("Failed to create assistant:", await res.text());
-            return null;
+            const body = await res.text();
+            console.error("Failed to create assistant:", res.status, body);
+            return { data: null, error: { status: res.status, body } };
         }
 
-        return await res.json();
-    } catch (error) {
+        return { data: await res.json() };
+    } catch (error: any) {
         console.error("Vapi Client Error (createAssistant):", error);
-        return null;
+        return {
+            data: null,
+            error: { status: 0, body: error?.message ?? "network error" },
+        };
     }
 }
 
@@ -596,5 +615,111 @@ export async function deleteTool(
     } catch (error) {
         console.error("Vapi Client Error (deleteTool):", error);
         return false;
+    }
+}
+
+// ─── STRUCTURED OUTPUTS (VAPI /structured-output) ───
+// Created once per VAPI org and attached to assistants via
+// `artifactPlan.structuredOutputIds`. Result lands at
+// `call.artifact.structuredOutputs[id].result` on the end-of-call webhook.
+
+export interface VapiStructuredOutput {
+    id: string;
+    orgId?: string;
+    name: string;
+    description?: string;
+    type?: "ai" | "regex";
+    schema?: Record<string, any>;
+    assistantIds?: string[];
+    workflowIds?: string[];
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface CreateStructuredOutputPayload {
+    name: string;
+    description?: string;
+    schema: Record<string, any>;
+    type?: "ai" | "regex";
+    assistantIds?: string[];
+    workflowIds?: string[];
+}
+
+export async function createStructuredOutput(
+    payload: CreateStructuredOutputPayload,
+    apiKey: string
+): Promise<VapiStructuredOutput | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/structured-output`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ type: "ai", ...payload }),
+        });
+        if (!res.ok) {
+            console.error(
+                "Failed to create structured output:",
+                res.status,
+                await res.text()
+            );
+            return null;
+        }
+        return (await res.json()) as VapiStructuredOutput;
+    } catch (error) {
+        console.error("Vapi Client Error (createStructuredOutput):", error);
+        return null;
+    }
+}
+
+export async function getStructuredOutput(
+    id: string,
+    apiKey: string
+): Promise<VapiStructuredOutput | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/structured-output/${id}`, {
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as VapiStructuredOutput;
+    } catch (error) {
+        console.error("Vapi Client Error (getStructuredOutput):", error);
+        return null;
+    }
+}
+
+export async function updateStructuredOutput(
+    id: string,
+    payload: Partial<CreateStructuredOutputPayload>,
+    apiKey: string
+): Promise<VapiStructuredOutput | null> {
+    if (!apiKey) return null;
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/structured-output/${id}`, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            console.error(
+                "Failed to update structured output:",
+                res.status,
+                await res.text()
+            );
+            return null;
+        }
+        return (await res.json()) as VapiStructuredOutput;
+    } catch (error) {
+        console.error("Vapi Client Error (updateStructuredOutput):", error);
+        return null;
     }
 }

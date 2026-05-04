@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
+import { formatVapiError } from "@/lib/vapi-errors";
 import { getClientVapiKey } from "@/lib/client-secrets";
 import { getAgentTypeDefinition } from "@/lib/agent-catalog";
 import { buildAgentPrompt } from "@/lib/agent-prompt-builders";
@@ -199,19 +200,24 @@ export async function deployAgentFleet(
             });
 
             // Create VAPI assistant
-            const vapiAssistant = await createAssistant(
+            const { data: vapiAssistant, error: vapiErr } = await createAssistant(
                 vapiPayload,
                 clientVapiKey
             );
 
             if (!vapiAssistant) {
+                console.error("[AGENT DEPLOY] VAPI rejected fleet assistant:", {
+                    type_id: suggestedAgent.type_id,
+                    status: vapiErr?.status,
+                    body: vapiErr?.body,
+                });
                 return {
                     type_id: suggestedAgent.type_id,
                     name: suggestedAgent.name,
                     agent_id: null,
                     vapi_id: null,
                     sequence_id: null,
-                    error: "VAPI assistant creation failed",
+                    error: formatVapiError(vapiErr),
                 };
             }
 
@@ -520,19 +526,24 @@ export async function deployAgentFleetV2(
             });
 
             // Create VAPI assistant
-            const vapiAssistant = await createAssistant(
+            const { data: vapiAssistant, error: vapiErr } = await createAssistant(
                 vapiPayload,
                 clientVapiKey
             );
 
             if (!vapiAssistant) {
+                console.error("[AGENT DEPLOY] VAPI rejected fleet assistant:", {
+                    type_id: suggestedAgent.type_id,
+                    status: vapiErr?.status,
+                    body: vapiErr?.body,
+                });
                 return {
                     type_id: suggestedAgent.type_id,
                     name: suggestedAgent.name,
                     agent_id: null,
                     vapi_id: null,
                     sequence_id: null,
-                    error: "VAPI assistant creation failed",
+                    error: formatVapiError(vapiErr),
                 };
             }
 

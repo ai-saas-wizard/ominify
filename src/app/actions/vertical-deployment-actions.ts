@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { createAssistant } from "@/lib/vapi";
+import { formatVapiError } from "@/lib/vapi-errors";
 import { getClientVapiKey } from "@/lib/client-secrets";
 import { revalidatePath } from "next/cache";
 import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
@@ -16,6 +17,7 @@ import {
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
 import { getCalendarToolIdsForClient } from "./umbrella-tools-actions";
+import { getREStructuredOutputIdForClient } from "./umbrella-structured-outputs-actions";
 import type { REInvestorFormData } from "@/lib/verticals/types";
 import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import type { CreateAssistantPayload } from "@/lib/vapi";
@@ -116,6 +118,11 @@ export async function deployVerticalAgents(
               )
             : [];
 
+        // 3c. Resolve umbrella-scoped RE structured output ID (UMBRELLA only).
+        // Null for CUSTOM accounts → analysisPlan falls through to inline.
+        const reStructuredOutputId =
+            await getREStructuredOutputIdForClient(clientId);
+
         // 4. Deploy each agent defined on the vertical (inbound + outbound)
         const deployedAgents: DeploymentResult["agents"] = [];
 
@@ -192,6 +199,7 @@ export async function deployVerticalAgents(
                     agentCategory: agentDef.category,
                     templateVersion: "vertical-re-v1",
                     appUrl,
+                    reStructuredOutputId,
                     voicemailDetection: isOutbound
                         ? {
                               provider: "twilio",
@@ -213,15 +221,15 @@ export async function deployVerticalAgents(
 
             // 4e. Create VAPI assistant (per-agent try/catch so one failure doesn't abort the other)
             let vapiAssistant: { id: string } | null = null;
+            let vapiErr: { status: number; body: string } | undefined;
             try {
-                vapiAssistant = await createAssistant(
-                    vapiPayload,
-                    clientVapiKey
-                );
-            } catch (vapiError: any) {
+                const result = await createAssistant(vapiPayload, clientVapiKey);
+                vapiAssistant = result.data;
+                vapiErr = result.error;
+            } catch (thrown: any) {
                 console.error(
-                    `[VERTICAL] VAPI creation error for ${agentDef.id}:`,
-                    vapiError
+                    `[VERTICAL] VAPI creation threw for ${agentDef.id}:`,
+                    thrown
                 );
                 deployedAgents.push({
                     type_id: agentDef.id,
@@ -229,19 +237,23 @@ export async function deployVerticalAgents(
                     agent_id: null,
                     vapi_id: null,
                     sequence_id: null,
-                    error: vapiError.message || "VAPI assistant creation failed",
+                    error: thrown?.message || "VAPI assistant creation failed",
                 });
                 continue;
             }
 
             if (!vapiAssistant) {
+                console.error(
+                    `[VERTICAL] VAPI rejected ${agentDef.id}:`,
+                    { status: vapiErr?.status, body: vapiErr?.body }
+                );
                 deployedAgents.push({
                     type_id: agentDef.id,
                     name: agentName,
                     agent_id: null,
                     vapi_id: null,
                     sequence_id: null,
-                    error: "VAPI assistant creation returned null",
+                    error: formatVapiError(vapiErr),
                 });
                 continue;
             }
@@ -385,6 +397,7 @@ function buildVerticalVapiPayload(
         };
         voicemailMessage?: string;
         endCallMessage?: string;
+        reStructuredOutputId?: string | null;
     }
 ): CreateAssistantPayload {
     // Build the payload with Samantha's exact settings as the base,
@@ -444,11 +457,23 @@ function buildVerticalVapiPayload(
             agentCategory: overrides.agentCategory,
             templateVersion: overrides.templateVersion,
         },
-        analysisPlan: {
-            structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
-            structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
-            minMessagesThreshold: 5,
-        },
+        // UMBRELLA: attach the global per-umbrella RE structured output via
+        // artifactPlan.structuredOutputIds. CUSTOM (or umbrella bootstrap not
+        // yet run): fall back to the inline analysisPlan so extraction still
+        // happens.
+        ...(overrides.reStructuredOutputId
+            ? {
+                  artifactPlan: {
+                      structuredOutputIds: [overrides.reStructuredOutputId],
+                  },
+              }
+            : {
+                  analysisPlan: {
+                      structuredDataSchema: RE_STRUCTURED_DATA_SCHEMA,
+                      structuredDataPrompt: RE_STRUCTURED_DATA_PROMPT,
+                      minMessagesThreshold: 5,
+                  },
+              }),
         ...(overrides.voicemailDetection
             ? { voicemailDetection: overrides.voicemailDetection }
             : {}),
