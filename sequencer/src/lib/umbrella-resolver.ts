@@ -36,7 +36,9 @@ export class UmbrellaResolver {
             };
         }
 
-        // Fetch from DB using RPC or join
+        // Fetch from DB using RPC or join. NOTE: the column on
+        // tenant_vapi_assignments is `client_id` — the parameter name
+        // `tenantId` here is just legacy nomenclature in the sequencer.
         const { data, error } = await supabase
             .from('tenant_vapi_assignments')
             .select(`
@@ -51,7 +53,7 @@ export class UmbrellaResolver {
                     concurrency_limit
                 )
             `)
-            .eq('tenant_id', tenantId)
+            .eq('client_id', tenantId)
             .eq('is_active', true)
             .single();
 
@@ -96,7 +98,7 @@ export class UmbrellaResolver {
     async getTenantsForUmbrella(umbrellaId: string): Promise<string[]> {
         const { data, error } = await supabase
             .from('tenant_vapi_assignments')
-            .select('tenant_id')
+            .select('client_id')
             .eq('umbrella_id', umbrellaId)
             .eq('is_active', true);
 
@@ -105,7 +107,7 @@ export class UmbrellaResolver {
             return [];
         }
 
-        return (data || []).map(d => d.tenant_id);
+        return (data || []).map(d => d.client_id);
     }
 }
 
