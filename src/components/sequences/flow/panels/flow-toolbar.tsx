@@ -13,7 +13,9 @@ import {
     Users,
     Activity,
     PanelRightOpen,
+    Zap,
 } from "lucide-react";
+import { TestNowDialog } from "./test-now-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -60,6 +62,7 @@ export function FlowToolbar({
     const router = useRouter();
     const [toggling, setToggling] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [testOpen, setTestOpen] = useState(false);
     const [mutationEnabled, setMutationEnabled] = useState(
         sequence?.enable_adaptive_mutation || false
     );
@@ -157,6 +160,25 @@ export function FlowToolbar({
                             </button>
                         </TooltipTrigger>
                         <TooltipContent>Toggle sequence active/inactive</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+
+                {/* Test now */}
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <motion.button
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                transition={{ type: "spring", stiffness: 600, damping: 38 }}
+                                onClick={() => setTestOpen(true)}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gradient-to-br from-amber-400 to-amber-500 text-white shadow-sm hover:shadow-md transition-shadow"
+                            >
+                                <Zap className="w-3.5 h-3.5" />
+                                Test now
+                            </motion.button>
+                        </TooltipTrigger>
+                        <TooltipContent>Fire a test call to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
 
@@ -275,6 +297,13 @@ export function FlowToolbar({
                     ))}
                 </div>
             </motion.div>
+
+            <TestNowDialog
+                open={testOpen}
+                onOpenChange={setTestOpen}
+                sequenceId={sequenceId}
+                clientId={clientId}
+            />
         </Panel>
     );
 }

@@ -1790,6 +1790,133 @@ export async function bulkEnrollFromCSV(
     }
 }
 
+// ─── Test enroll: fire ad-hoc phone numbers as test enrollments ──────────────
+// Used by the "Test now" button on the sequence canvas. Creates contacts on
+// the fly (or reuses existing), enrolls them with is_test=true and
+// next_step_at=NOW so the scheduler-worker fires them immediately, bypassing
+// pacing + business-hours + TCPA gates.
+
+interface TestEnrollInput {
+    phone: string;
+    name?: string;
+    customVariables?: Record<string, string>;
+}
+
+export async function enrollTestPhones(
+    sequenceId: string,
+    clientId: string,
+    inputs: TestEnrollInput[]
+): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { enrolled: number; errors: string[] };
+}> {
+    try {
+        if (!inputs || inputs.length === 0) {
+            return { success: false, error: "No phones provided" };
+        }
+
+        let enrolled = 0;
+        const errors: string[] = [];
+        const now = new Date().toISOString();
+
+        for (let i = 0; i < inputs.length; i++) {
+            const input = inputs[i];
+            const label = `#${i + 1}`;
+            try {
+                const phone = toE164(input.phone, "US");
+                if (!phone) {
+                    errors.push(`${label}: invalid phone "${input.phone}"`);
+                    continue;
+                }
+
+                let contactId: string;
+                const { data: existing } = await supabase
+                    .from("contacts")
+                    .select("id")
+                    .eq("client_id", clientId)
+                    .eq("phone", phone)
+                    .maybeSingle();
+
+                if (existing?.id) {
+                    contactId = existing.id;
+                } else {
+                    const { data: created, error: contactErr } = await supabase
+                        .from("contacts")
+                        .insert({
+                            client_id: clientId,
+                            phone,
+                            name: input.name || null,
+                            custom_fields: { is_test_contact: true },
+                            total_calls: 0,
+                        })
+                        .select("id")
+                        .single();
+                    if (contactErr || !created) {
+                        errors.push(
+                            `${label}: contact upsert failed — ${contactErr?.message || "unknown"}`
+                        );
+                        continue;
+                    }
+                    contactId = created.id;
+                }
+
+                const safeName = input.name?.trim() || "Test Contact";
+                const customVariables: Record<string, string> = {
+                    ...(input.customVariables || {}),
+                    name: safeName,
+                    phone,
+                };
+                if (input.name?.trim()) {
+                    const [first, ...rest] = input.name.trim().split(/\s+/);
+                    customVariables.first_name = first;
+                    if (rest.length) customVariables.last_name = rest.join(" ");
+                }
+
+                const { error: enrollErr } = await supabase
+                    .from("sequence_enrollments")
+                    .insert({
+                        sequence_id: sequenceId,
+                        contact_id: contactId,
+                        tenant_id: clientId,
+                        status: "active",
+                        current_step_order: 1,
+                        enrollment_source: "test_now",
+                        enrolled_at: now,
+                        next_step_at: now,
+                        is_test: true,
+                        sentiment_trend: "stable",
+                        last_emotion: null,
+                        recommended_tone: null,
+                        is_hot_lead: false,
+                        is_at_risk: false,
+                        engagement_score: 50,
+                        needs_human_intervention: false,
+                        custom_variables: customVariables,
+                        contact_replied: false,
+                        contact_answered_call: false,
+                        appointment_booked: false,
+                        channel_overrides: {},
+                    });
+
+                if (enrollErr) {
+                    errors.push(`${label}: enroll failed — ${enrollErr.message}`);
+                    continue;
+                }
+                enrolled++;
+            } catch (err: any) {
+                errors.push(`${label}: ${err?.message || "unknown error"}`);
+            }
+        }
+
+        revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
+        return { success: true, data: { enrolled, errors } };
+    } catch (error: any) {
+        console.error("enrollTestPhones error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}
+
 // ─── Create sequence from Goal-First Wizard ──────────────────────────────────
 
 const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string; trigger_type: string; urgency_tier: string }> = {
