@@ -215,6 +215,17 @@ export interface VoiceContent {
     // a full inline VAPI agent instead of using vapi_assistant_id
     prompt_section_overrides?: Record<string, string>;
     tool_overrides?: { add?: string[]; remove?: string[] };
+    // Runtime context surfaced as assistantOverrides.variableValues on the
+    // assistantId path. The baked-in prompt can reference these via
+    // {{task_context}} / {{conversation_history}} / {{tone_directive}}.
+    task_context?: string;
+    conversation_history?: string;
+    tone_directive?: string;
+    // Per-call opening line override → assistantOverrides.firstMessage.
+    first_message_override?: string;
+    // Force the inline path even when vapi_assistant_id is set — for cases
+    // where the caller has materially changed the system prompt.
+    system_prompt_overridden?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════

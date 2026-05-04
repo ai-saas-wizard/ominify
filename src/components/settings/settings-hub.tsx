@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, User, Users, ChevronRight, Webhook, Plug, Mail, Key } from "lucide-react";
+import { Shield, User, Users, ChevronRight, Webhook, Plug, Mail, Key, Phone } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { staggerContainer, staggerItem } from "@/lib/settings-animations";
@@ -56,6 +56,17 @@ const navLinks = [
         gradient: "from-blue-500 via-sky-500 to-blue-600",
         title: "Integrations",
         description: () => "Connect Google Calendar and other services",
+    },
+    {
+        key: "outbound-caller-id",
+        path: "settings/outbound-caller-id",
+        icon: Phone,
+        iconBg: "bg-emerald-100",
+        iconColor: "text-emerald-600",
+        gradient: "from-emerald-500 via-teal-500 to-emerald-600",
+        title: "Outbound Caller ID",
+        description: () =>
+            "Default phone number for outbound calls",
     },
     {
         key: "webhooks",

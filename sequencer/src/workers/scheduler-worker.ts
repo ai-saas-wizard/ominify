@@ -648,10 +648,39 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 voiceContent.override_variables = overrides;
             }
 
-            // Look up the agent's assigned phone number for outbound caller ID
+            // Resolve outbound caller ID. Priority order:
+            //   1. tenant_profiles.default_outbound_phone_id (operator's
+            //      explicit choice from /settings/outbound-caller-id)
+            //   2. Phone assigned to this specific agent (legacy per-agent
+            //      assignment, mostly used for inbound routing)
+            //   3. Any active phone for this tenant registered with VAPI
+            //      (last-resort fallback so test_now works before configuration)
+            // VAPI rejects /call/phone without phoneNumberId, so we MUST land
+            // on something here.
             let phoneNumberId: string | null = null;
             const stepWithAgent = step as SequenceStep & { voice_agent_id?: string };
-            if (stepWithAgent.voice_agent_id) {
+
+            const { data: tenantDefault } = await supabase
+                .from('tenant_profiles')
+                .select('default_outbound_phone_id')
+                .eq('client_id', enrollment.tenant_id)
+                .single();
+
+            if (tenantDefault?.default_outbound_phone_id) {
+                const { data: defaultPhone } = await supabase
+                    .from('tenant_phone_numbers')
+                    .select('vapi_phone_number_id, status')
+                    .eq('id', tenantDefault.default_outbound_phone_id)
+                    .single();
+                if (
+                    defaultPhone?.status === 'active' &&
+                    defaultPhone.vapi_phone_number_id
+                ) {
+                    phoneNumberId = defaultPhone.vapi_phone_number_id;
+                }
+            }
+
+            if (!phoneNumberId && stepWithAgent.voice_agent_id) {
                 const { data: phoneRow } = await supabase
                     .from('tenant_phone_numbers')
                     .select('vapi_phone_number_id')
@@ -661,7 +690,26 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 phoneNumberId = phoneRow?.vapi_phone_number_id || null;
             }
 
-            // ── Blueprint-based dispatch: load blueprint and assemble inline agent
+            if (!phoneNumberId) {
+                const { data: fallbackPhone } = await supabase
+                    .from('tenant_phone_numbers')
+                    .select('vapi_phone_number_id')
+                    .eq('client_id', enrollment.tenant_id)
+                    .eq('status', 'active')
+                    .not('vapi_phone_number_id', 'is', null)
+                    .limit(1)
+                    .maybeSingle();
+                if (fallbackPhone?.vapi_phone_number_id) {
+                    phoneNumberId = fallbackPhone.vapi_phone_number_id;
+                    console.log(`[SCHEDULER] No tenant-default or agent-level phone for ${stepWithAgent.voice_agent_id || '<no agent>'}, falling back to tenant phone ${phoneNumberId}`);
+                }
+            }
+
+            // ── Blueprint-based dispatch: load blueprint and assemble inline
+            // agent ONLY when the call genuinely diverges from the baked-in
+            // assistant. When there's a blueprint but nothing to override,
+            // we fall through to the assistantId path in the worker, which
+            // is cheaper and uses the assistant exactly as it was created.
             let inlineAgent: InlineVapiAgent | undefined;
 
             if (stepWithAgent.voice_agent_id) {
@@ -674,7 +722,6 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 const blueprint = agentRow?.agent_blueprint as AgentBlueprint | null;
 
                 if (blueprint && isValidBlueprint(blueprint)) {
-                    // Build runtime injections
                     const promptInjections: Record<string, string> = {};
                     if (conversationHistoryInjection) {
                         promptInjections.conversation_history = conversationHistoryInjection;
@@ -694,32 +741,80 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                         ...(voiceContent.prompt_section_overrides || {}),
                     };
 
-                    inlineAgent = assembleInlineAgent({
-                        blueprint,
-                        promptSectionOverrides: sectionOverrides,
-                        promptInjections,
-                        toolOverrides: voiceContent.tool_overrides,
-                        firstMessageOverride: voiceContent.first_message !== blueprint.first_message
-                            ? voiceContent.first_message
-                            : undefined,
-                        variableValues: voiceContent.override_variables,
-                    });
+                    const hasToolOverrides = !!(
+                        voiceContent.tool_overrides &&
+                        ((voiceContent.tool_overrides.add?.length || 0) > 0 ||
+                            (voiceContent.tool_overrides.remove?.length || 0) > 0)
+                    );
 
-                    console.log(`[SCHEDULER] Blueprint assembled for enrollment ${enrollment.id} (model: ${blueprint.model.model}, voice: ${blueprint.voice.voiceId})`);
+                    const hasFirstMessageOverride = !!(
+                        voiceContent.first_message &&
+                        voiceContent.first_message !== blueprint.first_message
+                    );
+
+                    // What counts as a "real override" — anything that
+                    // changes the assistant's structure beyond per-call vars:
+                    //   - sectionOverrides: explicit prompt-section changes
+                    //     OR sequence.task_context that needs to be sewn into
+                    //     business_context.
+                    //   - hasToolOverrides: tool list mutations.
+                    //   - hasFirstMessageOverride: a different opening line
+                    //     that the operator has explicitly set on this step
+                    //     (note: assistantOverrides.firstMessage handles this
+                    //     on the assistantId path too — see below).
+                    //
+                    // INTENTIONALLY excluded:
+                    //   - promptInjections (conversation_history, tone_directive):
+                    //     these are computed on every call from EI state and
+                    //     are non-empty by construction. Counting them would
+                    //     force inline always. They flow as variableValues on
+                    //     the assistantId path; if the baked-in prompt has
+                    //     {{conversation_history}} / {{tone_directive}}
+                    //     placeholders they get substituted, otherwise they're
+                    //     harmlessly unused.
+                    //   - override_variables: pure variableValues, supported
+                    //     by both paths.
+                    const hasRealOverrides =
+                        Object.keys(sectionOverrides).length > 0 ||
+                        hasToolOverrides ||
+                        hasFirstMessageOverride;
+
+                    if (hasRealOverrides) {
+                        inlineAgent = assembleInlineAgent({
+                            blueprint,
+                            promptSectionOverrides: sectionOverrides,
+                            promptInjections,
+                            toolOverrides: voiceContent.tool_overrides,
+                            firstMessageOverride: hasFirstMessageOverride
+                                ? voiceContent.first_message
+                                : undefined,
+                            variableValues: voiceContent.override_variables,
+                        });
+
+                        console.log(`[SCHEDULER] Blueprint assembled for enrollment ${enrollment.id} (model: ${blueprint.model.model}, voice: ${blueprint.voice.voiceId})`);
+                    } else {
+                        // No meaningful overrides — let the worker take the
+                        // assistantId path. Forward firstMessage override only
+                        // when the step explicitly requests one.
+                        if (hasFirstMessageOverride) {
+                            voiceContent.first_message_override = voiceContent.first_message;
+                        }
+                        console.log(`[SCHEDULER] Blueprint exists for enrollment ${enrollment.id} but no overrides — using assistantId path`);
+                    }
                 } else {
                     console.log(`[SCHEDULER] No valid blueprint for agent ${stepWithAgent.voice_agent_id}, falling back to legacy dispatch`);
                 }
             }
 
-            // Fallback: if no blueprint, inject context into system_prompt the legacy way
+            // When NOT using an inline agent, surface task_context /
+            // conversation_history / tone_directive as VoiceContent fields so
+            // the worker attaches them as assistantOverrides.variableValues.
+            // The baked-in prompt can pick them up via {{task_context}} etc;
+            // if it doesn't, they're harmlessly unused.
             if (!inlineAgent) {
-                if (sequence.task_context) {
-                    voiceContent.system_prompt = `${voiceContent.system_prompt}\n\nCampaign context:\n${sequence.task_context}`;
-                }
-                if (conversationHistoryInjection) {
-                    voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${conversationHistoryInjection}`;
-                }
-                voiceContent.system_prompt = `${voiceContent.system_prompt}\n\n${toneDirective}`;
+                if (sequence.task_context) voiceContent.task_context = sequence.task_context;
+                if (conversationHistoryInjection) voiceContent.conversation_history = conversationHistoryInjection;
+                if (toneDirective) voiceContent.tone_directive = toneDirective;
             }
 
             await vapiQueue.add('vapi:call', {

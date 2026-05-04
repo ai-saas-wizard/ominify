@@ -57,12 +57,97 @@ async function logExecution(params: {
 }
 
 /**
+ * Build the inline `assistant` object for /call/phone.
+ *
+ * Used in two cases:
+ *   1. inlineAgent present — blueprint with real per-call overrides
+ *   2. No vapi_assistant_id AND no inlineAgent — hardcoded fallback
+ *
+ * For case 1 we keep the payload minimal: serverMessages / clientMessages /
+ * voicemailDetection are only set when the blueprint explicitly customizes
+ * the server URL or detection — otherwise the assistant's stored config
+ * already covers them and repeating here is dead weight.
+ */
+function buildInlineAssistant(
+    inlineAgent: InlineVapiAgent | undefined,
+    assistantConfig: VoiceContent
+): Record<string, any> {
+    if (inlineAgent) {
+        const assistant: Record<string, any> = {
+            firstMessage: inlineAgent.firstMessage,
+            model: {
+                provider: inlineAgent.model.provider,
+                model: inlineAgent.model.model,
+                systemPrompt: inlineAgent.model.systemPrompt,
+                temperature: inlineAgent.model.temperature,
+                tools: inlineAgent.tools,
+            },
+            voice: {
+                provider: inlineAgent.voice.provider,
+                voiceId: inlineAgent.voice.voiceId,
+            },
+            ...(inlineAgent.transcriber
+                ? {
+                      transcriber: {
+                          provider: inlineAgent.transcriber.provider,
+                          model: inlineAgent.transcriber.model,
+                          language: inlineAgent.transcriber.language,
+                      },
+                  }
+                : {}),
+            ...(inlineAgent.maxDurationSeconds
+                ? { maxDurationSeconds: inlineAgent.maxDurationSeconds }
+                : {}),
+            ...(inlineAgent.backgroundSound
+                ? { backgroundSound: inlineAgent.backgroundSound }
+                : {}),
+            ...(inlineAgent.endCallMessage
+                ? { endCallMessage: inlineAgent.endCallMessage }
+                : {}),
+            ...(inlineAgent.voicemailMessage
+                ? { voicemailMessage: inlineAgent.voicemailMessage }
+                : {}),
+            ...(inlineAgent.voicemailDetection
+                ? { voicemailDetection: inlineAgent.voicemailDetection }
+                : {}),
+        };
+
+        if (inlineAgent.serverUrl) {
+            assistant.server = { url: inlineAgent.serverUrl };
+            assistant.serverMessages = ["status-update", "end-of-call-report"];
+            assistant.clientMessages = [];
+        }
+
+        return assistant;
+    }
+
+    // Hardcoded fallback when neither inlineAgent nor vapi_assistant_id exist.
+    return {
+        firstMessage: assistantConfig.first_message,
+        model: {
+            provider: 'openai',
+            model: 'gpt-4',
+            systemPrompt: assistantConfig.system_prompt,
+        },
+        voice: {
+            provider: 'playht',
+            voiceId: 'jennifer',
+        },
+        serverMessages: ["status-update", "end-of-call-report"],
+        clientMessages: [],
+    };
+}
+
+/**
  * Make a VAPI call
  *
- * Dispatch priority:
- * 1. inlineAgent (from blueprint) — tenant's real voice/model + dynamic prompt
- * 2. Legacy assistantId path — fixed VAPI agent (only override_variables survive)
- * 3. Legacy inline fallback — hardcoded voice/model (old behavior)
+ * Default path: reference the baked-in assistant by ID and send per-call
+ * variation as assistantOverrides (variableValues, optional firstMessage).
+ *
+ * Inline path is taken only when:
+ *   - the scheduler assembled an inlineAgent (blueprint had real overrides)
+ *   - or there's no vapi_assistant_id (hardcoded fallback)
+ *   - or assistantConfig.system_prompt_overridden is set
  */
 async function makeVapiCall(
     vapiApiKey: string,
@@ -82,20 +167,6 @@ async function makeVapiCall(
     } catch (err) {
         console.warn('[VAPI] Failed to resolve call-time variables, continuing without:', err);
     }
-
-    const requestBody: any = {
-        phoneNumberId: outboundPhoneNumberId || null,
-        customer: {
-            number: phoneNumber,
-        },
-        serverUrl: `${WEBHOOK_BASE_URL}/webhooks/vapi/call-events`,
-        serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET || 'ominify-secret',
-        metadata: {
-            tenantId,
-            umbrellaId,
-            enrollmentId,
-        },
-    };
 
     // Resolve contact-level variables for this enrollment. The outbound RE
     // agent (and any other tenant-shaped agent) reads {{contact_data}} as a
@@ -129,7 +200,6 @@ async function makeVapiCall(
                     (contact.custom_fields as Record<string, any>) || {};
                 const fieldKeys = Object.keys(customFields);
 
-                // Build a key → {name, description, type} map from definitions
                 const defByKey = new Map<
                     string,
                     { name: string; description: string | null; type: string }
@@ -142,9 +212,6 @@ async function makeVapiCall(
                     });
                 }
 
-                // Legend lines: prefer "- key (Display Name, type): description"
-                // when a definition exists; fall back to bare key for keys
-                // that haven't been described yet.
                 const legendLines = fieldKeys.map((k) => {
                     const def = defByKey.get(k);
                     if (!def) return `- ${k}`;
@@ -171,119 +238,77 @@ async function makeVapiCall(
         console.warn('[VAPI] Failed to resolve contact variables, continuing without:', err);
     }
 
-    // Build base assistantOverrides.variableValues — merged into whichever
-    // dispatch path we take below.
+    // Single source of truth for assistantOverrides.variableValues, merged
+    // from every layer we have. Later spreads win on key collision.
     const baseVariableValues: Record<string, any> = {
         ...(callVars
             ? { currentDate: callVars.currentDate, tenantTimezone: callVars.tenantTimezone }
             : {}),
         ...contactVariables,
+        ...(assistantConfig.task_context
+            ? { task_context: assistantConfig.task_context }
+            : {}),
+        ...(assistantConfig.conversation_history
+            ? { conversation_history: assistantConfig.conversation_history }
+            : {}),
+        ...(assistantConfig.tone_directive
+            ? { tone_directive: assistantConfig.tone_directive }
+            : {}),
+        ...(assistantConfig.override_variables ?? {}),
+        ...(inlineAgent?.variableValues ?? {}),
     };
 
-    // Always attach assistantOverrides.variableValues when we have any —
-    // VAPI applies these to both `assistant` inline configs and `assistantId`
-    // references, and ignores them otherwise.
+    // NOTE: VAPI's /call/phone endpoint doesn't accept serverUrl /
+    // serverUrlSecret at the top level — those belong on the assistant's
+    // own config (`assistant.server.url`), set at agent-creation time.
+    // Also: VAPI requires `phoneNumberId` OR top-level `phoneNumber`. Sending
+    // `phoneNumberId: null` is rejected as missing — only attach the field
+    // when we actually have a value.
+    const requestBody: any = {
+        customer: {
+            number: phoneNumber,
+        },
+        metadata: {
+            tenantId,
+            umbrellaId,
+            enrollmentId,
+        },
+        ...(outboundPhoneNumberId ? { phoneNumberId: outboundPhoneNumberId } : {}),
+    };
+
+    const assistantOverrides: Record<string, any> = {};
     if (Object.keys(baseVariableValues).length > 0) {
-        requestBody.assistantOverrides = {
-            ...(requestBody.assistantOverrides || {}),
-            variableValues: {
-                ...(requestBody.assistantOverrides?.variableValues || {}),
-                ...baseVariableValues,
-            },
-        };
+        assistantOverrides.variableValues = baseVariableValues;
+    }
+    if (assistantConfig.first_message_override) {
+        assistantOverrides.firstMessage = assistantConfig.first_message_override;
     }
 
-    if (inlineAgent) {
-        // ── PATH 1: Blueprint inline agent (preferred)
-        // Merge per-contact variables (from enrollment.custom_variables) into
-        // assistantOverrides.variableValues so VAPI substitutes {{var}} at call time.
-        if (inlineAgent.variableValues && Object.keys(inlineAgent.variableValues).length > 0) {
-            requestBody.assistantOverrides = {
-                ...(requestBody.assistantOverrides || {}),
-                variableValues: {
-                    ...(requestBody.assistantOverrides?.variableValues || {}),
-                    ...inlineAgent.variableValues,
-                },
-            };
-        }
+    const useInline = Boolean(
+        inlineAgent ||
+        !assistantConfig.vapi_assistant_id ||
+        assistantConfig.system_prompt_overridden
+    );
 
-        // Uses tenant's real voice, model, and dynamic prompt from the blueprint
-        requestBody.assistant = {
-            firstMessage: inlineAgent.firstMessage,
-            model: {
-                provider: inlineAgent.model.provider,
-                model: inlineAgent.model.model,
-                systemPrompt: inlineAgent.model.systemPrompt,
-                temperature: inlineAgent.model.temperature,
-                tools: inlineAgent.tools,
-            },
-            voice: {
-                provider: inlineAgent.voice.provider,
-                voiceId: inlineAgent.voice.voiceId,
-            },
-            ...(inlineAgent.transcriber ? {
-                transcriber: {
-                    provider: inlineAgent.transcriber.provider,
-                    model: inlineAgent.transcriber.model,
-                    language: inlineAgent.transcriber.language,
-                },
-            } : {}),
-            maxDurationSeconds: inlineAgent.maxDurationSeconds,
-            backgroundSound: inlineAgent.backgroundSound,
-            endCallMessage: inlineAgent.endCallMessage,
-            voicemailMessage: inlineAgent.voicemailMessage,
-            ...(inlineAgent.voicemailDetection ? {
-                voicemailDetection: inlineAgent.voicemailDetection,
-            } : {}),
-            serverMessages: ["status-update", "end-of-call-report"],
-            clientMessages: [],
-        };
-
-        // Override server URL if blueprint specifies one
-        if (inlineAgent.serverUrl) {
-            requestBody.assistant.server = { url: inlineAgent.serverUrl };
-        }
-
-        console.log(`[VAPI] Using blueprint inline agent (model: ${inlineAgent.model.model}, voice: ${inlineAgent.voice.voiceId})`);
-
-    } else if (assistantConfig.vapi_assistant_id) {
-        // ── PATH 2: Legacy assistantId (dynamic prompt is lost — only overrides survive)
-        requestBody.assistantId = assistantConfig.vapi_assistant_id;
-
-        const overrides = assistantConfig.override_variables;
-        if (overrides && Object.keys(overrides).length > 0) {
-            // Merge user-provided overrides on top of any already-set call-time
-            // variables (currentDate, tenantTimezone) so both survive.
-            requestBody.assistantOverrides = {
-                ...(requestBody.assistantOverrides || {}),
-                variableValues: {
-                    ...(requestBody.assistantOverrides?.variableValues || {}),
-                    ...overrides,
-                },
-            };
-        }
-
-        console.log(`[VAPI] Using legacy assistantId: ${assistantConfig.vapi_assistant_id}`);
-
+    if (useInline) {
+        requestBody.assistant = buildInlineAssistant(inlineAgent, assistantConfig);
     } else {
-        // ── PATH 3: Legacy inline fallback (hardcoded voice/model)
-        requestBody.assistant = {
-            firstMessage: assistantConfig.first_message,
-            model: {
-                provider: 'openai',
-                model: 'gpt-4',
-                systemPrompt: assistantConfig.system_prompt,
-            },
-            voice: {
-                provider: 'playht',
-                voiceId: 'jennifer',
-            },
-            serverMessages: ["status-update", "end-of-call-report"],
-            clientMessages: [],
-        };
-
-        console.log('[VAPI] Using legacy inline fallback (hardcoded voice/model)');
+        requestBody.assistantId = assistantConfig.vapi_assistant_id;
     }
+
+    if (Object.keys(assistantOverrides).length > 0) {
+        requestBody.assistantOverrides = assistantOverrides;
+    }
+
+    // Greppable single-line dispatch summary so future "did the worker use
+    // assistantId or inline" questions are answerable from logs in 1 second.
+    console.log(
+        `[VAPI] Dispatch: ${
+            requestBody.assistantId ? `assistantId=${requestBody.assistantId}` : 'inline'
+        }, vars=${Object.keys(assistantOverrides.variableValues || {}).length}, firstMsg=${
+            assistantOverrides.firstMessage ? 'override' : 'baked'
+        }`
+    );
 
     const response = await fetch('https://api.vapi.ai/call/phone', {
         method: 'POST',
