@@ -57,71 +57,66 @@ async function logExecution(params: {
 }
 
 /**
- * Build the inline `assistant` object for /call/phone.
+ * Build the per-call overrides object that layers on top of the baked-in
+ * assistant. When the scheduler assembled an inlineAgent (blueprint with
+ * real per-call customizations), we flatten its fields into assistantOverrides
+ * so VAPI keeps the assistant's artifactPlan / analysisPlan / endCallPhrases /
+ * messagePlan / etc. while still applying the operator's per-call changes.
  *
- * Used in two cases:
- *   1. inlineAgent present — blueprint with real per-call overrides
- *   2. No vapi_assistant_id AND no inlineAgent — hardcoded fallback
- *
- * For case 1 we keep the payload minimal: serverMessages / clientMessages /
- * voicemailDetection are only set when the blueprint explicitly customizes
- * the server URL or detection — otherwise the assistant's stored config
- * already covers them and repeating here is dead weight.
+ * Why not send a transient `assistant`? Transient REPLACES the baked-in,
+ * dropping its artifactPlan.structuredOutputIds → no structured-data
+ * extraction. Overrides PRESERVE everything we don't explicitly change.
  */
-function buildInlineAssistant(
-    inlineAgent: InlineVapiAgent | undefined,
+function buildAssistantOverridesFromInline(
+    inlineAgent: InlineVapiAgent
+): Record<string, any> {
+    const overrides: Record<string, any> = {
+        firstMessage: inlineAgent.firstMessage,
+        model: {
+            provider: inlineAgent.model.provider,
+            model: inlineAgent.model.model,
+            systemPrompt: inlineAgent.model.systemPrompt,
+            temperature: inlineAgent.model.temperature,
+            tools: inlineAgent.tools,
+        },
+        voice: {
+            provider: inlineAgent.voice.provider,
+            voiceId: inlineAgent.voice.voiceId,
+        },
+    };
+    if (inlineAgent.transcriber) {
+        overrides.transcriber = {
+            provider: inlineAgent.transcriber.provider,
+            model: inlineAgent.transcriber.model,
+            language: inlineAgent.transcriber.language,
+        };
+    }
+    if (inlineAgent.maxDurationSeconds) {
+        overrides.maxDurationSeconds = inlineAgent.maxDurationSeconds;
+    }
+    if (inlineAgent.backgroundSound) {
+        overrides.backgroundSound = inlineAgent.backgroundSound;
+    }
+    if (inlineAgent.endCallMessage) {
+        overrides.endCallMessage = inlineAgent.endCallMessage;
+    }
+    if (inlineAgent.voicemailMessage) {
+        overrides.voicemailMessage = inlineAgent.voicemailMessage;
+    }
+    if (inlineAgent.voicemailDetection) {
+        overrides.voicemailDetection = inlineAgent.voicemailDetection;
+    }
+    return overrides;
+}
+
+/**
+ * Hardcoded transient assistant — last-resort fallback when the tenant's
+ * voice agent has never been bootstrapped (no vapi_assistant_id stored).
+ * Rare in production; new tenants get a real agent during onboarding.
+ */
+function buildLegacyTransientAssistant(
     assistantConfig: VoiceContent
 ): Record<string, any> {
-    if (inlineAgent) {
-        const assistant: Record<string, any> = {
-            firstMessage: inlineAgent.firstMessage,
-            model: {
-                provider: inlineAgent.model.provider,
-                model: inlineAgent.model.model,
-                systemPrompt: inlineAgent.model.systemPrompt,
-                temperature: inlineAgent.model.temperature,
-                tools: inlineAgent.tools,
-            },
-            voice: {
-                provider: inlineAgent.voice.provider,
-                voiceId: inlineAgent.voice.voiceId,
-            },
-            ...(inlineAgent.transcriber
-                ? {
-                      transcriber: {
-                          provider: inlineAgent.transcriber.provider,
-                          model: inlineAgent.transcriber.model,
-                          language: inlineAgent.transcriber.language,
-                      },
-                  }
-                : {}),
-            ...(inlineAgent.maxDurationSeconds
-                ? { maxDurationSeconds: inlineAgent.maxDurationSeconds }
-                : {}),
-            ...(inlineAgent.backgroundSound
-                ? { backgroundSound: inlineAgent.backgroundSound }
-                : {}),
-            ...(inlineAgent.endCallMessage
-                ? { endCallMessage: inlineAgent.endCallMessage }
-                : {}),
-            ...(inlineAgent.voicemailMessage
-                ? { voicemailMessage: inlineAgent.voicemailMessage }
-                : {}),
-            ...(inlineAgent.voicemailDetection
-                ? { voicemailDetection: inlineAgent.voicemailDetection }
-                : {}),
-        };
-
-        if (inlineAgent.serverUrl) {
-            assistant.server = { url: inlineAgent.serverUrl };
-            assistant.serverMessages = ["status-update", "end-of-call-report"];
-            assistant.clientMessages = [];
-        }
-
-        return assistant;
-    }
-
-    // Hardcoded fallback when neither inlineAgent nor vapi_assistant_id exist.
     return {
         firstMessage: assistantConfig.first_message,
         model: {
@@ -280,34 +275,45 @@ async function makeVapiCall(
     if (Object.keys(baseVariableValues).length > 0) {
         assistantOverrides.variableValues = baseVariableValues;
     }
-    if (assistantConfig.first_message_override) {
-        assistantOverrides.firstMessage = assistantConfig.first_message_override;
-    }
 
-    const useInline = Boolean(
-        inlineAgent ||
-        !assistantConfig.vapi_assistant_id ||
-        assistantConfig.system_prompt_overridden
-    );
-
-    if (useInline) {
-        requestBody.assistant = buildInlineAssistant(inlineAgent, assistantConfig);
-    } else {
+    // Dispatch decision:
+    //   - vapi_assistant_id present (the common case): reference baked-in
+    //     assistant by ID and layer per-call customizations via
+    //     assistantOverrides. This preserves artifactPlan.structuredOutputIds,
+    //     analysisPlan, endCallPhrases, messagePlan, etc.
+    //   - inlineAgent present: blueprint produced per-call overrides
+    //     (firstMessage, systemPrompt, voice, tools, etc.) — flatten into
+    //     assistantOverrides instead of replacing the assistant.
+    //   - vapi_assistant_id missing: rare unbootstrapped tenant — fall back
+    //     to a hardcoded transient assistant (the legacy last-resort path).
+    if (assistantConfig.vapi_assistant_id) {
         requestBody.assistantId = assistantConfig.vapi_assistant_id;
+        if (inlineAgent) {
+            Object.assign(
+                assistantOverrides,
+                buildAssistantOverridesFromInline(inlineAgent)
+            );
+        }
+    } else {
+        requestBody.assistant = buildLegacyTransientAssistant(assistantConfig);
     }
 
     if (Object.keys(assistantOverrides).length > 0) {
         requestBody.assistantOverrides = assistantOverrides;
     }
 
-    // Greppable single-line dispatch summary so future "did the worker use
-    // assistantId or inline" questions are answerable from logs in 1 second.
+    // Greppable dispatch summary. Override keys (excluding variableValues)
+    // tell us at-a-glance which fields were customized for this call.
+    const overrideKeys = Object.keys(assistantOverrides).filter(
+        (k) => k !== 'variableValues'
+    );
+    const dispatchTarget = requestBody.assistantId
+        ? `assistantId=${requestBody.assistantId}`
+        : 'transient';
     console.log(
-        `[VAPI] Dispatch: ${
-            requestBody.assistantId ? `assistantId=${requestBody.assistantId}` : 'inline'
-        }, vars=${Object.keys(assistantOverrides.variableValues || {}).length}, firstMsg=${
-            assistantOverrides.firstMessage ? 'override' : 'baked'
-        }`
+        `[VAPI] Dispatch: ${dispatchTarget}, vars=${
+            Object.keys(assistantOverrides.variableValues || {}).length
+        }, overrides=[${overrideKeys.join(',')}]`
     );
 
     const response = await fetch('https://api.vapi.ai/call/phone', {

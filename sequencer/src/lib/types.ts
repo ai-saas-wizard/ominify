@@ -211,8 +211,8 @@ export interface VoiceContent {
     system_prompt: string;
     transfer_number?: string;
     override_variables?: Record<string, string>;
-    // Blueprint-based dispatch: when present, the sequencer uses these to build
-    // a full inline VAPI agent instead of using vapi_assistant_id
+    // Blueprint-based dispatch: when set, the scheduler assembles an
+    // InlineVapiAgent that the worker flattens into assistantOverrides.
     prompt_section_overrides?: Record<string, string>;
     tool_overrides?: { add?: string[]; remove?: string[] };
     // Runtime context surfaced as assistantOverrides.variableValues on the
@@ -221,11 +221,6 @@ export interface VoiceContent {
     task_context?: string;
     conversation_history?: string;
     tone_directive?: string;
-    // Per-call opening line override → assistantOverrides.firstMessage.
-    first_message_override?: string;
-    // Force the inline path even when vapi_assistant_id is set — for cases
-    // where the caller has materially changed the system prompt.
-    system_prompt_overridden?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════

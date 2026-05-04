@@ -794,11 +794,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                         console.log(`[SCHEDULER] Blueprint assembled for enrollment ${enrollment.id} (model: ${blueprint.model.model}, voice: ${blueprint.voice.voiceId})`);
                     } else {
                         // No meaningful overrides — let the worker take the
-                        // assistantId path. Forward firstMessage override only
-                        // when the step explicitly requests one.
-                        if (hasFirstMessageOverride) {
-                            voiceContent.first_message_override = voiceContent.first_message;
-                        }
+                        // assistantId path with no override layering.
                         console.log(`[SCHEDULER] Blueprint exists for enrollment ${enrollment.id} but no overrides — using assistantId path`);
                     }
                 } else {
