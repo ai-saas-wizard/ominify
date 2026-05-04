@@ -13,7 +13,7 @@ export default function WalkthroughPage() {
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full max-w-6xl rounded-lg shadow-2xl"
+                className="w-full max-w-6xl aspect-video rounded-lg shadow-2xl bg-black"
             />
         </main>
     );
