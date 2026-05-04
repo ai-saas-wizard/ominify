@@ -207,7 +207,12 @@ function renderTemplate(
     content: SmsContent | EmailContent | VoiceContent,
     variables: Record<string, any>
 ): SmsContent | EmailContent | VoiceContent {
-    const render = (text: string): string => {
+    // Tolerate undefined/null/non-string template fields. Dynamically-
+    // generated steps occasionally come back missing one of the channel's
+    // text fields; previously this crashed with "Cannot read properties of
+    // undefined (reading 'replace')" and put the scheduler in a hot loop.
+    const render = (text: unknown): string => {
+        if (typeof text !== 'string') return '';
         return text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
             return variables[key] ?? match;
         });
