@@ -138,6 +138,10 @@ export interface CreateAssistantResult {
     error?: { status: number; body: string };
 }
 
+// VAPI rejects assistant names > 40 chars. Clip server-side as a final guard
+// so a long companyName + suffix doesn't take down the wizard.
+const MAX_ASSISTANT_NAME_LEN = 40;
+
 export async function createAssistant(
     payload: CreateAssistantPayload,
     apiKey?: string
@@ -150,6 +154,11 @@ export async function createAssistant(
         };
     }
 
+    const safePayload =
+        payload.name && payload.name.length > MAX_ASSISTANT_NAME_LEN
+            ? { ...payload, name: payload.name.slice(0, MAX_ASSISTANT_NAME_LEN) }
+            : payload;
+
     try {
         const res = await fetch(`${VAPI_BASE_URL}/assistant`, {
             method: 'POST',
@@ -157,7 +166,7 @@ export async function createAssistant(
                 Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(safePayload),
         });
 
         if (!res.ok) {

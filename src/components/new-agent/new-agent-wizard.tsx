@@ -122,7 +122,7 @@ export function NewAgentWizard({
         const found = RE_OUTBOUND_GOALS.find(
             (g) => g.value === outboundFormData.outboundGoal
         );
-        return found?.label ?? "Outbound";
+        return found?.shortLabel ?? "Outbound";
     }, [outboundFormData.outboundGoal]);
 
     const handleSelectVertical = (verticalId: string) => {
@@ -217,7 +217,7 @@ export function NewAgentWizard({
                         deploy({
                             kind: "vertical_re",
                             formData,
-                            agentName: `${formData.companyName} - Inbound Receptionist`,
+                            agentName: `${formData.companyName} - Inbound`,
                         })
                     }
                 />

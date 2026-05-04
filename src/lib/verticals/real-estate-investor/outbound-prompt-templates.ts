@@ -10,29 +10,34 @@ export interface REOutboundStarter {
 export const RE_OUTBOUND_GOALS: {
     value: REOutboundGoal;
     label: string;
+    shortLabel: string;
     description: string;
 }[] = [
     {
         value: "re_engage_prior_offer",
         label: "Re-engage sellers with prior offers",
+        shortLabel: "Re-engage",
         description:
             "Outbound follow-up to sellers who received an offer but didn't move forward. Pitches the prior offer if known and handles objections.",
     },
     {
         value: "cold_outreach_motivated_seller",
         label: "Cold outreach to motivated sellers",
+        shortLabel: "Cold Outreach",
         description:
             "First-touch outbound to motivated-seller leads. Qualifies the property and tries to set an appointment with a buying specialist.",
     },
     {
         value: "missed_appointment_followup",
         label: "Follow up on missed appointments",
+        shortLabel: "Missed Appt",
         description:
             "Outbound follow-up to sellers who no-showed or cancelled a previously scheduled appointment. Goal is to reschedule.",
     },
     {
         value: "custom",
         label: "Custom (start blank)",
+        shortLabel: "Custom",
         description:
             "Start with a minimal scaffold and write your own system prompt.",
     },
