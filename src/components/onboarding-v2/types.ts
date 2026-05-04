@@ -139,6 +139,7 @@ export interface DeployedAgent {
     vapi_id: string | null;
     sequence_id: string | null;
     error: string | null;
+    failedAt?: "prompt" | "vapi" | "db" | null;
 }
 
 // ─── COMPONENT PROPS ───

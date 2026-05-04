@@ -144,6 +144,7 @@ export async function deployVerticalAgents(
                         vapi_id: null,
                         sequence_id: null,
                         error: "Outbound prompt or first message is empty",
+                        failedAt: "prompt",
                     });
                     continue;
                 }
@@ -238,6 +239,7 @@ export async function deployVerticalAgents(
                     vapi_id: null,
                     sequence_id: null,
                     error: thrown?.message || "VAPI assistant creation failed",
+                    failedAt: "vapi",
                 });
                 continue;
             }
@@ -254,6 +256,7 @@ export async function deployVerticalAgents(
                     vapi_id: null,
                     sequence_id: null,
                     error: formatVapiError(vapiErr),
+                    failedAt: "vapi",
                 });
                 continue;
             }
@@ -311,7 +314,8 @@ export async function deployVerticalAgents(
                 agent_id: agentRecord?.id || null,
                 vapi_id: vapiAssistant.id,
                 sequence_id: null,
-                error: null,
+                error: agentError ? `DB save failed: ${agentError.message}` : null,
+                failedAt: agentError ? "db" : null,
             });
         }
 

@@ -204,20 +204,49 @@ export function OnboardingV2Wizard({
                 });
                 setTimeout(() => setPhase("success"), 1500);
             } else {
+                const stepsFromResult = result.agents.map((a) => {
+                    const promptOk = a.failedAt !== "prompt";
+                    const vapiOk = !a.failedAt || a.failedAt === "db";
+                    const dbOk = !a.error;
+                    return {
+                        id: a.type_id,
+                        agentTypeId: a.type_id,
+                        label: a.name + (a.error ? ` — ${a.error}` : ""),
+                        status: (a.error ? "failed" : "completed") as "completed" | "failed",
+                        substeps: [
+                            {
+                                label: "Building system prompt from template",
+                                status: (promptOk ? "completed" : "failed") as "completed" | "failed",
+                            },
+                            {
+                                label: "Creating voice agent",
+                                status: (vapiOk ? "completed" : "failed") as "completed" | "failed",
+                            },
+                            {
+                                label: "Saving to database",
+                                status: (dbOk ? "completed" : "failed") as "completed" | "failed",
+                            },
+                        ],
+                    };
+                });
+
                 setVerticalDeployProgress((prev) => {
                     if (!prev) return prev;
                     return {
                         ...prev,
                         error: result.error || "Deployment failed",
-                        steps: prev.steps.map((step) => ({
-                            ...step,
-                            status: "failed" as const,
-                            substeps: step.substeps.map((s) =>
-                                s.status === "in_progress" || s.status === "pending"
-                                    ? { ...s, status: "failed" as const }
-                                    : s
-                            ),
-                        })),
+                        steps:
+                            stepsFromResult.length > 0
+                                ? stepsFromResult
+                                : prev.steps.map((step) => ({
+                                      ...step,
+                                      status: "failed" as const,
+                                      substeps: step.substeps.map((s) =>
+                                          s.status === "in_progress" || s.status === "pending"
+                                              ? { ...s, status: "failed" as const }
+                                              : s
+                                      ),
+                                  })),
                     };
                 });
             }
