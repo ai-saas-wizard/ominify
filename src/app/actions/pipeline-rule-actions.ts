@@ -192,7 +192,7 @@ export async function evaluateStageRules(
                     sequence_id: rule.sequence_id,
                     contact_id: contactId,
                     status: "active",
-                    current_step_order: 1,
+                    current_step_order: 0,
                     next_step_at: new Date().toISOString(),
                     enrollment_source: contactData.enrollment_source || "auto_trigger",
                 });

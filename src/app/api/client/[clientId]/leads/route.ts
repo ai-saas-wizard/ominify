@@ -175,7 +175,7 @@ export async function POST(
                 sequence_id: enroll_in_sequence,
                 contact_id: contactId,
                 status: "active",
-                current_step_order: 1,
+                current_step_order: 0,
                 next_step_at: new Date().toISOString(),
                 enrollment_source: source || "api",
             });
