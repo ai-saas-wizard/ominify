@@ -358,8 +358,14 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
-    // 2. Check business hours (for voice + SMS)
+    // Test enrollments bypass business-hours + TCPA so the operator can
+    // dial themselves on demand without waiting for a window. Live
+    // enrollments still respect the gates below.
+    const isTestEnrollment = enrollment.is_test === true;
+
+    // 2. Check business hours (for voice + SMS) — skipped for test enrollments
     if (
+        !isTestEnrollment &&
         sequence.respect_business_hours &&
         step.channel !== 'email' &&
         !isWithinBusinessHours(timezone, tenantProfile.business_hours)
@@ -370,12 +376,20 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
-    // 3. TCPA check (no calls/texts before 8am or after 9pm)
-    if (['sms', 'voice'].includes(step.channel) && !isTCPACompliant(timezone)) {
+    // 3. TCPA check (no calls/texts before 8am or after 9pm) — skipped for test enrollments
+    if (
+        !isTestEnrollment &&
+        ['sms', 'voice'].includes(step.channel) &&
+        !isTCPACompliant(timezone)
+    ) {
         const nextWindow = getNextTCPAWindow(timezone);
         console.log(`[SCHEDULER] Outside TCPA window, rescheduling to ${nextWindow.toISOString()}`);
         await rescheduleStep(enrollment.id, nextWindow);
         return;
+    }
+
+    if (isTestEnrollment) {
+        console.log(`[SCHEDULER] Test enrollment ${enrollment.id} — bypassing business-hours & TCPA gates.`);
     }
 
     // 4. Load conversation context for cross-channel awareness

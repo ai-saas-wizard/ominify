@@ -144,7 +144,7 @@ export function OnboardingV2Wizard({
                     status: "in_progress",
                     substeps: [
                         { label: "Building system prompt from template", status: "in_progress" },
-                        { label: "Creating VAPI assistant", status: "pending" },
+                        { label: "Creating voice agent", status: "pending" },
                         { label: "Saving to database", status: "pending" },
                     ],
                 },
@@ -155,7 +155,7 @@ export function OnboardingV2Wizard({
                     status: "pending",
                     substeps: [
                         { label: "Building system prompt from template", status: "pending" },
-                        { label: "Creating VAPI assistant", status: "pending" },
+                        { label: "Creating voice agent", status: "pending" },
                         { label: "Saving to database", status: "pending" },
                     ],
                 },
@@ -179,7 +179,7 @@ export function OnboardingV2Wizard({
                     substeps: [
                         { label: "Building system prompt from template", status: "completed" as const },
                         {
-                            label: "Creating VAPI assistant",
+                            label: "Creating voice agent",
                             status: (a.error ? "failed" : "completed") as
                                 | "completed"
                                 | "failed",

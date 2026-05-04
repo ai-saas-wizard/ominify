@@ -1564,8 +1564,10 @@ export async function bulkEnrollFromCSV(
     sequenceId: string,
     clientId: string,
     rows: Record<string, string>[],
-    columnMapping: Record<string, ColumnRole>
+    columnMapping: Record<string, ColumnRole>,
+    options?: { isTest?: boolean }
 ) {
+    const isTest = options?.isTest === true;
     try {
         if (!rows || rows.length === 0) {
             return { success: false, error: "No rows to process" };
@@ -1723,11 +1725,14 @@ export async function bulkEnrollFromCSV(
                         }
                     }
 
-                    // Stagger next_step_at across the batch when pacing is set;
-                    // otherwise fire immediately.
-                    const nextStepAt = pacingIntervalMs
-                        ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
-                        : new Date().toISOString();
+                    // Test enrollments fire immediately and ignore pacing.
+                    // Live enrollments stagger across the batch when pacing is
+                    // set; otherwise fire immediately.
+                    const nextStepAt = isTest
+                        ? new Date().toISOString()
+                        : pacingIntervalMs
+                          ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
+                          : new Date().toISOString();
 
                     // Enroll the contact
                     const { error: enrollErr } = await supabase
@@ -1741,6 +1746,7 @@ export async function bulkEnrollFromCSV(
                             enrollment_source: "csv_upload",
                             enrolled_at: new Date().toISOString(),
                             next_step_at: nextStepAt,
+                            is_test: isTest,
                             sentiment_trend: "stable",
                             last_emotion: null,
                             recommended_tone: null,

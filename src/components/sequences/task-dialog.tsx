@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import * as Papa from "papaparse";
 import {
     Loader2,
@@ -15,6 +15,8 @@ import {
     Mail,
     Phone,
     Columns,
+    UserCircle2,
+    Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,10 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { createTaskFromDescription } from "@/app/actions/ai-generate-sequence-actions";
+import {
+    createTaskFromDescription,
+    listOutboundAgentsForClient,
+} from "@/app/actions/ai-generate-sequence-actions";
 import { bulkEnrollFromCSV } from "@/app/actions/sequence-actions";
 import { CSVColumnMapper } from "@/components/sequences/csv-column-mapper";
 
@@ -76,12 +81,21 @@ export function TaskDialog({
     const [loadingAction, setLoadingAction] = useState<"launch" | "test" | null>(null);
     const [error, setError] = useState("");
 
-    // Two-phase flow: "brief" (user writes task + uploads CSV) → "mapping"
-    // (user maps columns). We show the mapper before calling the server so we
-    // don't create a task then fail mid-enroll.
-    const [phase, setPhase] = useState<"brief" | "mapping">("brief");
+    // Voice agent picker — fetched once when the dialog opens. Empty list
+    // means the client hasn't deployed an outbound agent yet (we surface the
+    // existing NO_OUTBOUND_AGENT error so the user gets a configure CTA).
+    const [agents, setAgents] = useState<
+        { id: string; name: string; vapi_id: string }[]
+    >([]);
+    const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+    const [agentsLoading, setAgentsLoading] = useState(false);
+
+    // Three-phase flow: "brief" (user writes task + uploads CSV) → "mapping"
+    // (user maps columns) → "summary" (post-enroll counts + actions).
+    const [phase, setPhase] = useState<"brief" | "mapping" | "summary">("brief");
     const [pendingMode, setPendingMode] = useState<"launch" | "test" | null>(null);
     const [enrollmentErrors, setEnrollmentErrors] = useState<string[]>([]);
+    const [enrolledCount, setEnrolledCount] = useState(0);
     // Set after a successful bulk enroll so "Retry failed rows" can hit the
     // same sequence with a filtered subset of rows.
     const [lastEnrolledSequenceId, setLastEnrolledSequenceId] = useState<
@@ -91,6 +105,24 @@ export function TaskDialog({
         null
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (!open || !channelReadiness.voice.ready) return;
+        let cancelled = false;
+        setAgentsLoading(true);
+        listOutboundAgentsForClient(clientId)
+            .then((list) => {
+                if (cancelled) return;
+                setAgents(list);
+                setSelectedAgentId((prev) => prev || list[0]?.id || "");
+            })
+            .finally(() => {
+                if (!cancelled) setAgentsLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, clientId, channelReadiness.voice.ready]);
 
     // ── CSV Parsing (simple header extraction) ──────────────────────────────
 
@@ -183,9 +215,31 @@ export function TaskDialog({
         setPhase("brief");
         setPendingMode(null);
         setEnrollmentErrors([]);
+        setEnrolledCount(0);
         setLastEnrolledSequenceId(null);
         setLastMapping(null);
+        setSelectedAgentId("");
     }, []);
+
+    const handleSummaryAction = useCallback(
+        (action: "open" | "close") => {
+            if (!lastEnrolledSequenceId) return;
+            if (action === "open") {
+                if (pendingMode === "test") onTestMode(lastEnrolledSequenceId);
+                else onLaunch(lastEnrolledSequenceId);
+            }
+            onOpenChange(false);
+            setTimeout(resetAll, 200);
+        },
+        [
+            lastEnrolledSequenceId,
+            pendingMode,
+            onTestMode,
+            onLaunch,
+            onOpenChange,
+            resetAll,
+        ]
+    );
 
     const finishTaskCreation = useCallback(
         async (mode: "launch" | "test", mapping?: Record<string, string>) => {
@@ -200,7 +254,8 @@ export function TaskDialog({
                     csvColumns.length > 0 ? csvColumns : undefined,
                     channelReadiness,
                     taskContext.trim() || undefined,
-                    pacingPerMinute.trim() ? Math.max(1, parseInt(pacingPerMinute.trim(), 10)) : undefined
+                    pacingPerMinute.trim() ? Math.max(1, parseInt(pacingPerMinute.trim(), 10)) : undefined,
+                    selectedAgentId || undefined
                 );
 
                 if (!result.success || !result.sequenceId) {
@@ -212,12 +267,14 @@ export function TaskDialog({
                 const sequenceId = result.sequenceId;
 
                 // If CSV + mapping provided, enroll contacts.
+                let totalEnrolled = 0;
                 if (mapping && csvParsedData.length > 0) {
                     const enrollResult = await bulkEnrollFromCSV(
                         sequenceId,
                         clientId,
                         csvParsedData,
-                        mapping as any
+                        mapping as any,
+                        { isTest: mode === "test" }
                     );
 
                     if (!enrollResult.success) {
@@ -227,6 +284,8 @@ export function TaskDialog({
                     }
 
                     const { enrolled, errors: enrollErrors } = enrollResult.data!;
+                    totalEnrolled = enrolled;
+                    setEnrolledCount(enrolled);
                     setEnrollmentErrors(enrollErrors || []);
                     setLastEnrolledSequenceId(sequenceId);
                     setLastMapping(mapping);
@@ -244,15 +303,9 @@ export function TaskDialog({
                     }
                 }
 
-                // Fire callback
-                if (mode === "test") {
-                    onTestMode(sequenceId);
-                } else {
-                    onLaunch(sequenceId);
-                }
-
-                onOpenChange(false);
-                resetAll();
+                setLastEnrolledSequenceId(sequenceId);
+                setEnrolledCount(totalEnrolled);
+                setPhase("summary");
             } catch (err) {
                 setError(err instanceof Error ? err.message : "An unexpected error occurred.");
             } finally {
@@ -267,10 +320,7 @@ export function TaskDialog({
             csvParsedData,
             clientId,
             channelReadiness,
-            onLaunch,
-            onTestMode,
-            onOpenChange,
-            resetAll,
+            selectedAgentId,
         ]
     );
 
@@ -435,7 +485,11 @@ export function TaskDialog({
                                     <Rocket className="w-4 h-4 text-emerald-600" />
                                 </div>
                                 <h2 className="text-lg font-semibold text-gray-900">
-                                    {phase === "mapping" ? "Map CSV Columns" : "New Task"}
+                                    {phase === "mapping"
+                                        ? "Map CSV Columns"
+                                        : phase === "summary"
+                                          ? "Task Created"
+                                          : "New Task"}
                                 </h2>
                             </div>
                             <button
@@ -447,7 +501,76 @@ export function TaskDialog({
                             </button>
                         </div>
 
-                        {phase === "mapping" ? (
+                        {phase === "summary" ? (
+                            <div className="p-6 space-y-5">
+                                <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-100 rounded-lg">
+                                    <div className="p-1.5 bg-emerald-100 rounded-md flex-shrink-0">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-sm font-semibold text-emerald-900">
+                                            {enrolledCount} contact{enrolledCount === 1 ? "" : "s"} enrolled
+                                        </p>
+                                        <p className="text-xs text-emerald-700 mt-0.5">
+                                            {pendingMode === "test"
+                                                ? "Test mode active — first call dispatches in ~30 seconds, ignoring pacing and quiet-hours."
+                                                : pacingPerMinute.trim()
+                                                  ? `Calls staggered at ${pacingPerMinute} per minute, respecting business hours.`
+                                                  : "First call dispatches now, respecting business hours."}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                    <div className="rounded-lg border border-gray-200 px-3 py-3">
+                                        <p className="text-xs text-gray-500 uppercase tracking-wide">Queued</p>
+                                        <p className="text-lg font-semibold text-gray-900 mt-0.5">{enrolledCount}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 px-3 py-3">
+                                        <p className="text-xs text-gray-500 uppercase tracking-wide">Skipped</p>
+                                        <p className="text-lg font-semibold text-gray-900 mt-0.5">{enrollmentErrors.length}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 px-3 py-3">
+                                        <p className="text-xs text-gray-500 uppercase tracking-wide">Mode</p>
+                                        <p className="text-lg font-semibold text-gray-900 mt-0.5">
+                                            {pendingMode === "test" ? "Test" : "Live"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {enrollmentErrors.length > 0 && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+                                        <div className="font-medium mb-1">
+                                            {enrollmentErrors.length} row{enrollmentErrors.length === 1 ? "" : "s"} skipped:
+                                        </div>
+                                        <ul className="space-y-0.5 max-h-32 overflow-y-auto">
+                                            {enrollmentErrors.slice(0, 10).map((err, idx) => (
+                                                <li key={idx}>• {err}</li>
+                                            ))}
+                                            {enrollmentErrors.length > 10 && (
+                                                <li className="italic">…and {enrollmentErrors.length - 10} more</li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-3 pt-1">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => handleSummaryAction("close")}
+                                        className="flex-1"
+                                    >
+                                        Done
+                                    </Button>
+                                    <Button
+                                        onClick={() => handleSummaryAction("open")}
+                                        className="flex-1"
+                                    >
+                                        Open task
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : phase === "mapping" ? (
                             <div className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
                                 <p className="text-sm text-gray-500 mb-4">
                                     Tell us which column is the phone number. Everything else becomes a conversation variable the agent can reference like{" "}
@@ -679,6 +802,48 @@ export function TaskDialog({
                                 )}
                             </div>
 
+                            {/* Voice agent picker — shown when voice is ready and agents exist */}
+                            {channelReadiness.voice.ready && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                        <UserCircle2 className="w-3.5 h-3.5 text-gray-400" />
+                                        Voice agent
+                                    </label>
+                                    {agentsLoading ? (
+                                        <div className="text-xs text-gray-400 flex items-center gap-1.5">
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Loading agents…
+                                        </div>
+                                    ) : agents.length === 0 ? (
+                                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+                                            No outbound agents deployed yet.{" "}
+                                            <a
+                                                href={`/client/${clientId}/agents/new`}
+                                                className="underline font-medium"
+                                            >
+                                                Create one →
+                                            </a>
+                                        </p>
+                                    ) : (
+                                        <select
+                                            value={selectedAgentId}
+                                            onChange={(e) => setSelectedAgentId(e.target.value)}
+                                            disabled={loadingAction !== null}
+                                            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50 bg-white"
+                                        >
+                                            {agents.map((a) => (
+                                                <option key={a.id} value={a.id}>
+                                                    {a.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    <p className="text-xs text-gray-400">
+                                        Picks which voice agent dials enrolled contacts on this task.
+                                    </p>
+                                </div>
+                            )}
+
                             {/* Channel Status */}
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-gray-700">
@@ -768,32 +933,38 @@ export function TaskDialog({
                         )}
 
                         {/* ── Footer Buttons ─────────────────────────────── */}
-                        <div className="flex items-center gap-3 px-6 py-4 border-t border-gray-100 flex-shrink-0">
-                            <Button
-                                variant="outline"
-                                onClick={() => handleSubmit("test")}
-                                disabled={!canSubmit}
-                                className="flex-1"
-                            >
-                                {loadingAction === "test" ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <FlaskConical className="w-4 h-4" />
-                                )}
-                                Test on Myself
-                            </Button>
-                            <Button
-                                onClick={() => handleSubmit("launch")}
-                                disabled={!canSubmit}
-                                className="flex-1"
-                            >
-                                {loadingAction === "launch" ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Rocket className="w-4 h-4" />
-                                )}
-                                Launch Task
-                            </Button>
+                        <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
+                            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
+                                <Zap className="w-3 h-3 text-amber-500" />
+                                <span><strong>Test now</strong> bypasses pacing &amp; quiet-hours so you can dial yourself instantly.</span>
+                            </p>
+                            <div className="flex items-center gap-3">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => handleSubmit("test")}
+                                    disabled={!canSubmit}
+                                    className="flex-1"
+                                >
+                                    {loadingAction === "test" ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <FlaskConical className="w-4 h-4" />
+                                    )}
+                                    Test now
+                                </Button>
+                                <Button
+                                    onClick={() => handleSubmit("launch")}
+                                    disabled={!canSubmit}
+                                    className="flex-1"
+                                >
+                                    {loadingAction === "launch" ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <Rocket className="w-4 h-4" />
+                                    )}
+                                    Launch Task
+                                </Button>
+                            </div>
                         </div>
                         </>
                         )}

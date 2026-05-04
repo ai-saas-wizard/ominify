@@ -325,11 +325,23 @@ Output the corrected JSON object with the same structure: {"name": "...", "descr
     return extractJSON(raw);
 }
 
-// ─── VAPI Agent Lookup ───────────────────────────────────────────────────────
-// Look up the client's outbound VAPI agent so voice steps can reference it
+// ─── Voice Agent Lookup ──────────────────────────────────────────────────────
+// Look up the client's outbound voice agent(s) so voice steps can reference one
 // instead of generating redundant system prompts.
 
-async function getOutboundVapiId(clientId: string): Promise<string | null> {
+async function getOutboundVapiId(
+    clientId: string,
+    overrideAgentId?: string | null
+): Promise<string | null> {
+    if (overrideAgentId) {
+        const { data } = await supabase
+            .from("agents")
+            .select("vapi_id")
+            .eq("id", overrideAgentId)
+            .eq("client_id", clientId)
+            .single();
+        if (data?.vapi_id) return data.vapi_id;
+    }
     const { data } = await supabase
         .from("agents")
         .select("vapi_id")
@@ -338,6 +350,18 @@ async function getOutboundVapiId(clientId: string): Promise<string | null> {
         .limit(1)
         .single();
     return data?.vapi_id || null;
+}
+
+export async function listOutboundAgentsForClient(
+    clientId: string
+): Promise<{ id: string; name: string; vapi_id: string }[]> {
+    const { data } = await supabase
+        .from("agents")
+        .select("id, name, vapi_id")
+        .eq("client_id", clientId)
+        .eq("agent_type", "outbound")
+        .order("created_at", { ascending: false });
+    return (data || []).filter((a) => a.vapi_id);
 }
 
 // Inject vapi_assistant_id into voice step content when an outbound agent exists.
@@ -1176,7 +1200,8 @@ export async function createTaskFromDescription(
     csvColumns?: string[],
     availableChannels?: { sms: { ready: boolean }; email: { ready: boolean }; voice: { ready: boolean } },
     taskContext?: string,
-    pacingPerMinute?: number
+    pacingPerMinute?: number,
+    agentId?: string
 ): Promise<{ success: boolean; sequenceId?: string; error?: string }> {
     try {
         // ── Fetch tenant profile for business context
@@ -1330,11 +1355,11 @@ Output ONLY the JSON object.`;
             }
         }
 
-        // ── Inject VAPI assistant ID for voice steps
+        // ── Inject voice agent ID for voice steps
         // Gate: voice steps require an outbound agent; bail out with a clear
         // error the UI can surface with a "Configure Outbound Agent" CTA.
         if (validation.steps![0].channel === "voice") {
-            const vapiId = await getOutboundVapiId(clientId);
+            const vapiId = await getOutboundVapiId(clientId, agentId);
             if (!vapiId) {
                 return {
                     success: false,

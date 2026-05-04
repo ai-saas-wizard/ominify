@@ -79,7 +79,7 @@ export function VoiceContentEditor({
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          VAPI Assistant ID{" "}
+          Voice Agent ID{" "}
           <span className="text-gray-400 font-normal">(optional)</span>
         </label>
         <input
