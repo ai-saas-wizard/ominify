@@ -31,8 +31,9 @@ import {
     createTaskFromDescription,
     listOutboundAgentsForClient,
 } from "@/app/actions/ai-generate-sequence-actions";
-import { bulkEnrollFromCSV } from "@/app/actions/sequence-actions";
+import { bulkEnrollFromCSV, enrollListInSequence } from "@/app/actions/sequence-actions";
 import { CSVColumnMapper } from "@/components/sequences/csv-column-mapper";
+import { TaskSourcePicker } from "@/components/sequences/task-source-picker";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,12 @@ export function TaskDialog({
     const [csvRowCount, setCsvRowCount] = useState(0);
     const [csvSampleData, setCsvSampleData] = useState<Record<string, string>[]>([]);
     const [csvParsedData, setCsvParsedData] = useState<Record<string, string>[]>([]);
+    // Saved-list source: when set, we skip the mapping phase entirely and call
+    // enrollListInSequence (which replays the list's saved column_mapping
+    // against each member's source_row). Mutually exclusive with csvFile.
+    const [selectedListId, setSelectedListId] = useState<string | null>(null);
+    const [selectedListName, setSelectedListName] = useState<string>("");
+    const [selectedListCount, setSelectedListCount] = useState<number>(0);
     const [loadingAction, setLoadingAction] = useState<"launch" | "test" | null>(null);
     const [error, setError] = useState("");
 
@@ -131,6 +138,11 @@ export function TaskDialog({
             setError("Please upload a CSV file.");
             return;
         }
+
+        // Picking a CSV clears any previously-selected saved list.
+        setSelectedListId(null);
+        setSelectedListName("");
+        setSelectedListCount(0);
 
         setCsvFile(file);
         setError("");
@@ -200,6 +212,42 @@ export function TaskDialog({
         }
     }, []);
 
+    const handleListSelected = useCallback(
+        (payload: {
+            listId: string;
+            listName: string;
+            contactCount: number;
+            sourceFilename: string | null;
+            rows: Record<string, string>[];
+            columns: string[];
+            mapping: Record<string, string>;
+        }) => {
+            // Selecting a list clears any uploaded CSV. We don't populate
+            // csvParsedData — the list path uses enrollListInSequence which
+            // pulls members directly server-side.
+            setCsvFile(null);
+            setCsvColumns([]);
+            setCsvRowCount(0);
+            setCsvSampleData([]);
+            setCsvParsedData([]);
+            setSelectedListId(payload.listId);
+            setSelectedListName(payload.listName);
+            setSelectedListCount(payload.contactCount);
+            // Surface the list's saved columns to the prompt-variable chip row
+            // so the user can reference {{column_name}} in their instruction.
+            setCsvColumns(payload.columns);
+            setError("");
+        },
+        [],
+    );
+
+    const handleListCleared = useCallback(() => {
+        setSelectedListId(null);
+        setSelectedListName("");
+        setSelectedListCount(0);
+        setCsvColumns([]);
+    }, []);
+
     // ── Submit Handlers ─────────────────────────────────────────────────────
 
     const resetAll = useCallback(() => {
@@ -211,6 +259,9 @@ export function TaskDialog({
         setCsvRowCount(0);
         setCsvSampleData([]);
         setCsvParsedData([]);
+        setSelectedListId(null);
+        setSelectedListName("");
+        setSelectedListCount(0);
         setError("");
         setPhase("brief");
         setPendingMode(null);
@@ -301,6 +352,31 @@ export function TaskDialog({
                         setLoadingAction(null);
                         return;
                     }
+                } else if (selectedListId) {
+                    // Saved-list path: skip the mapping phase entirely and let
+                    // the server replay the list's stored column_mapping.
+                    const enrollResult = await enrollListInSequence(
+                        sequenceId,
+                        selectedListId,
+                        { isTest: mode === "test" },
+                    );
+                    if (!enrollResult.success) {
+                        setError(enrollResult.error || "Failed to enroll list.");
+                        setLoadingAction(null);
+                        return;
+                    }
+                    const { enrolled, errors: enrollErrors } = enrollResult.data!;
+                    totalEnrolled = enrolled;
+                    setEnrolledCount(enrolled);
+                    setEnrollmentErrors(enrollErrors || []);
+                    setLastEnrolledSequenceId(sequenceId);
+                    if (enrollErrors && enrollErrors.length > 0 && enrolled === 0) {
+                        setError(
+                            `No contacts enrolled. ${enrollErrors.length} row(s) failed.`,
+                        );
+                        setLoadingAction(null);
+                        return;
+                    }
                 }
 
                 setLastEnrolledSequenceId(sequenceId);
@@ -318,6 +394,7 @@ export function TaskDialog({
             pacingPerMinute,
             csvColumns,
             csvParsedData,
+            selectedListId,
             clientId,
             channelReadiness,
             selectedAgentId,
@@ -331,8 +408,8 @@ export function TaskDialog({
                 return;
             }
 
-            // If CSV uploaded, show mapping step first.
-            if (csvFile && csvColumns.length > 0) {
+            // CSV path: show mapping step first. List path: enroll directly.
+            if (csvFile && csvColumns.length > 0 && !selectedListId) {
                 setPendingMode(mode);
                 setPhase("mapping");
                 setError("");
@@ -345,7 +422,7 @@ export function TaskDialog({
                 setError(err instanceof Error ? err.message : "An unexpected error occurred.");
             }
         },
-        [instruction, csvFile, csvColumns, finishTaskCreation]
+        [instruction, csvFile, csvColumns, selectedListId, finishTaskCreation]
     );
 
     const handleClose = useCallback(() => {
@@ -717,90 +794,93 @@ export function TaskDialog({
                                 </p>
                             </div>
 
-                            {/* CSV Upload Area */}
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-                                    <FileSpreadsheet className="w-3.5 h-3.5 text-gray-400" />
-                                    CSV Contact List
-                                    <span className="text-xs text-gray-400 font-normal">(optional)</span>
-                                </label>
-
-                                {!csvFile ? (
-                                    <div
-                                        onDrop={handleDrop}
-                                        onDragOver={handleDragOver}
-                                        onClick={() => fileInputRef.current?.click()}
-                                        className="border-2 border-dashed border-gray-200 hover:border-emerald-300 rounded-lg p-6 text-center cursor-pointer transition-colors group"
-                                    >
-                                        <Upload className="w-6 h-6 text-gray-300 group-hover:text-emerald-400 mx-auto mb-2 transition-colors" />
-                                        <p className="text-sm text-gray-500">
-                                            Drop a CSV file here or{" "}
-                                            <span className="text-emerald-600 font-medium">browse</span>
-                                        </p>
-                                        <p className="text-xs text-gray-400 mt-1">
-                                            Column headers will be available as template variables
-                                        </p>
-                                        <input
-                                            ref={fileInputRef}
-                                            type="file"
-                                            accept=".csv"
-                                            onChange={handleFileInputChange}
-                                            className="hidden"
-                                        />
-                                    </div>
-                                ) : (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 4 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className="border border-gray-200 rounded-lg p-4 space-y-3"
-                                    >
-                                        {/* File info row */}
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2.5">
-                                                <div className="p-1.5 bg-emerald-50 rounded-md">
-                                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">
-                                                        {csvFile.name}
-                                                    </p>
-                                                    <p className="text-xs text-gray-500">
-                                                        {csvRowCount} row{csvRowCount !== 1 ? "s" : ""} &middot;{" "}
-                                                        {csvColumns.length} column{csvColumns.length !== 1 ? "s" : ""}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={removeFile}
-                                                disabled={loadingAction !== null}
-                                                className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
+                            {/* Contact source — Upload CSV | Select List */}
+                            <TaskSourcePicker
+                                clientId={clientId}
+                                selectedListId={selectedListId}
+                                onListSelected={handleListSelected}
+                                onListCleared={handleListCleared}
+                                uploadSlot={
+                                    !csvFile ? (
+                                        <div
+                                            onDrop={handleDrop}
+                                            onDragOver={handleDragOver}
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="border-2 border-dashed border-gray-200 hover:border-indigo-300 rounded-lg p-6 text-center cursor-pointer transition-colors group"
+                                        >
+                                            <Upload className="w-6 h-6 text-gray-300 group-hover:text-indigo-400 mx-auto mb-2 transition-colors" />
+                                            <p className="text-sm text-gray-500">
+                                                Drop a CSV file here or{" "}
+                                                <span className="text-indigo-600 font-medium">browse</span>
+                                            </p>
+                                            <p className="text-xs text-gray-400 mt-1">
+                                                Column headers will be available as template variables
+                                            </p>
+                                            <input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept=".csv"
+                                                onChange={handleFileInputChange}
+                                                className="hidden"
+                                            />
                                         </div>
-
-                                        {/* Detected columns */}
-                                        {csvColumns.length > 0 && (
-                                            <div className="space-y-1.5">
-                                                <p className="text-xs font-medium text-gray-500 flex items-center gap-1">
-                                                    <Columns className="w-3 h-3" />
-                                                    Detected Columns
-                                                </p>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {csvColumns.map((col) => (
-                                                        <span
-                                                            key={col}
-                                                            className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 text-xs font-mono text-emerald-700"
-                                                        >
-                                                            {`{{${col}}}`}
-                                                        </span>
-                                                    ))}
+                                    ) : (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 4 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className="border border-gray-200 rounded-lg p-4 space-y-3"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="p-1.5 bg-indigo-50 rounded-md">
+                                                        <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">
+                                                            {csvFile.name}
+                                                        </p>
+                                                        <p className="text-xs text-gray-500">
+                                                            {csvRowCount} row{csvRowCount !== 1 ? "s" : ""} &middot;{" "}
+                                                            {csvColumns.length} column{csvColumns.length !== 1 ? "s" : ""}
+                                                        </p>
+                                                    </div>
                                                 </div>
+                                                <button
+                                                    onClick={removeFile}
+                                                    disabled={loadingAction !== null}
+                                                    className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
                                             </div>
-                                        )}
-                                    </motion.div>
-                                )}
-                            </div>
+                                            {csvColumns.length > 0 && (
+                                                <div className="space-y-1.5">
+                                                    <p className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                                                        <Columns className="w-3 h-3" />
+                                                        Detected Columns
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {csvColumns.map((col) => (
+                                                            <span
+                                                                key={col}
+                                                                className="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-xs font-mono text-indigo-700"
+                                                            >
+                                                                {`{{${col}}}`}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </motion.div>
+                                    )
+                                }
+                            />
+                            {selectedListId && selectedListCount > 0 && (
+                                <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                                    <Zap className="w-3 h-3 text-indigo-500" />
+                                    {selectedListCount.toLocaleString()} contact{selectedListCount !== 1 ? "s" : ""} from <strong>{selectedListName}</strong> will be enrolled when you continue.
+                                </p>
+                            )}
 
                             {/* Voice agent picker — shown when voice is ready and agents exist */}
                             {channelReadiness.voice.ready && (

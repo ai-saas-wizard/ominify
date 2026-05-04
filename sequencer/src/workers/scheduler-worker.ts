@@ -86,12 +86,20 @@ const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
 const TEST_MODE_DELAY_SECONDS = 30; // Compressed delay for test enrollments
 
+interface ContactFieldDef {
+    field_key: string;
+    name: string | null;
+    description: string | null;
+    field_type: string | null;
+}
+
 interface EnrollmentWithContext {
     enrollment: SequenceEnrollment;
     step: SequenceStep;
     sequence: Sequence;
     contact: Contact;
     tenantProfile: TenantProfile;
+    contactFieldDefs: ContactFieldDef[];
 }
 
 /**
@@ -292,6 +300,32 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
         }
     }
 
+    // Batch-load custom contact_fields per client. The descriptions feed
+    // {{contact_field_legend}} so AI step generation + SMS/email templates
+    // know what each custom_variable means.
+    const fieldDefsByClientId = new Map<string, ContactFieldDef[]>();
+    if (clientIds.length > 0) {
+        const { data: fieldDefs, error: fieldErr } = await supabase
+            .from('contact_fields')
+            .select('client_id, field_key, name, description, field_type')
+            .in('client_id', clientIds);
+        if (fieldErr) {
+            console.error('[SCHEDULER] Error fetching contact_fields:', fieldErr);
+        } else if (fieldDefs) {
+            for (const f of fieldDefs as any[]) {
+                if (!f.client_id) continue;
+                const arr = fieldDefsByClientId.get(f.client_id) || [];
+                arr.push({
+                    field_key: f.field_key,
+                    name: f.name || null,
+                    description: f.description || null,
+                    field_type: f.field_type || null,
+                });
+                fieldDefsByClientId.set(f.client_id, arr);
+            }
+        }
+    }
+
     // Fetch the next step for each enrollment
     const results: EnrollmentWithContext[] = [];
 
@@ -332,6 +366,7 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
             sequence: enrollment.sequences,
             contact: enrollment.contacts,
             tenantProfile,
+            contactFieldDefs: fieldDefsByClientId.get(enrollment.tenant_id as string) || [],
         });
     }
 
@@ -342,7 +377,7 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
  * Process a single enrollment step
  */
 async function processStep(ctx: EnrollmentWithContext): Promise<void> {
-    const { enrollment, step, sequence, contact, tenantProfile } = ctx;
+    const { enrollment, step, sequence, contact, tenantProfile, contactFieldDefs } = ctx;
     const timezone = tenantProfile.timezone || 'America/New_York';
 
     console.log(`[SCHEDULER] Processing enrollment ${enrollment.id}, step ${step.step_order} (${step.channel})`);
@@ -451,6 +486,30 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         engagementScore: enrollmentEI.engagement_score || 50,
     });
 
+    // Build a glossary of custom field descriptions for any custom_variable
+    // referenced by this enrollment. Surfaced to AI step-generation prompts and
+    // any SMS/email template that interpolates {{contact_field_legend}}.
+    const customFieldKeys = new Set<string>([
+        ...Object.keys(contact.custom_fields || {}),
+        ...Object.keys(enrollment.custom_variables || {}),
+    ]);
+    const defByKey = new Map(contactFieldDefs.map((d) => [d.field_key, d]));
+    const legendLines: string[] = [];
+    for (const key of customFieldKeys) {
+        const def = defByKey.get(key);
+        if (!def) continue;
+        const head = def.name && def.name !== key ? `${key} (${def.name})` : key;
+        legendLines.push(def.description ? `- ${head}: ${def.description}` : `- ${head}`);
+    }
+    const contactFieldLegend = legendLines.length > 0
+        ? legendLines.join('\n')
+        : '(no documented custom fields)';
+
+    const contactDataMerged: Record<string, any> = {
+        ...(contact.custom_fields || {}),
+        ...(enrollment.custom_variables || {}),
+    };
+
     const variables = {
         // Contact core fields
         first_name: contact.first_name || contact.name?.split(' ')[0] || '',
@@ -479,6 +538,9 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         ...conversationVars,
         // Emotional intelligence / tone variables
         ...toneVars,
+        // Custom field semantic glossary (description text from contact_fields).
+        contact_field_legend: contactFieldLegend,
+        contact_data: JSON.stringify(contactDataMerged),
     };
 
     // 5b. A/B Variant Selection — check if step has active variants

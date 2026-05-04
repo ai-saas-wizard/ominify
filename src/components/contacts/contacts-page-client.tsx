@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Users, Plus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { ContactsTable } from "./contacts-table";
 import { AddContactModal } from "./add-contact-modal";
+import { ContactsShell } from "./contacts-shell";
 
 interface Contact {
     id: string;
@@ -30,7 +30,7 @@ export function ContactsPageClient({
     clientId,
     initialContacts,
     total,
-    customFields
+    customFields,
 }: {
     clientId: string;
     initialContacts: Contact[];
@@ -42,51 +42,51 @@ export function ContactsPageClient({
 
     const handleContactAdded = () => {
         setShowAddModal(false);
-        // Refresh contacts
         fetch(`/api/client/${clientId}/contacts`)
-            .then(res => res.json())
-            .then(data => setContacts(data.contacts))
+            .then((res) => res.json())
+            .then((data) => setContacts(data.contacts))
             .catch(console.error);
     };
 
     return (
-        <div className="p-4 lg:p-8 space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Users className="w-6 h-6 text-emerald-600" />
-                        Contacts
-                    </h1>
-                    <p className="text-gray-500 text-sm mt-1">
-                        {contacts.length} contact{contacts.length !== 1 ? 's' : ''} from inbound calls
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
+        <ContactsShell
+            title="Contacts"
+            subtitle={
+                <span>
+                    {total.toLocaleString()} contact{total !== 1 ? "s" : ""}
+                </span>
+            }
+            actions={
+                <>
                     <Link
                         href={`/client/${clientId}/settings/contact-fields`}
-                        className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
                     >
                         Custom Fields
                     </Link>
+                    <Link
+                        href={`/client/${clientId}/contacts/import`}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+                    >
+                        <Upload className="w-4 h-4" />
+                        Import
+                    </Link>
                     <button
                         onClick={() => setShowAddModal(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                     >
                         <Plus className="w-4 h-4" />
                         Add Contact
                     </button>
-                </div>
-            </div>
-
-            {/* Contacts Table */}
+                </>
+            }
+        >
             <ContactsTable
                 clientId={clientId}
                 initialContacts={contacts}
                 customFields={customFields}
             />
 
-            {/* Add Contact Modal */}
             {showAddModal && (
                 <AddContactModal
                     clientId={clientId}
@@ -95,6 +95,6 @@ export function ContactsPageClient({
                     onSuccess={handleContactAdded}
                 />
             )}
-        </div>
+        </ContactsShell>
     );
 }

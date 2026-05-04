@@ -5,6 +5,12 @@ import { revalidatePath } from "next/cache";
 import { currentUser } from "@clerk/nextjs/server";
 import { autoAdvanceContactStage } from "@/app/actions/pipeline-actions";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
+import {
+    upsertContactsFromRows,
+    syntheticRowFromContact,
+    type ColumnRole as ImportColumnRole,
+    type UpsertedRow,
+} from "@/app/actions/_helpers/contact-import";
 
 // Normalize any phone input to E.164 (+12223334444). Defaults to US.
 // Returns null for unparseable or invalid numbers.
@@ -1558,272 +1564,261 @@ export async function createTestEnrollment(
 // CSV Bulk Enrollment
 // ═══════════════════════════════════════════════════════════════════
 
-type ColumnRole = "phone" | "email" | "first_name" | "last_name" | "company" | "custom_variable" | "skip";
+type ColumnRole = ImportColumnRole;
+
+// Internal: enroll a list of already-upserted contacts into a sequence. Shared
+// by bulkEnrollFromCSV (CSV path) and enrollListInSequence (saved-list path).
+// Pacing is loaded once from the sequence; next_step_at is staggered across the
+// batch when pacing is set. sourceListId, when provided, stamps lineage on each
+// enrollment row so we can audit which list a sequence run came from.
+async function enrollUpsertedRows(
+    sequenceId: string,
+    clientId: string,
+    upserted: UpsertedRow[],
+    options: { isTest?: boolean; sourceListId?: string | null; enrollmentSource?: string },
+): Promise<{ enrolled: number; errors: string[] }> {
+    const isTest = options.isTest === true;
+    const sourceListId = options.sourceListId ?? null;
+    const enrollmentSource = options.enrollmentSource ?? "csv_upload";
+
+    if (upserted.length === 0) return { enrolled: 0, errors: [] };
+
+    const { data: sequenceRow } = await supabase
+        .from("sequences")
+        .select("pacing_per_minute")
+        .eq("id", sequenceId)
+        .single();
+    const pacingPerMinute = sequenceRow?.pacing_per_minute as number | null | undefined;
+    const pacingIntervalMs =
+        pacingPerMinute && pacingPerMinute > 0 ? Math.floor(60_000 / pacingPerMinute) : 0;
+    const baseTime = Date.now();
+
+    const ENGAGED = new Set(["replied", "booked", "converted", "manual_stop", "unenrolled"]);
+    const errors: string[] = [];
+    let enrolled = 0;
+
+    for (const row of upserted) {
+        try {
+            const { data: existingEnrollment } = await supabase
+                .from("sequence_enrollments")
+                .select("id, status")
+                .eq("sequence_id", sequenceId)
+                .eq("contact_id", row.contactId)
+                .maybeSingle();
+
+            if (existingEnrollment && ENGAGED.has(existingEnrollment.status)) {
+                errors.push(
+                    `Row ${row.rowIndex}: Contact (${row.phone}) has status ${existingEnrollment.status} — won't re-dial someone who already engaged`,
+                );
+                continue;
+            }
+
+            const nextStepAt = isTest
+                ? new Date().toISOString()
+                : pacingIntervalMs
+                  ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
+                  : new Date().toISOString();
+
+            if (existingEnrollment) {
+                const { error: updateErr } = await supabase
+                    .from("sequence_enrollments")
+                    .update({
+                        status: "active",
+                        current_step_order: 0,
+                        next_step_at: nextStepAt,
+                        is_test: isTest,
+                        completed_at: null,
+                        custom_variables: row.customVariables,
+                        enrollment_source: enrollmentSource,
+                        source_list_id: sourceListId,
+                        contact_replied: false,
+                        contact_answered_call: false,
+                        appointment_booked: false,
+                    })
+                    .eq("id", existingEnrollment.id);
+                if (updateErr) {
+                    errors.push(`Row ${row.rowIndex}: Re-enroll failed — ${updateErr.message}`);
+                    continue;
+                }
+            } else {
+                const { error: enrollErr } = await supabase.from("sequence_enrollments").insert({
+                    sequence_id: sequenceId,
+                    contact_id: row.contactId,
+                    tenant_id: clientId,
+                    status: "active",
+                    current_step_order: 0,
+                    enrollment_source: enrollmentSource,
+                    enrolled_at: new Date().toISOString(),
+                    next_step_at: nextStepAt,
+                    is_test: isTest,
+                    sentiment_trend: "stable",
+                    last_emotion: null,
+                    recommended_tone: null,
+                    is_hot_lead: false,
+                    is_at_risk: false,
+                    engagement_score: 50,
+                    needs_human_intervention: false,
+                    custom_variables: row.customVariables,
+                    source_list_id: sourceListId,
+                    contact_replied: false,
+                    contact_answered_call: false,
+                    appointment_booked: false,
+                    channel_overrides: {},
+                });
+                if (enrollErr) {
+                    errors.push(`Row ${row.rowIndex}: Enrollment failed — ${enrollErr.message}`);
+                    continue;
+                }
+            }
+
+            await autoAdvanceContactStage(row.contactId, clientId, "New Lead").catch(() => {});
+            await autoAdvanceContactStage(row.contactId, clientId, "Contacted").catch(() => {});
+
+            enrolled++;
+        } catch (e: any) {
+            errors.push(`Row ${row.rowIndex}: ${e?.message || "Unknown error"}`);
+        }
+    }
+
+    return { enrolled, errors };
+}
 
 export async function bulkEnrollFromCSV(
     sequenceId: string,
     clientId: string,
     rows: Record<string, string>[],
     columnMapping: Record<string, ColumnRole>,
-    options?: { isTest?: boolean }
+    options?: { isTest?: boolean },
 ) {
-    const isTest = options?.isTest === true;
     try {
         if (!rows || rows.length === 0) {
             return { success: false, error: "No rows to process" };
         }
-
-        // Validate that at least one column is mapped to phone
-        const hasPhone = Object.values(columnMapping).includes("phone");
-        if (!hasPhone) {
+        if (!Object.values(columnMapping).includes("phone")) {
             return { success: false, error: "A phone column mapping is required" };
         }
 
-        // Load sequence pacing — used to stagger next_step_at across a bulk upload.
-        const { data: sequenceRow } = await supabase
-            .from("sequences")
-            .select("pacing_per_minute")
-            .eq("id", sequenceId)
-            .single();
-        const pacingPerMinute = sequenceRow?.pacing_per_minute as number | null | undefined;
-        const pacingIntervalMs =
-            pacingPerMinute && pacingPerMinute > 0 ? Math.floor(60_000 / pacingPerMinute) : 0;
-        const baseTime = Date.now();
+        const upsertResult = await upsertContactsFromRows(clientId, rows, columnMapping);
+        const { enrolled, errors: enrollErrors } = await enrollUpsertedRows(
+            sequenceId,
+            clientId,
+            upsertResult.upserted,
+            { isTest: options?.isTest, enrollmentSource: "csv_upload" },
+        );
 
-        const BATCH_SIZE = 50;
-        let enrolled = 0;
-        const errors: string[] = [];
-
-        // Build reverse mapping: role → column names
-        const roleToColumns: Record<string, string[]> = {};
-        for (const [col, role] of Object.entries(columnMapping)) {
-            if (!roleToColumns[role]) roleToColumns[role] = [];
-            roleToColumns[role].push(col);
-        }
-
-        // Process in batches
-        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-            const batch = rows.slice(i, i + BATCH_SIZE);
-
-            for (let j = 0; j < batch.length; j++) {
-                const row = batch[j];
-                const rowIndex = i + j + 1; // 1-based for user-facing errors
-
-                try {
-                    // Extract fields based on column mapping
-                    const rawPhone = (roleToColumns.phone || [])
-                        .map((col) => row[col]?.trim())
-                        .find((v) => v) || "";
-                    const phone = toE164(rawPhone);
-                    if (rawPhone && !phone) {
-                        errors.push(`Row ${rowIndex}: Invalid phone number "${rawPhone}"`);
-                        continue;
-                    }
-                    const email = (roleToColumns.email || [])
-                        .map((col) => row[col]?.trim())
-                        .find((v) => v) || "";
-                    const firstName = (roleToColumns.first_name || [])
-                        .map((col) => row[col]?.trim())
-                        .find((v) => v) || "";
-                    const lastName = (roleToColumns.last_name || [])
-                        .map((col) => row[col]?.trim())
-                        .find((v) => v) || "";
-                    const company = (roleToColumns.company || [])
-                        .map((col) => row[col]?.trim())
-                        .find((v) => v) || "";
-
-                    if (!phone) {
-                        errors.push(`Row ${rowIndex}: Missing phone number`);
-                        continue;
-                    }
-
-                    // Build contact name from first_name + last_name
-                    const nameParts = [firstName, lastName].filter(Boolean);
-                    const name = nameParts.length > 0 ? nameParts.join(" ") : null;
-
-                    // Build custom_fields for the contact (company + custom_variable columns)
-                    const customFields: Record<string, string> = {};
-                    if (company) customFields.company = company;
-                    for (const col of roleToColumns.custom_variable || []) {
-                        if (row[col]?.trim()) {
-                            customFields[col] = row[col].trim();
-                        }
-                    }
-
-                    // Upsert contact: check if exists by phone + client_id
-                    let contactId: string;
-                    const { data: existingContact } = await supabase
-                        .from("contacts")
-                        .select("id, custom_fields, opted_out_at")
-                        .eq("client_id", clientId)
-                        .eq("phone", phone)
-                        .single();
-
-                    if (existingContact?.opted_out_at) {
-                        errors.push(
-                            `Row ${rowIndex}: Contact (${phone}) is opted out — skipped.`
-                        );
-                        continue;
-                    }
-
-                    if (existingContact) {
-                        contactId = existingContact.id;
-                        // Update contact with any new info
-                        const updateData: Record<string, any> = {};
-                        if (name) updateData.name = name;
-                        if (email) updateData.email = email;
-                        if (Object.keys(customFields).length > 0) {
-                            updateData.custom_fields = { ...(existingContact.custom_fields || {}), ...customFields };
-                        }
-                        if (Object.keys(updateData).length > 0) {
-                            await supabase
-                                .from("contacts")
-                                .update(updateData)
-                                .eq("id", contactId);
-                        }
-                    } else {
-                        // Insert new contact
-                        const { data: newContact, error: insertErr } = await supabase
-                            .from("contacts")
-                            .insert({
-                                client_id: clientId,
-                                phone,
-                                name: name || null,
-                                email: email || null,
-                                custom_fields: Object.keys(customFields).length > 0 ? customFields : {},
-                                total_calls: 0,
-                            })
-                            .select("id")
-                            .single();
-
-                        if (insertErr || !newContact) {
-                            errors.push(`Row ${rowIndex}: Failed to create contact — ${insertErr?.message || "unknown error"}`);
-                            continue;
-                        }
-                        contactId = newContact.id;
-                    }
-
-                    // Check for an existing enrollment for this (sequence, contact)
-                    // — the table has a UNIQUE constraint on that pair, so we
-                    // upsert: if the contact is being re-uploaded and either
-                    // hasn't engaged yet OR was completed/failed, we reset the
-                    // row so the operator can dial them again.
-                    const { data: existingEnrollment } = await supabase
-                        .from("sequence_enrollments")
-                        .select("id, status")
-                        .eq("sequence_id", sequenceId)
-                        .eq("contact_id", contactId)
-                        .maybeSingle();
-
-                    const ENGAGED = new Set([
-                        "replied",
-                        "booked",
-                        "converted",
-                        "manual_stop",
-                        "unenrolled",
-                    ]);
-
-                    if (existingEnrollment && ENGAGED.has(existingEnrollment.status)) {
-                        errors.push(
-                            `Row ${rowIndex}: Contact (${phone}) has status ${existingEnrollment.status} — won't re-dial someone who already engaged`
-                        );
-                        continue;
-                    }
-
-                    // Build custom_variables for enrollment (all non-skip columns as key-value pairs)
-                    const customVariables: Record<string, string> = {};
-                    for (const [col, role] of Object.entries(columnMapping)) {
-                        if (role !== "skip" && row[col]?.trim()) {
-                            customVariables[col] = row[col].trim();
-                        }
-                    }
-
-                    // Test enrollments fire immediately and ignore pacing.
-                    // Live enrollments stagger across the batch when pacing is
-                    // set; otherwise fire immediately.
-                    const nextStepAt = isTest
-                        ? new Date().toISOString()
-                        : pacingIntervalMs
-                          ? new Date(baseTime + enrolled * pacingIntervalMs).toISOString()
-                          : new Date().toISOString();
-
-                    if (existingEnrollment) {
-                        // Reset the existing row instead of inserting a duplicate.
-                        const { error: updateErr } = await supabase
-                            .from("sequence_enrollments")
-                            .update({
-                                status: "active",
-                                current_step_order: 0,
-                                next_step_at: nextStepAt,
-                                is_test: isTest,
-                                completed_at: null,
-                                custom_variables: customVariables,
-                                enrollment_source: "csv_upload",
-                                contact_replied: false,
-                                contact_answered_call: false,
-                                appointment_booked: false,
-                            })
-                            .eq("id", existingEnrollment.id);
-
-                        if (updateErr) {
-                            errors.push(
-                                `Row ${rowIndex}: Re-enroll failed — ${updateErr.message}`
-                            );
-                            continue;
-                        }
-                    } else {
-                        const { error: enrollErr } = await supabase
-                            .from("sequence_enrollments")
-                            .insert({
-                                sequence_id: sequenceId,
-                                contact_id: contactId,
-                                tenant_id: clientId,
-                                status: "active",
-                                current_step_order: 0,
-                                enrollment_source: "csv_upload",
-                                enrolled_at: new Date().toISOString(),
-                                next_step_at: nextStepAt,
-                                is_test: isTest,
-                                sentiment_trend: "stable",
-                                last_emotion: null,
-                                recommended_tone: null,
-                                is_hot_lead: false,
-                                is_at_risk: false,
-                                engagement_score: 50,
-                                needs_human_intervention: false,
-                                custom_variables: customVariables,
-                                contact_replied: false,
-                                contact_answered_call: false,
-                                appointment_booked: false,
-                                channel_overrides: {},
-                            });
-
-                        if (enrollErr) {
-                            errors.push(`Row ${rowIndex}: Enrollment failed — ${enrollErr.message}`);
-                            continue;
-                        }
-                    }
-
-                    // Auto-advance pipeline: new contact → New Lead, enrolled → Contacted
-                    await autoAdvanceContactStage(contactId, clientId, "New Lead").catch(() => {});
-                    await autoAdvanceContactStage(contactId, clientId, "Contacted").catch(() => {});
-
-                    enrolled++;
-                } catch (rowError: any) {
-                    errors.push(`Row ${rowIndex}: ${rowError?.message || "Unknown error"}`);
-                }
-            }
-        }
-
-        // Revalidate the sequence page
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
 
         return {
             success: true,
-            data: { enrolled, errors },
+            data: {
+                enrolled,
+                errors: [...upsertResult.errors, ...enrollErrors],
+            },
         };
     } catch (error: any) {
         console.error("bulkEnrollFromCSV error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}
+
+// Enroll every member of a saved contact list into a sequence. Replays each
+// member's stored source_row through the list's column_mapping, so per-row
+// custom_variables match exactly what the original CSV produced. Members added
+// manually (no source_row) get a synthetic row built from their core contact
+// fields. Stamps source_list_id on each enrollment for lineage.
+export async function enrollListInSequence(
+    sequenceId: string,
+    listId: string,
+    options?: { isTest?: boolean },
+): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { enrolled: number; errors: string[] };
+}> {
+    try {
+        const { data: list, error: listErr } = await supabase
+            .from("contact_lists")
+            .select("id, client_id, column_mapping, archived_at")
+            .eq("id", listId)
+            .single();
+        if (listErr || !list) {
+            return { success: false, error: "List not found" };
+        }
+        if (list.archived_at) {
+            return { success: false, error: "Cannot enroll an archived list" };
+        }
+
+        const columnMapping = (list.column_mapping || {}) as Record<string, ColumnRole>;
+        if (!Object.values(columnMapping).includes("phone")) {
+            return {
+                success: false,
+                error: "List has no phone column mapping. Edit the list mapping before enrolling.",
+            };
+        }
+
+        const { data: members } = await supabase
+            .from("contact_list_members")
+            .select("contact_id, source_row, contacts(id, phone, name, email, custom_fields)")
+            .eq("list_id", listId);
+
+        if (!members || members.length === 0) {
+            return { success: true, data: { enrolled: 0, errors: ["List has no members"] } };
+        }
+
+        // Build UpsertedRow shape directly from list members — contacts already
+        // exist; we don't need upsertContactsFromRows here. Note: we still
+        // construct customVariables off the saved source_row using the list's
+        // column_mapping so each enrollment row matches the original CSV.
+        const upserted: UpsertedRow[] = [];
+        const errors: string[] = [];
+
+        for (let i = 0; i < members.length; i++) {
+            const m: any = members[i];
+            const contact = m.contacts;
+            if (!contact) {
+                errors.push(`Member ${i + 1}: contact missing`);
+                continue;
+            }
+            const row: Record<string, string> =
+                m.source_row || syntheticRowFromContact(contact);
+
+            const customVariables: Record<string, string> = {};
+            for (const [col, role] of Object.entries(columnMapping)) {
+                if (role !== "skip" && row[col] !== undefined && String(row[col]).trim()) {
+                    customVariables[col] = String(row[col]).trim();
+                }
+            }
+
+            upserted.push({
+                contactId: contact.id,
+                rowIndex: i + 1,
+                customVariables,
+                sourceRow: row,
+                phone: contact.phone,
+                name: contact.name,
+                email: contact.email,
+            });
+        }
+
+        const { enrolled, errors: enrollErrors } = await enrollUpsertedRows(
+            sequenceId,
+            list.client_id,
+            upserted,
+            {
+                isTest: options?.isTest,
+                sourceListId: listId,
+                enrollmentSource: "list_enrollment",
+            },
+        );
+
+        revalidatePath(`/client/${list.client_id}/sequences/${sequenceId}`);
+
+        return {
+            success: true,
+            data: { enrolled, errors: [...errors, ...enrollErrors] },
+        };
+    } catch (error: any) {
+        console.error("enrollListInSequence error:", error);
         return { success: false, error: error?.message || "Internal error" };
     }
 }
