@@ -170,26 +170,19 @@ export function OnboardingV2Wizard({
             // Deploy: creates BOTH VAPI assistants + saves both to DB
             const result = await deployVerticalAgents(clientId, verticalFormData);
 
-            if (result.success) {
+            const partialFailure =
+                result.success && result.agents.some((a) => a.error);
+
+            if (result.success && !partialFailure) {
                 const completedSteps = result.agents.map((a) => ({
                     id: a.type_id,
                     agentTypeId: a.type_id,
                     label: a.name,
-                    status: (a.error ? "failed" : "completed") as "completed" | "failed",
+                    status: "completed" as const,
                     substeps: [
                         { label: "Building system prompt from template", status: "completed" as const },
-                        {
-                            label: "Creating voice agent",
-                            status: (a.error ? "failed" : "completed") as
-                                | "completed"
-                                | "failed",
-                        },
-                        {
-                            label: "Saving to database",
-                            status: (a.error ? "failed" : "completed") as
-                                | "completed"
-                                | "failed",
-                        },
+                        { label: "Creating voice agent", status: "completed" as const },
+                        { label: "Saving to database", status: "completed" as const },
                     ],
                 }));
 
@@ -197,7 +190,7 @@ export function OnboardingV2Wizard({
                     if (!prev) return prev;
                     return {
                         ...prev,
-                        completedAgents: completedSteps.filter((s) => s.status === "completed").length,
+                        completedAgents: completedSteps.length,
                         currentAgent: null,
                         steps: completedSteps.length > 0 ? completedSteps : prev.steps,
                     };
@@ -230,11 +223,19 @@ export function OnboardingV2Wizard({
                     };
                 });
 
+                const succeededCount = result.agents.filter((a) => !a.error).length;
+                const failedCount = result.agents.length - succeededCount;
+                const bannerError = partialFailure
+                    ? `${succeededCount} of ${result.agents.length} agents deployed — ${failedCount} failed. See details below.`
+                    : result.error || "Deployment failed";
+
                 setVerticalDeployProgress((prev) => {
                     if (!prev) return prev;
                     return {
                         ...prev,
-                        error: result.error || "Deployment failed",
+                        completedAgents: succeededCount,
+                        currentAgent: null,
+                        error: bannerError,
                         steps:
                             stepsFromResult.length > 0
                                 ? stepsFromResult

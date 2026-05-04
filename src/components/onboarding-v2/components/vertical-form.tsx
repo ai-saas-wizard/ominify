@@ -225,9 +225,11 @@ export function VerticalForm({
         const inboundTransferFirstName = (
             fields.inboundTransferFirstName as string
         ).trim();
-        const inboundTransferPhone = (
+        // validate() already passed, so toE164 is non-null for both phones.
+        const inboundTransferPhone = toE164(
             fields.inboundTransferPhone as string
-        ).trim();
+        )!;
+        const businessPhone = toE164(fields.businessPhone as string)!;
 
         const formData: REInvestorFormData = {
             companyName: (fields.companyName as string).trim(),
@@ -238,7 +240,7 @@ export function VerticalForm({
             dealTypes: fields.dealTypes as string[],
             timezone: fields.timezone as string,
             appointmentType: fields.appointmentType as string,
-            businessPhone: (fields.businessPhone as string).trim(),
+            businessPhone,
             inboundTransfer: {
                 firstName: inboundTransferFirstName,
                 role: (fields.inboundTransferRole as string).trim(),
@@ -502,6 +504,12 @@ function renderField(
 // ─── HELPERS ───
 
 function isValidPhone(phone: string): boolean {
+    return toE164(phone) !== null;
+}
+
+function toE164(phone: string): string | null {
     const digits = phone.replace(/\D/g, "");
-    return digits.length === 10 || (digits.length === 11 && digits.startsWith("1"));
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return null;
 }

@@ -195,11 +195,15 @@ export function VerticalOutboundConfig({
         buildSnapshot,
     ]);
 
+    const phoneE164 = normalizeUSPhoneE164(transferPhone);
+    const phoneInvalid = transferPhone.trim().length > 0 && !phoneE164;
+
     const handleContinue = useCallback(() => {
+        if (!phoneE164) return;
         const outboundTransfer: TransferSpecialist = {
             firstName: transferFirstName.trim(),
             role: transferRole.trim(),
-            phone: transferPhone.trim(),
+            phone: phoneE164,
             mode: transferMode,
         };
         onContinue({
@@ -214,7 +218,7 @@ export function VerticalOutboundConfig({
         formData,
         transferFirstName,
         transferRole,
-        transferPhone,
+        phoneE164,
         transferMode,
         goal,
         scenario,
@@ -226,7 +230,7 @@ export function VerticalOutboundConfig({
     const transferComplete =
         transferFirstName.trim().length > 0 &&
         transferRole.trim().length > 0 &&
-        transferPhone.trim().length >= 10;
+        !!phoneE164;
 
     const canContinue =
         transferComplete &&
@@ -318,7 +322,16 @@ export function VerticalOutboundConfig({
                                 value={transferPhone}
                                 onChange={(e) => setTransferPhone(e.target.value)}
                                 placeholder="e.g., (615) 203-8748"
+                                aria-invalid={phoneInvalid}
+                                className={cn(
+                                    phoneInvalid && "border-red-400 focus-visible:ring-red-300"
+                                )}
                             />
+                            {phoneInvalid && (
+                                <p className="mt-1 text-xs text-red-500">
+                                    Enter a 10-digit US number (e.g. 615-203-8748) or full E.164 (+1XXXXXXXXXX).
+                                </p>
+                            )}
                         </div>
                         <div>
                             <Label htmlFor="ot-mode" className="mb-1.5 block">
@@ -560,4 +573,13 @@ export function VerticalOutboundConfig({
             </motion.div>
         </div>
     );
+}
+
+// ─── HELPERS ───
+
+function normalizeUSPhoneE164(phone: string): string | null {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return null;
 }
