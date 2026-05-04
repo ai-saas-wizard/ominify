@@ -35,17 +35,26 @@ export function encrypt(plaintext: string): string {
     return `${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted}`;
 }
 
+// Output of encrypt(): three base64 segments joined by colons.
+const ENCRYPTED_SHAPE = /^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/;
+
 /**
- * Decrypt a string encrypted with encrypt()
+ * Decrypt a string encrypted with encrypt().
+ * Tolerates legacy plaintext rows (returns as-is) so the sequencer doesn't
+ * crash on rows written before the encryption rollout — mirrors
+ * src/lib/encryption-helpers.ts:safeDecrypt on the Vercel side.
  */
 export function decrypt(encryptedData: string): string {
+    if (!ENCRYPTED_SHAPE.test(encryptedData)) {
+        // Looks like plaintext — return as-is. Caller treats this the same
+        // way Vercel's safeDecrypt does: an unencrypted legacy value is
+        // passed through to the API consumer.
+        return encryptedData;
+    }
+
     const key = getEncryptionKey();
 
     const parts = encryptedData.split(':');
-    if (parts.length !== 3) {
-        throw new Error('Invalid encrypted data format');
-    }
-
     const [ivBase64, authTagBase64, ciphertext] = parts;
     const iv = Buffer.from(ivBase64, 'base64');
     const authTag = Buffer.from(authTagBase64, 'base64');
