@@ -3,23 +3,10 @@ import type Stripe from "stripe";
 import { supabase } from "./supabase";
 
 /**
- * Plan catalog. Keyed by `plan_key` stored on the subscriptions row.
- * Add new tiers here — the rest of the system reads from this map.
+ * Subscription helpers. Plan catalog moved to `pricing_tiers` (DB-backed) —
+ * see `src/lib/pricing-tiers.ts`. The `plan_key` column on subscriptions
+ * stores the tier slug (free-text) for per-subscription audit history.
  */
-export const SUBSCRIPTION_PLANS = {
-    basic_479: {
-        planKey: "basic_479" as const,
-        displayName: "Basic",
-        priceUsd: 479,
-        monthlyMinutes: 1000,
-        rolloverCap: 2000,
-        priceEnvKey: "STRIPE_PRICE_ID_SUBSCRIPTION_BASIC" as const,
-    },
-} as const;
-
-export type PlanKey = keyof typeof SUBSCRIPTION_PLANS;
-
-export const DEFAULT_PLAN: PlanKey = "basic_479";
 
 export interface SubscriptionRow {
     id: string;
@@ -103,7 +90,7 @@ function isoFromUnix(sec: number | null | undefined): string | null {
 export async function upsertSubscription(
     sub: Stripe.Subscription,
     clientId: string,
-    planKey: string = DEFAULT_PLAN
+    planKey: string
 ): Promise<SubscriptionRow> {
     const item = sub.items.data[0];
     const priceId = item?.price?.id ?? null;

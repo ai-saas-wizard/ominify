@@ -3,7 +3,7 @@ import { auth, currentUser } from '@clerk/nextjs/server';
 import { canAccessClient } from '@/lib/auth';
 import { createSubscriptionCheckoutSession } from '@/lib/stripe';
 import { supabase } from '@/lib/supabase';
-import { SUBSCRIPTION_PLANS, DEFAULT_PLAN } from '@/lib/subscriptions';
+import { getTierForClient } from '@/lib/pricing-tiers';
 import { hasActiveSubscription } from '@/lib/access';
 
 /**
@@ -43,12 +43,15 @@ export async function POST(request: NextRequest) {
             .eq('id', clientId)
             .single();
 
-        const planKey = DEFAULT_PLAN;
-        const plan = SUBSCRIPTION_PLANS[planKey];
-        const priceId = process.env[plan.priceEnvKey];
+        // Pricing is server-resolved from clients.pricing_tier_id — never
+        // trusts a value from the request body. This is the only place we
+        // pick the Stripe price for the upcoming subscription.
+        const tier = await getTierForClient(clientId);
+        const priceId = tier.stripe_price_id;
+        const planKey = tier.slug;
         if (!priceId) {
             return NextResponse.json(
-                { error: `missing_price_env:${plan.priceEnvKey}` },
+                { error: `tier_missing_stripe_price:${tier.slug}` },
                 { status: 500 }
             );
         }

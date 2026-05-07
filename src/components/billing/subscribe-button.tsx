@@ -6,8 +6,18 @@ import { Check } from "lucide-react";
 /**
  * Subscribe button — posts to /api/stripe/subscribe and redirects to
  * Stripe-hosted Checkout. Gated behind a TCPA/DNC consent checkbox.
+ *
+ * Price comes from the parent (resolved from the client's pricing tier).
  */
-export function SubscribeButton({ clientId }: { clientId: string }) {
+export function SubscribeButton({
+    clientId,
+    priceUsd,
+    ctaLabel,
+}: {
+    clientId: string;
+    priceUsd: number;
+    ctaLabel?: string;
+}) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [accepted, setAccepted] = useState(false);
@@ -90,7 +100,9 @@ export function SubscribeButton({ clientId }: { clientId: string }) {
                 disabled={loading || !accepted}
                 className="w-full px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-                {loading ? "Redirecting to Stripe…" : "Subscribe — $479/month"}
+                {loading
+                    ? "Redirecting to Stripe…"
+                    : ctaLabel ?? `Subscribe — $${priceUsd}/month`}
             </button>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
         </div>

@@ -7,6 +7,7 @@ import {
     Users,
     Settings,
     CreditCard,
+    Tag,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import Image from "next/image";
@@ -21,6 +22,11 @@ const routes = [
         label: "Billing",
         icon: CreditCard,
         href: "/admin/billing",
+    },
+    {
+        label: "Pricing Tiers",
+        icon: Tag,
+        href: "/admin/pricing-tiers",
     },
     {
         label: "Settings",

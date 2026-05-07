@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { constructWebhookEvent, stripe } from '@/lib/stripe';
 import { completePurchase } from '@/lib/billing';
 import {
-    SUBSCRIPTION_PLANS,
-    DEFAULT_PLAN,
     grantSubscriptionMinutes,
     markSubscriptionCanceled,
     resolveClientFromStripeIds,
     upsertSubscription,
-    type PlanKey,
 } from '@/lib/subscriptions';
+import { getPublicTier, getTierBySlug } from '@/lib/pricing-tiers';
 import Stripe from 'stripe';
 
 /**
@@ -82,7 +80,9 @@ export async function POST(request: NextRequest) {
                     );
                     break;
                 }
-                const planKey = (sub.metadata?.plan_key as string | undefined) || DEFAULT_PLAN;
+                const planKey =
+                    (sub.metadata?.plan_key as string | undefined) ||
+                    (await getPublicTier()).slug;
                 await upsertSubscription(sub, clientId, planKey);
                 console.log(
                     `[Stripe] ${event.type}: sub=${sub.id} client=${clientId} status=${sub.status}`
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
 
                 // Pull metadata from the subscription to resolve clientId + plan.
                 let clientId: string | null = null;
-                let planKey: PlanKey = DEFAULT_PLAN;
+                let planKey: string = (await getPublicTier()).slug;
 
                 if (subscriptionId && stripe) {
                     const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -133,8 +133,8 @@ export async function POST(request: NextRequest) {
                         stripeCustomerId:
                             typeof sub.customer === 'string' ? sub.customer : sub.customer?.id,
                     });
-                    planKey = ((sub.metadata?.plan_key as string | undefined) ||
-                        DEFAULT_PLAN) as PlanKey;
+                    planKey =
+                        (sub.metadata?.plan_key as string | undefined) || planKey;
 
                     // Keep our subscriptions row fresh on every invoice.
                     if (clientId) await upsertSubscription(sub, clientId, planKey);
@@ -155,13 +155,14 @@ export async function POST(request: NextRequest) {
                     break;
                 }
 
-                const plan = SUBSCRIPTION_PLANS[planKey];
+                const tier = (await getTierBySlug(planKey, { onlyActive: false })) ??
+                    (await getPublicTier());
                 const amountPaid = (invoice.amount_paid ?? 0) / 100;
 
                 const result = await grantSubscriptionMinutes({
                     clientId,
-                    minutes: plan.monthlyMinutes,
-                    rolloverCap: plan.rolloverCap,
+                    minutes: tier.monthly_minutes,
+                    rolloverCap: tier.rollover_cap,
                     stripeInvoiceId: invoice.id ?? null,
                     amountPaid,
                 });
@@ -195,8 +196,9 @@ export async function POST(request: NextRequest) {
                             typeof sub.customer === 'string' ? sub.customer : sub.customer?.id,
                     });
                     if (clientId) {
-                        const planKey = ((sub.metadata?.plan_key as string | undefined) ||
-                            DEFAULT_PLAN) as PlanKey;
+                        const planKey =
+                            (sub.metadata?.plan_key as string | undefined) ||
+                            (await getPublicTier()).slug;
                         // upsert surfaces the past_due status, which the access
                         // helper treats as "not allowed".
                         await upsertSubscription(sub, clientId, planKey);

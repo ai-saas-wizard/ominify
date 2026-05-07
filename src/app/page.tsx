@@ -1,10 +1,12 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { isAdmin, getAccessibleClients, addClientMember } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { encrypt } from "@/lib/encryption";
 import { isEncrypted } from "@/lib/encryption-helpers";
 import { hasActiveSubscription } from "@/lib/access";
+import { getTierForSignup } from "@/lib/pricing-tiers";
 import Link from "next/link";
 
 // Get the single active umbrella
@@ -37,6 +39,13 @@ async function autoProvisionUmbrellaClient(
     ? (isEncrypted(umbrellaKey) ? umbrellaKey : encrypt(umbrellaKey))
     : null;
 
+  // Resolve which pricing tier to assign. The /offers/[slug] route sets a
+  // cookie via middleware; getTierForSignup falls back to the public tier
+  // when missing/invalid.
+  const cookieStore = await cookies();
+  const tierSlug = cookieStore.get("omnify_tier")?.value ?? null;
+  const tier = await getTierForSignup(tierSlug);
+
   // Create the client record
   const { data: newClient, error: clientError } = await supabase
     .from("clients")
@@ -47,6 +56,7 @@ async function autoProvisionUmbrellaClient(
       vapi_key: vapiKeyCiphertext,
       vapi_org_id: umbrella.vapi_org_id,
       clerk_id: userId, // Real Clerk ID — no placeholder needed
+      pricing_tier_id: tier.id,
     })
     .select("id")
     .single();
@@ -89,7 +99,7 @@ async function autoProvisionUmbrellaClient(
   });
 
   console.log(
-    `[AUTO-PROVISION] Created UMBRELLA client ${clientId} for ${userEmail}, assigned to umbrella ${umbrella.name} (${umbrella.id})`
+    `[AUTO-PROVISION] Created UMBRELLA client ${clientId} for ${userEmail}, assigned to umbrella ${umbrella.name} (${umbrella.id}), tier ${tier.slug}`
   );
 
   return clientId;

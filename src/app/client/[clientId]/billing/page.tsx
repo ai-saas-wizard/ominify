@@ -1,5 +1,6 @@
 import { getOrCreateMinuteBalance, getOrCreateClientBilling, getClientUsageRecords, getClientPurchases, getClientUsageSummary } from "@/lib/billing";
-import { getActiveSubscription, SUBSCRIPTION_PLANS, DEFAULT_PLAN } from "@/lib/subscriptions";
+import { getActiveSubscription } from "@/lib/subscriptions";
+import { getTierForClient } from "@/lib/pricing-tiers";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { ArrowLeft, CreditCard, Clock } from "lucide-react";
@@ -25,16 +26,15 @@ export default async function ClientBillingPage(props: {
         return <div className="p-8 text-center text-red-600">Client not found</div>;
     }
 
-    const [balance, billing, usageRecords, purchases, usageSummary, subscription] = await Promise.all([
+    const [balance, billing, usageRecords, purchases, usageSummary, subscription, tier] = await Promise.all([
         getOrCreateMinuteBalance(clientId),
         getOrCreateClientBilling(clientId),
         getClientUsageRecords(clientId, 20),
         getClientPurchases(clientId, 10),
         getClientUsageSummary(clientId),
-        getActiveSubscription(clientId)
+        getActiveSubscription(clientId),
+        getTierForClient(clientId)
     ]);
-
-    const plan = SUBSCRIPTION_PLANS[DEFAULT_PLAN];
 
     return (
         <div className="p-4 lg:p-8 max-w-6xl mx-auto space-y-8">
@@ -56,8 +56,8 @@ export default async function ClientBillingPage(props: {
                 <SubscriptionCard
                     clientId={clientId}
                     status={subscription?.status ?? null}
-                    planName={plan.displayName}
-                    priceUsd={plan.priceUsd}
+                    planName={tier.display_name}
+                    priceUsd={tier.price_usd}
                     currentPeriodEnd={subscription?.current_period_end ?? null}
                     grandfathered={!!client.subscription_grandfathered}
                     isCustom={client.account_type === 'CUSTOM'}
@@ -67,7 +67,7 @@ export default async function ClientBillingPage(props: {
                     totalPurchased={Number(balance.total_purchased_minutes ?? 0)}
                     totalUsed={Number(balance.total_used_minutes ?? 0)}
                     subscriptionMinutes={Number(balance.subscription_minutes ?? 0)}
-                    rolloverCap={Number(balance.subscription_rollover_cap ?? plan.rolloverCap)}
+                    rolloverCap={Number(balance.subscription_rollover_cap ?? tier.rollover_cap)}
                 />
             </div>
 

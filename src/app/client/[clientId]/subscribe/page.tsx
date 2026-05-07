@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 import { canAccessClient } from "@/lib/auth";
 import { hasActiveSubscription } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
-import { SUBSCRIPTION_PLANS, DEFAULT_PLAN } from "@/lib/subscriptions";
+import { getTierForClient } from "@/lib/pricing-tiers";
 import { SubscribeButton } from "@/components/billing/subscribe-button";
+import { ClearTierCookieOnMount } from "@/components/billing/clear-tier-cookie";
 import { CheckCircle2 } from "lucide-react";
 
 export default async function SubscribePage({
@@ -38,18 +39,34 @@ export default async function SubscribePage({
         redirect(`/client/${clientId}/agents`);
     }
 
-    const plan = SUBSCRIPTION_PLANS[DEFAULT_PLAN];
+    // Pricing comes from the client's assigned tier (set at signup based on
+    // /offers/[slug] cookie). The page never enumerates other tiers — each
+    // client sees exactly one price.
+    const tier = await getTierForClient(clientId);
+    const features =
+        tier.landing_features.length > 0
+            ? tier.landing_features
+            : [
+                  `${tier.monthly_minutes.toLocaleString()} voice minutes included every month`,
+                  "Unused minutes — rollover for 2 months",
+                  "Top up with extra minute packs anytime",
+                  "Cancel, upgrade, or update your card via the Stripe portal",
+              ];
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center p-6">
+            {/* Once the user is on the subscribe page, the tier is locked into
+                clients.pricing_tier_id — clear the capture cookie so it can't
+                bleed into a different account on a shared browser. */}
+            <ClearTierCookieOnMount />
             <div className="max-w-xl w-full">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-900">
-                        Unlock your voice agents
+                        {tier.landing_headline ?? "Unlock your voice agents"}
                     </h1>
                     <p className="mt-3 text-gray-600">
-                        Omnify runs your inbound and outbound AI voice calls. Subscribe to
-                        activate your account and start placing calls today.
+                        {tier.landing_subheadline ??
+                            "Omnify runs your inbound and outbound AI voice calls. Subscribe to activate your account and start placing calls today."}
                     </p>
                 </div>
 
@@ -57,11 +74,11 @@ export default async function SubscribePage({
                     <div className="flex items-baseline justify-between">
                         <div>
                             <p className="text-sm font-medium text-emerald-700 uppercase tracking-wide">
-                                {plan.displayName}
+                                {tier.display_name}
                             </p>
                             <div className="mt-1 flex items-baseline gap-1">
                                 <span className="text-4xl font-bold text-gray-900">
-                                    ${plan.priceUsd}
+                                    ${tier.price_usd}
                                 </span>
                                 <span className="text-gray-500">/month</span>
                             </div>
@@ -69,13 +86,8 @@ export default async function SubscribePage({
                     </div>
 
                     <ul className="mt-6 space-y-3">
-                        {[
-                            `${plan.monthlyMinutes.toLocaleString()} voice minutes included every month`,
-                            `Unused minutes — rollover for 2 months`,
-                            "Top up with extra minute packs anytime",
-                            "Cancel, upgrade, or update your card via the Stripe portal",
-                        ].map((feature) => (
-                            <li key={feature} className="flex items-start gap-2 text-gray-700">
+                        {features.map((feature, i) => (
+                            <li key={i} className="flex items-start gap-2 text-gray-700">
                                 <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                                 <span>{feature}</span>
                             </li>
@@ -83,7 +95,11 @@ export default async function SubscribePage({
                     </ul>
 
                     <div className="mt-8">
-                        <SubscribeButton clientId={clientId} />
+                        <SubscribeButton
+                            clientId={clientId}
+                            priceUsd={tier.price_usd}
+                            ctaLabel={tier.landing_cta_label ?? undefined}
+                        />
                     </div>
 
                     <p className="mt-4 text-xs text-center text-gray-500">
