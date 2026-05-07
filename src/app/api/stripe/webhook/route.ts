@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { constructWebhookEvent, stripe } from '@/lib/stripe';
+import { constructWebhookEvent, convertSubscriptionToSchedule, stripe } from '@/lib/stripe';
 import { completePurchase } from '@/lib/billing';
 import {
     grantSubscriptionMinutes,
@@ -7,8 +7,76 @@ import {
     resolveClientFromStripeIds,
     upsertSubscription,
 } from '@/lib/subscriptions';
-import { getPublicTier, getTierBySlug } from '@/lib/pricing-tiers';
+import {
+    getPhaseByPriceId,
+    getPublicTier,
+    getTierBySlug,
+    getTierPhases,
+    isMultiPhase,
+} from '@/lib/pricing-tiers';
+import { supabase } from '@/lib/supabase';
 import Stripe from 'stripe';
+
+/**
+ * Extract the subscription ID from an Invoice. In Stripe API
+ * 2025-12-15.clover, `invoice.subscription` was moved to
+ * `invoice.parent.subscription_details.subscription`. Fall back to the
+ * pre-clover top-level field for safety on older payloads.
+ */
+function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+    type InvoiceWithSubFields = {
+        parent?: {
+            type?: string;
+            subscription_details?: {
+                subscription?: string | Stripe.Subscription | null;
+            } | null;
+        } | null;
+        subscription?: string | Stripe.Subscription | null;
+    };
+    const inv = invoice as unknown as InvoiceWithSubFields;
+    const fromParent = inv.parent?.subscription_details?.subscription;
+    const raw = fromParent ?? inv.subscription ?? null;
+    if (!raw) return null;
+    return typeof raw === 'string' ? raw : raw.id;
+}
+
+/**
+ * Extract the recurring subscription line item's price ID. In Stripe API
+ * 2025-12-15.clover, line items have:
+ *   line.parent.type === 'subscription_item_details' (vs 'invoice_item_details')
+ *   line.pricing.price_details.price (string ID)
+ * The pre-clover `line.price.id` is no longer populated.
+ */
+function getRecurringLinePriceId(invoice: Stripe.Invoice): string | null {
+    type LineWithDetails = {
+        parent?: { type?: string } | null;
+        pricing?: {
+            price_details?: { price?: string | Stripe.Price | null } | null;
+        } | null;
+    };
+    for (const l of invoice.lines.data as unknown as LineWithDetails[]) {
+        if (l.parent?.type !== 'subscription_item_details') continue;
+        const price = l.pricing?.price_details?.price;
+        if (!price) continue;
+        return typeof price === 'string' ? price : price.id;
+    }
+    return null;
+}
+
+/**
+ * Read the plan_key our system has stored for a Stripe subscription. After
+ * the initial `customer.subscription.created` event our DB row is the source
+ * of truth — Stripe metadata becomes a hint that an attacker could
+ * theoretically tamper with via the Customer Portal.
+ */
+async function getStoredPlanKey(stripeSubId: string): Promise<string | null> {
+    const { data } = await supabase
+        .from('subscriptions')
+        .select('plan_key')
+        .eq('stripe_subscription_id', stripeSubId)
+        .maybeSingle();
+    return (data?.plan_key as string | undefined) ?? null;
+}
 
 /**
  * Stripe webhook entry point.
@@ -80,13 +148,44 @@ export async function POST(request: NextRequest) {
                     );
                     break;
                 }
+                // For `created`, no DB row exists yet so metadata is the only
+                // source. For `updated`, prefer the DB row our code wrote at
+                // signup — Stripe metadata can be tampered through the
+                // Customer Portal in some configurations and we don't want a
+                // user changing their tier mid-subscription.
+                const storedPlanKey =
+                    event.type === 'customer.subscription.updated'
+                        ? await getStoredPlanKey(sub.id)
+                        : null;
                 const planKey =
+                    storedPlanKey ||
                     (sub.metadata?.plan_key as string | undefined) ||
                     (await getPublicTier()).slug;
                 await upsertSubscription(sub, clientId, planKey);
                 console.log(
                     `[Stripe] ${event.type}: sub=${sub.id} client=${clientId} status=${sub.status}`
                 );
+
+                // For multi-phase tiers, wrap the freshly-created subscription
+                // in a Stripe Schedule so future phases bill at their own
+                // price. Re-throws on failure so Stripe redelivers — silent
+                // catch would strand the customer on phase 1 forever.
+                if (event.type === 'customer.subscription.created' && !sub.schedule) {
+                    const tier = await getTierBySlug(planKey, { onlyActive: false });
+                    if (tier && isMultiPhase(tier)) {
+                        await convertSubscriptionToSchedule({
+                            subscriptionId: sub.id,
+                            phases: getTierPhases(tier).map((p) => ({
+                                stripe_price_id: p.stripe_price_id,
+                                duration_months: p.duration_months,
+                            })),
+                            metadata: { clientId, plan_key: planKey },
+                        });
+                        console.log(
+                            `[Stripe] Wrapped sub=${sub.id} in schedule (${getTierPhases(tier).length} phases)`
+                        );
+                    }
+                }
                 break;
             }
 
@@ -100,11 +199,8 @@ export async function POST(request: NextRequest) {
             case 'invoice.paid': {
                 const invoice = event.data.object as Stripe.Invoice;
 
-                const invoiceAny = invoice as unknown as {
-                    subscription?: string | Stripe.Subscription | null;
-                    billing_reason?: string | null;
-                };
-                const billingReason = invoiceAny.billing_reason;
+                const billingReason = (invoice as unknown as { billing_reason?: string | null })
+                    .billing_reason;
 
                 // Only grant minutes for subscription invoices (initial + renewals).
                 if (
@@ -115,15 +211,17 @@ export async function POST(request: NextRequest) {
                     break;
                 }
 
-                const subscriptionIdRaw = invoiceAny.subscription;
-                const subscriptionId =
-                    typeof subscriptionIdRaw === 'string'
-                        ? subscriptionIdRaw
-                        : subscriptionIdRaw?.id ?? null;
+                const subscriptionId = getInvoiceSubscriptionId(invoice);
 
                 // Pull metadata from the subscription to resolve clientId + plan.
+                // Our DB row, once written, is the source of truth for plan_key
+                // — Stripe metadata is only used for the very first event
+                // (before our row exists) since a customer could theoretically
+                // tamper with it through the Customer Portal.
                 let clientId: string | null = null;
-                let planKey: string = (await getPublicTier()).slug;
+                let planKey: string | null = subscriptionId
+                    ? await getStoredPlanKey(subscriptionId)
+                    : null;
 
                 if (subscriptionId && stripe) {
                     const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -133,11 +231,13 @@ export async function POST(request: NextRequest) {
                         stripeCustomerId:
                             typeof sub.customer === 'string' ? sub.customer : sub.customer?.id,
                     });
-                    planKey =
-                        (sub.metadata?.plan_key as string | undefined) || planKey;
-
+                    if (!planKey) {
+                        planKey = (sub.metadata?.plan_key as string | undefined) ?? null;
+                    }
                     // Keep our subscriptions row fresh on every invoice.
-                    if (clientId) await upsertSubscription(sub, clientId, planKey);
+                    if (clientId && planKey) {
+                        await upsertSubscription(sub, clientId, planKey);
+                    }
                 }
 
                 if (!clientId) {
@@ -155,13 +255,44 @@ export async function POST(request: NextRequest) {
                     break;
                 }
 
-                const tier = (await getTierBySlug(planKey, { onlyActive: false })) ??
+                if (!planKey) planKey = (await getPublicTier()).slug;
+                const tier =
+                    (await getTierBySlug(planKey, { onlyActive: false })) ??
                     (await getPublicTier());
+
+                // Find the subscription line item to resolve the phase. If
+                // pagination cut off the lines we need, log it loudly — for
+                // typical single-line subscription invoices this won't fire.
+                if (invoice.lines.has_more) {
+                    console.warn(
+                        `[Stripe] invoice.paid ${invoice.id}: lines.has_more=true; phase resolution may be incomplete (consider listLineItems pagination)`
+                    );
+                }
+                const lineItemPriceId = getRecurringLinePriceId(invoice);
+
+                let phase = getPhaseByPriceId(tier, lineItemPriceId);
+                if (!phase) {
+                    if (isMultiPhase(tier)) {
+                        // Refuse to silently grant phase 1's minutes — that
+                        // would over- or under-grant on every cycle if the
+                        // tier's price IDs and Stripe's billed price ever
+                        // diverge (e.g. an admin edit, or an API/SDK shape
+                        // change). Better to skip the grant; admin/support
+                        // can retroactively reconcile.
+                        console.error(
+                            `[Stripe] invoice.paid ${invoice.id}: no phase match for price=${lineItemPriceId} on multi-phase tier=${tier.slug}; SKIPPING grant — admin must reconcile`
+                        );
+                        break;
+                    }
+                    // Single-phase tier: fall back to phase 1 (the only phase).
+                    phase = getTierPhases(tier)[0];
+                }
+
                 const amountPaid = (invoice.amount_paid ?? 0) / 100;
 
                 const result = await grantSubscriptionMinutes({
                     clientId,
-                    minutes: tier.monthly_minutes,
+                    minutes: phase.monthly_minutes,
                     rolloverCap: tier.rollover_cap,
                     stripeInvoiceId: invoice.id ?? null,
                     amountPaid,
@@ -171,7 +302,7 @@ export async function POST(request: NextRequest) {
                     console.log(`[Stripe] invoice.paid ${invoice.id} — already granted (idempotent skip)`);
                 } else {
                     console.log(
-                        `[Stripe] invoice.paid ${invoice.id} — granted ${result.granted}min, trimmed ${result.trimmed}min for client ${clientId}`
+                        `[Stripe] invoice.paid ${invoice.id} — granted ${result.granted}min, trimmed ${result.trimmed}min for client ${clientId} (tier=${tier.slug}, price=${lineItemPriceId ?? 'none'})`
                     );
                 }
                 break;
@@ -179,14 +310,7 @@ export async function POST(request: NextRequest) {
 
             case 'invoice.payment_failed': {
                 const invoice = event.data.object as Stripe.Invoice;
-                const invoiceAny = invoice as unknown as {
-                    subscription?: string | Stripe.Subscription | null;
-                };
-                const subscriptionIdRaw = invoiceAny.subscription;
-                const subscriptionId =
-                    typeof subscriptionIdRaw === 'string'
-                        ? subscriptionIdRaw
-                        : subscriptionIdRaw?.id ?? null;
+                const subscriptionId = getInvoiceSubscriptionId(invoice);
                 if (subscriptionId && stripe) {
                     const sub = await stripe.subscriptions.retrieve(subscriptionId);
                     const clientId = await resolveClientFromStripeIds({
@@ -197,6 +321,7 @@ export async function POST(request: NextRequest) {
                     });
                     if (clientId) {
                         const planKey =
+                            (await getStoredPlanKey(subscriptionId)) ||
                             (sub.metadata?.plan_key as string | undefined) ||
                             (await getPublicTier()).slug;
                         // upsert surfaces the past_due status, which the access
@@ -217,10 +342,15 @@ export async function POST(request: NextRequest) {
             default:
                 console.log('[Stripe] Unhandled event type:', event.type);
         }
-    } catch (err: any) {
-        // Always log but ack 2xx so Stripe doesn't retry indefinitely on
-        // transient errors — we have alerting on console errors.
-        console.error('[Stripe] Webhook handler error:', err?.message || err);
+    } catch (err: unknown) {
+        // Return 5xx so Stripe redelivers. The handler is designed to be
+        // idempotent (minute grants are keyed by (client, kind, invoice_id);
+        // schedule conversion checks `!sub.schedule`; subscription upserts
+        // dedupe by id). Returning 2xx here previously silently dropped
+        // failures (e.g. a broken schedule conversion) with no retry.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[Stripe] Webhook handler error:', msg);
+        return NextResponse.json({ error: msg }, { status: 500 });
     }
 
     return NextResponse.json({ received: true });

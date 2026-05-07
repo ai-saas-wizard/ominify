@@ -8,14 +8,18 @@ import { Check } from "lucide-react";
  * Stripe-hosted Checkout. Gated behind a TCPA/DNC consent checkbox.
  *
  * Price comes from the parent (resolved from the client's pricing tier).
+ * `multiPhase` shifts the CTA copy to communicate that the price will rise
+ * after the intro period.
  */
 export function SubscribeButton({
     clientId,
     priceUsd,
+    multiPhase,
     ctaLabel,
 }: {
     clientId: string;
     priceUsd: number;
+    multiPhase?: boolean;
     ctaLabel?: string;
 }) {
     const [loading, setLoading] = useState(false);
@@ -102,7 +106,10 @@ export function SubscribeButton({
             >
                 {loading
                     ? "Redirecting to Stripe…"
-                    : ctaLabel ?? `Subscribe — $${priceUsd}/month`}
+                    : ctaLabel ??
+                      (multiPhase
+                          ? `Start with $${priceUsd}/month`
+                          : `Subscribe — $${priceUsd}/month`)}
             </button>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
         </div>

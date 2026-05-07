@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,12 @@ import {
     updateTierAction,
     type ActionResult,
 } from "../actions";
+import {
+    PhasesEditor,
+    phasesToJson,
+    type EditablePhase,
+} from "./phases-editor";
+import type { TierPhase } from "@/lib/pricing-tiers";
 
 export interface TierFormInitial {
     id?: string;
@@ -27,6 +33,7 @@ export interface TierFormInitial {
     landing_subheadline: string | null;
     landing_features: string[];
     landing_cta_label: string | null;
+    phases: TierPhase[] | null;
 }
 
 const DEFAULTS: TierFormInitial = {
@@ -43,7 +50,18 @@ const DEFAULTS: TierFormInitial = {
     landing_subheadline: "",
     landing_features: [],
     landing_cta_label: "",
+    phases: null,
 };
+
+function tierPhasesToEditable(phases: TierPhase[] | null): EditablePhase[] {
+    if (!phases || phases.length === 0) return [];
+    return phases.map((p) => ({
+        stripe_price_id: p.stripe_price_id,
+        price_usd: String(p.price_usd),
+        monthly_minutes: String(p.monthly_minutes),
+        duration_months: p.duration_months === null ? "" : String(p.duration_months),
+    }));
+}
 
 function randomSuffix(length = 6): string {
     const alphabet = "abcdefghjkmnpqrstuvwxyz23456789"; // skip ambiguous chars
@@ -88,6 +106,24 @@ export function TierForm({
     const [features, setFeatures] = useState(init.landing_features.join("\n"));
     const [isPublic, setIsPublic] = useState(init.is_public);
 
+    // Multi-phase state. When enabled, top-level price fields mirror phase 1
+    // and are disabled; on submit we serialize phases as JSON.
+    const initialPhasesEditable = tierPhasesToEditable(init.phases);
+    const [multiPhase, setMultiPhase] = useState(initialPhasesEditable.length > 1);
+    const [phases, setPhases] = useState<EditablePhase[]>(
+        initialPhasesEditable.length > 0 ? initialPhasesEditable : []
+    );
+    const [stripePriceId, setStripePriceId] = useState(init.stripe_price_id);
+    const [priceUsd, setPriceUsd] = useState(init.price_usd ? String(init.price_usd) : "");
+    const [monthlyMinutes, setMonthlyMinutes] = useState(String(init.monthly_minutes));
+
+    // Keep top-level fields in sync with phase 1 while multi-phase is on
+    const syncFromPhase1 = useCallback((p1: EditablePhase) => {
+        setStripePriceId(p1.stripe_price_id);
+        setPriceUsd(p1.price_usd);
+        setMonthlyMinutes(p1.monthly_minutes);
+    }, []);
+
     const suggestion = useMemo(() => {
         if (mode !== "create") return "";
         if (!slug || /[a-zA-Z0-9_-]{1,}-[a-z0-9]{4,}$/.test(slug)) return "";
@@ -103,6 +139,14 @@ export function TierForm({
         formData.set("slug", slug);
         formData.set("landing_features", features);
         formData.set("is_public", isPublic ? "on" : "");
+        formData.set("phases", phasesToJson(multiPhase, phases));
+        // When multi-phase is on, controlled fields drive the submitted values
+        // (the inputs are disabled but state still owns the truth).
+        if (multiPhase) {
+            formData.set("stripe_price_id", stripePriceId);
+            formData.set("price_usd", priceUsd);
+            formData.set("monthly_minutes", monthlyMinutes);
+        }
 
         startTransition(async () => {
             let result: ActionResult<{ id: string }>;
@@ -178,7 +222,9 @@ export function TierForm({
                             type="number"
                             step="0.01"
                             min="0.01"
-                            defaultValue={init.price_usd || ""}
+                            value={priceUsd}
+                            onChange={(e) => setPriceUsd(e.target.value)}
+                            disabled={multiPhase}
                             required
                         />
                     </div>
@@ -190,7 +236,9 @@ export function TierForm({
                             type="number"
                             min="1"
                             step="1"
-                            defaultValue={init.monthly_minutes}
+                            value={monthlyMinutes}
+                            onChange={(e) => setMonthlyMinutes(e.target.value)}
+                            disabled={multiPhase}
                             required
                         />
                     </div>
@@ -213,14 +261,27 @@ export function TierForm({
                     <Input
                         id="stripe_price_id"
                         name="stripe_price_id"
-                        defaultValue={init.stripe_price_id}
+                        value={stripePriceId}
+                        onChange={(e) => setStripePriceId(e.target.value)}
+                        disabled={multiPhase}
                         placeholder="price_1Txxxxxx"
                         required
                     />
                     <p className="mt-1 text-xs text-gray-400">
-                        Create a Product + Price in Stripe Dashboard, then paste the Price ID here.
+                        {multiPhase
+                            ? "Managed by Phase 1 below."
+                            : "Create a Product + Price in Stripe Dashboard, then paste the Price ID here."}
                     </p>
                 </div>
+
+                {/* Multi-phase pricing editor */}
+                <PhasesEditor
+                    enabled={multiPhase}
+                    onEnabledChange={setMultiPhase}
+                    phases={phases}
+                    onPhasesChange={setPhases}
+                    syncSinglePhase={syncFromPhase1}
+                />
 
                 <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-gray-50">
                     <div>

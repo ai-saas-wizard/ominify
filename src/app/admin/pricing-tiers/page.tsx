@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Plus, Globe, EyeOff } from "lucide-react";
-import { listAllTiers } from "@/lib/pricing-tiers";
+import { listAllTiers, getTierPhases } from "@/lib/pricing-tiers";
 import { getAppUrl } from "@/lib/app-url";
+import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
 import { TierRowActions } from "./_components/tier-row-actions";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,7 @@ export default async function PricingTiersAdminPage() {
                     <tbody className="divide-y divide-gray-100">
                         {tiers.map((tier) => {
                             const offerUrl = `${appUrl}/offers/${tier.slug}`;
+                            const phases = getTierPhases(tier);
                             return (
                                 <tr key={tier.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-3">
@@ -60,15 +62,14 @@ export default async function PricingTiersAdminPage() {
                                         </div>
                                         <code className="text-xs text-gray-500">{tier.slug}</code>
                                     </td>
-                                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                                        ${tier.price_usd.toFixed(0)}/mo
+                                    <td className="px-4 py-3">
+                                        <PhaseSummary phases={phases} variant="compact" />
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-700">
-                                        {tier.monthly_minutes.toLocaleString()}
-                                        <span className="text-xs text-gray-400">
-                                            {" "}
-                                            (cap {tier.rollover_cap.toLocaleString()})
-                                        </span>
+                                        <PhaseMinutesSummary phases={phases} />
+                                        <div className="text-xs text-gray-400">
+                                            cap {tier.rollover_cap.toLocaleString()}
+                                        </div>
                                     </td>
                                     <td className="px-4 py-3">
                                         <code className="text-xs text-gray-500">

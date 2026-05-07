@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { requireRateLimit, RATE_POLICIES, userActionKey } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
+import { validatePhases, type TierPhase } from "@/lib/pricing-tiers";
 
 async function requireAdmin(): Promise<{ userId: string; email: string }> {
     const { userId } = await auth();
@@ -35,6 +36,34 @@ interface TierFormFields {
     landing_subheadline: string | null;
     landing_features: string[];
     landing_cta_label: string | null;
+    phases: TierPhase[] | null;
+    /** Set when the phases JSON was malformed; surfaced to the admin. */
+    phases_parse_error: string | null;
+}
+
+/**
+ * Parse a JSON string from the admin form. Returns the validated phases or
+ * an error string for the user. Empty input means "single-phase tier" — not
+ * an error.
+ */
+function parsePhasesFromForm(
+    raw: string
+): { phases: TierPhase[] | null; error: string | null } {
+    if (!raw) return { phases: null, error: null };
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { phases: null, error: "phases JSON is malformed" };
+    }
+    if (!Array.isArray(parsed) || parsed.length < 2) {
+        // Single-phase posted via the multi-phase JSON pipe — treat as
+        // "single-phase tier" (toggle was off) so we save phases=null.
+        return { phases: null, error: null };
+    }
+    const result = validatePhases(parsed);
+    if (!result.ok) return { phases: null, error: result.error };
+    return { phases: result.phases, error: null };
 }
 
 function parseFeatures(raw: string): string[] {
@@ -47,10 +76,10 @@ function parseFeatures(raw: string): string[] {
 function parseForm(form: FormData): TierFormFields {
     const slug = String(form.get("slug") ?? "").trim();
     const display_name = String(form.get("display_name") ?? "").trim();
-    const price_usd = Number(form.get("price_usd"));
-    const monthly_minutes = Number(form.get("monthly_minutes"));
+    let price_usd = Number(form.get("price_usd"));
+    let monthly_minutes = Number(form.get("monthly_minutes"));
     const rollover_cap = Number(form.get("rollover_cap") ?? 2000);
-    const stripe_price_id = String(form.get("stripe_price_id") ?? "").trim();
+    let stripe_price_id = String(form.get("stripe_price_id") ?? "").trim();
     const is_public = form.get("is_public") === "on";
     const description = String(form.get("description") ?? "").trim() || null;
     const landing_eyebrow =
@@ -62,6 +91,16 @@ function parseForm(form: FormData): TierFormFields {
     const landing_features = parseFeatures(String(form.get("landing_features") ?? ""));
     const landing_cta_label =
         String(form.get("landing_cta_label") ?? "").trim() || null;
+    const phasesParse = parsePhasesFromForm(String(form.get("phases") ?? "").trim());
+    const phases = phasesParse.phases;
+
+    // When multi-phase, top-level fields mirror phase 1 — defensively re-sync
+    // here so the DB reflects phase 1 even if the client missed the sync.
+    if (phases) {
+        stripe_price_id = phases[0].stripe_price_id;
+        price_usd = phases[0].price_usd;
+        monthly_minutes = phases[0].monthly_minutes;
+    }
 
     return {
         slug,
@@ -77,6 +116,8 @@ function parseForm(form: FormData): TierFormFields {
         landing_subheadline,
         landing_features,
         landing_cta_label,
+        phases,
+        phases_parse_error: phasesParse.error,
     };
 }
 
@@ -97,6 +138,8 @@ function validate(fields: TierFormFields): string | null {
     if (!fields.stripe_price_id.startsWith("price_")) {
         return "Stripe price ID must start with `price_`.";
     }
+    // phases-level errors are surfaced from validatePhases via parsePhasesFromForm
+    if (fields.phases_parse_error) return fields.phases_parse_error;
     return null;
 }
 
@@ -137,6 +180,7 @@ export async function createTierAction(form: FormData): Promise<ActionResult<{ i
             landing_subheadline: fields.landing_subheadline,
             landing_features: fields.landing_features,
             landing_cta_label: fields.landing_cta_label,
+            phases: fields.phases,
         })
         .select("id")
         .single();
@@ -187,6 +231,7 @@ export async function updateTierAction(
             landing_subheadline: fields.landing_subheadline,
             landing_features: fields.landing_features,
             landing_cta_label: fields.landing_cta_label,
+            phases: fields.phases,
             updated_at: new Date().toISOString(),
         })
         .eq("id", id);

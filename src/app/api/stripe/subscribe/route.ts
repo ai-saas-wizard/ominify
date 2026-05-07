@@ -3,7 +3,7 @@ import { auth, currentUser } from '@clerk/nextjs/server';
 import { canAccessClient } from '@/lib/auth';
 import { createSubscriptionCheckoutSession } from '@/lib/stripe';
 import { supabase } from '@/lib/supabase';
-import { getTierForClient } from '@/lib/pricing-tiers';
+import { getTierForClient, getTierPhases } from '@/lib/pricing-tiers';
 import { hasActiveSubscription } from '@/lib/access';
 
 /**
@@ -44,10 +44,12 @@ export async function POST(request: NextRequest) {
             .single();
 
         // Pricing is server-resolved from clients.pricing_tier_id — never
-        // trusts a value from the request body. This is the only place we
-        // pick the Stripe price for the upcoming subscription.
+        // trusts a value from the request body. For multi-phase tiers, we use
+        // phase 1's price for the initial Checkout; the webhook converts the
+        // resulting subscription into a Stripe Schedule covering all phases.
         const tier = await getTierForClient(clientId);
-        const priceId = tier.stripe_price_id;
+        const phases = getTierPhases(tier);
+        const priceId = phases[0].stripe_price_id;
         const planKey = tier.slug;
         if (!priceId) {
             return NextResponse.json(

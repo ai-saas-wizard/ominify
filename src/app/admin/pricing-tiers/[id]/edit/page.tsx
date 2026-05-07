@@ -31,6 +31,11 @@ export default async function EditPricingTierPage({
                     resubscribe.
                 </p>
             </div>
+            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                ⚠️ Editing pricing fields affects new sign-ups only. Existing Stripe
+                subscriptions keep the schedule they originally signed up for. To
+                change pricing for active subscribers, contact them to resubscribe.
+            </div>
             <TierForm
                 mode="edit"
                 initial={{
@@ -48,6 +53,7 @@ export default async function EditPricingTierPage({
                     landing_subheadline: tier.landing_subheadline,
                     landing_features: tier.landing_features,
                     landing_cta_label: tier.landing_cta_label,
+                    phases: tier.phases,
                 }}
             />
         </div>

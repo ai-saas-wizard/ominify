@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
-import { getTierBySlug } from "@/lib/pricing-tiers";
+import { getTierBySlug, getTierPhases } from "@/lib/pricing-tiers";
+import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
 
 // Always run dynamically — tier rows can change in the admin panel.
 export const dynamic = "force-dynamic";
@@ -22,14 +23,8 @@ export default async function OfferLandingPage({
 
     if (!tier) redirect("/sign-up");
 
-    const features =
-        tier.landing_features.length > 0
-            ? tier.landing_features
-            : [
-                  `${tier.monthly_minutes.toLocaleString()} voice minutes/month included`,
-                  "Top up with extra minute packs anytime",
-                  "Cancel anytime",
-              ];
+    const phases = getTierPhases(tier);
+    const adminFeatures = tier.landing_features;
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-white flex items-center justify-center p-6">
@@ -55,21 +50,35 @@ export default async function OfferLandingPage({
                         <p className="text-sm font-medium text-emerald-700 uppercase tracking-wide">
                             {tier.display_name}
                         </p>
-                        <div className="mt-1 flex items-baseline gap-1">
-                            <span className="text-5xl font-bold text-gray-900">
-                                ${tier.price_usd}
-                            </span>
-                            <span className="text-gray-500">/month</span>
+                        <div className="mt-1">
+                            <PhaseSummary phases={phases} />
                         </div>
                     </div>
 
                     <ul className="mt-6 space-y-3">
-                        {features.map((f, i) => (
-                            <li key={i} className="flex items-start gap-2 text-gray-700">
-                                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                                <span>{f}</span>
-                            </li>
-                        ))}
+                        {adminFeatures.length > 0 ? (
+                            adminFeatures.map((f, i) => (
+                                <li key={i} className="flex items-start gap-2 text-gray-700">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                    <span>{f}</span>
+                                </li>
+                            ))
+                        ) : (
+                            <>
+                                <li className="flex items-start gap-2 text-gray-700">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                    <PhaseMinutesSummary phases={phases} />
+                                </li>
+                                <li className="flex items-start gap-2 text-gray-700">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                    <span>Top up with extra minute packs anytime</span>
+                                </li>
+                                <li className="flex items-start gap-2 text-gray-700">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                    <span>Cancel anytime</span>
+                                </li>
+                            </>
+                        )}
                     </ul>
 
                     <div className="mt-8">

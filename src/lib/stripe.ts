@@ -167,6 +167,68 @@ export async function createSubscriptionCheckoutSession(
 }
 
 /**
+ * Wrap an existing live Subscription in a Subscription Schedule with
+ * pre-defined phases. Used immediately after Checkout for multi-phase tiers
+ * so Stripe handles the auto-transition between phases (e.g. 2 months at
+ * $99 → forever at $379).
+ *
+ * Stripe's API requires this in two calls: `create({ from_subscription })`
+ * mints a schedule wrapping the live sub with a single default phase; then
+ * `update(id, { phases })` replaces that phase list with our multi-phase
+ * journey. Calling them in one shot returns 400 — `from_subscription` and
+ * `phases` are mutually exclusive.
+ *
+ * The webhook idempotency-guards this with `!sub.schedule` before calling,
+ * but if Stripe redelivers and the create fails with "subscription already
+ * has a schedule", the caller should treat that as success and skip.
+ */
+export async function convertSubscriptionToSchedule(args: {
+    subscriptionId: string;
+    phases: Array<{ stripe_price_id: string; duration_months: number | null }>;
+    metadata: { clientId: string; plan_key: string };
+}): Promise<Stripe.SubscriptionSchedule> {
+    if (!stripe) throw new Error('Stripe not configured');
+
+    // Step 1: wrap the live subscription. Stripe creates a schedule with a
+    // single default phase mirroring the subscription's current item.
+    // Idempotency: if the subscription is already wrapped (e.g. webhook
+    // redelivery race), retrieve the existing schedule by re-reading the
+    // subscription rather than failing.
+    let schedule: Stripe.SubscriptionSchedule;
+    try {
+        schedule = await stripe.subscriptionSchedules.create({
+            from_subscription: args.subscriptionId,
+        });
+    } catch (err) {
+        const fresh = await stripe.subscriptions.retrieve(args.subscriptionId);
+        const existingScheduleId =
+            typeof fresh.schedule === 'string' ? fresh.schedule : fresh.schedule?.id;
+        if (!existingScheduleId) throw err;
+        schedule = await stripe.subscriptionSchedules.retrieve(existingScheduleId);
+    }
+
+    // Step 2: replace the default phase list with our explicit phases.
+    // `duration: { interval, interval_count }` is the post-19.0.0 shape;
+    // `iterations` was removed. The terminal phase has no duration so it
+    // runs until the subscription is canceled.
+    return stripe.subscriptionSchedules.update(schedule.id, {
+        end_behavior: 'release',
+        metadata: args.metadata,
+        phases: args.phases.map((p) => ({
+            items: [{ price: p.stripe_price_id }],
+            ...(p.duration_months
+                ? {
+                      duration: {
+                          interval: 'month' as const,
+                          interval_count: p.duration_months,
+                      },
+                  }
+                : {}),
+        })),
+    });
+}
+
+/**
  * Create a Stripe Billing Portal session so the user can cancel, update card,
  * and view invoices. Portal behavior (e.g. immediate cancellation) is
  * configured in the Stripe Dashboard, not here.
