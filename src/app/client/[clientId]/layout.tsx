@@ -83,7 +83,7 @@ export default async function ClientLayout({
         supabase.from("client_members").select("id").eq("client_id", clientId).eq("clerk_id", userId).maybeSingle(),
         supabase.from("clients").select("clerk_id").eq("id", clientId).maybeSingle(),
         supabase.from("clients").select("account_type, disabled, name").eq("id", clientId).maybeSingle(),
-        supabase.from("tenant_profiles").select("legal_business_name, onboarding_completed, walkthrough_completed").eq("client_id", clientId).maybeSingle(),
+        supabase.from("tenant_profiles").select("legal_business_name, onboarding_completed, walkthrough_completed, onboarding_path, onboarding_call_scheduled_at, onboarding_call_event_uri").eq("client_id", clientId).maybeSingle(),
         hasActiveSubscription(clientId).catch(() => ({ allowed: true as const, reason: undefined })),
         headers(),
         getOrCreateMinuteBalance(clientId).catch(() => null),
@@ -96,7 +96,14 @@ export default async function ClientLayout({
     const isOwner = (ownerCheck.data as { clerk_id: string | null } | null)?.clerk_id === userId;
     const hasAccess = userIsAdmin || isMember || isOwner;
     const clientRecord = clientRecordResult.data as { account_type: string; disabled: boolean; name: string } | null;
-    const profile = profileResult.data as { legal_business_name: string | null; onboarding_completed: boolean | null; walkthrough_completed: boolean | null } | null;
+    const profile = profileResult.data as {
+        legal_business_name: string | null;
+        onboarding_completed: boolean | null;
+        walkthrough_completed: boolean | null;
+        onboarding_path: string | null;
+        onboarding_call_scheduled_at: string | null;
+        onboarding_call_event_uri: string | null;
+    } | null;
 
     if (!hasAccess) {
         return (
@@ -162,15 +169,60 @@ export default async function ClientLayout({
         }
     }
 
-    let showOnboardingBanner = false;
+    type OnboardingBanner =
+        | { kind: "none" }
+        | { kind: "amber-incomplete" }
+        | { kind: "emerald-call-scheduled"; scheduledAt: string }
+        | {
+              kind: "admin-not-started" | "admin-call-pending" | "admin-call-booked";
+              scheduledAt?: string;
+              eventUri?: string | null;
+          };
+
+    let onboardingBanner: OnboardingBanner = { kind: "none" };
     let showWalkthrough = false;
     if (clientRecord?.account_type === "UMBRELLA") {
         if (!profile?.onboarding_completed) {
-            showOnboardingBanner = true;
+            const path = profile?.onboarding_path ?? null;
+            const scheduledAt = profile?.onboarding_call_scheduled_at ?? undefined;
+            if (userIsAdmin) {
+                if (path === "manual_call_booked" && scheduledAt) {
+                    onboardingBanner = {
+                        kind: "admin-call-booked",
+                        scheduledAt,
+                        eventUri: profile?.onboarding_call_event_uri ?? null,
+                    };
+                } else if (path === "manual_call_pending") {
+                    onboardingBanner = { kind: "admin-call-pending" };
+                } else {
+                    onboardingBanner = { kind: "admin-not-started" };
+                }
+            } else if (path === "manual_call_booked" && scheduledAt) {
+                onboardingBanner = {
+                    kind: "emerald-call-scheduled",
+                    scheduledAt,
+                };
+            } else {
+                onboardingBanner = { kind: "amber-incomplete" };
+            }
         } else if (!profile?.walkthrough_completed) {
             showWalkthrough = true;
         }
     }
+
+    const formatScheduled = (iso: string) => {
+        try {
+            return new Intl.DateTimeFormat("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+            }).format(new Date(iso));
+        } catch {
+            return iso;
+        }
+    };
 
     const sidebarInitialData: SidebarInitialData = {
         clientId,
@@ -190,7 +242,7 @@ export default async function ClientLayout({
                 </div>
 
                 <main className="flex-1 overflow-auto">
-                    {showOnboardingBanner && (
+                    {onboardingBanner.kind === "amber-incomplete" && (
                         <div className="bg-amber-50 border-b border-amber-200 px-6 py-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -213,6 +265,88 @@ export default async function ClientLayout({
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                     </svg>
                                 </Link>
+                            </div>
+                        </div>
+                    )}
+                    {onboardingBanner.kind === "emerald-call-scheduled" && (
+                        <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-shrink-0">
+                                        <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </div>
+                                    <p className="text-sm text-emerald-800">
+                                        <span className="font-semibold">Onboarding call scheduled</span> for{" "}
+                                        <span className="font-medium">{formatScheduled(onboardingBanner.scheduledAt)}</span>.
+                                        {" "}We&apos;ll get you fully set up on the call.
+                                    </p>
+                                </div>
+                                <Link
+                                    href={`/client/${clientId}/onboarding`}
+                                    className="flex-shrink-0 text-sm font-medium text-emerald-700 hover:text-emerald-800 underline"
+                                >
+                                    View details
+                                </Link>
+                            </div>
+                        </div>
+                    )}
+                    {(onboardingBanner.kind === "admin-call-booked" ||
+                        onboardingBanner.kind === "admin-call-pending" ||
+                        onboardingBanner.kind === "admin-not-started") && (
+                        <div className="bg-indigo-50 border-b border-indigo-200 px-6 py-3">
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="flex-shrink-0 text-indigo-600">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h2.28a2 2 0 011.94 1.515l.7 2.81a2 2 0 01-.45 1.95l-1.27 1.27a16 16 0 006.59 6.59l1.27-1.27a2 2 0 011.95-.45l2.81.7A2 2 0 0121 17.72V20a1 1 0 01-1 1h-1C9.61 21 3 14.39 3 6V5z" />
+                                        </svg>
+                                    </div>
+                                    <p className="text-sm text-indigo-800 truncate">
+                                        {onboardingBanner.kind === "admin-call-booked" && (
+                                            <>
+                                                <span className="font-semibold">Onboarding call with this user</span>{" "}
+                                                scheduled for{" "}
+                                                <span className="font-medium">
+                                                    {formatScheduled(onboardingBanner.scheduledAt!)}
+                                                </span>
+                                            </>
+                                        )}
+                                        {onboardingBanner.kind === "admin-call-pending" && (
+                                            <>
+                                                <span className="font-semibold">User clicked Schedule Call</span>{" "}
+                                                but hasn&apos;t booked yet.
+                                            </>
+                                        )}
+                                        {onboardingBanner.kind === "admin-not-started" && (
+                                            <>
+                                                <span className="font-semibold">User has not started onboarding.</span>
+                                            </>
+                                        )}
+                                    </p>
+                                </div>
+                                <div className="flex-shrink-0 flex items-center gap-2">
+                                    {onboardingBanner.kind === "admin-call-booked" && onboardingBanner.eventUri && (
+                                        <a
+                                            href={onboardingBanner.eventUri}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-sm font-medium text-indigo-700 hover:text-indigo-800 underline"
+                                        >
+                                            View call
+                                        </a>
+                                    )}
+                                    <Link
+                                        href={`/client/${clientId}/onboarding`}
+                                        className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                    >
+                                        Configure Now
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </Link>
+                                </div>
                             </div>
                         </div>
                     )}

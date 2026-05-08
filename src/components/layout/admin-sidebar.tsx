@@ -9,6 +9,7 @@ import {
     CreditCard,
     Tag,
     Layers,
+    Calendar,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import Image from "next/image";
@@ -19,7 +20,12 @@ const routes = [
         icon: Users,
         href: "/admin/clients",
     },
-{
+    {
+        label: "Onboarding queue",
+        icon: Calendar,
+        href: "/admin/onboarding",
+    },
+    {
         label: "Billing",
         icon: CreditCard,
         href: "/admin/billing",

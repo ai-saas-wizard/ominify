@@ -10,6 +10,7 @@ import type { AIFieldMeta, TenantProfile } from "@/components/onboarding/types";
 
 export type OnboardingV2Phase =
     | "path_selection"
+    | "schedule_call"
     | "url_input"
     | "analyzing"
     | "profile_review"
@@ -148,6 +149,17 @@ export interface OnboardingV2WizardProps {
     clientId: string;
     clientName: string;
     initialProfile: Record<string, unknown> | null;
+    userEmail: string | null;
+    isAdmin: boolean;
+}
+
+export interface OnboardingCallBooking {
+    scheduledAt: string;
+    inviteeEmail: string | null;
+    inviteeName: string | null;
+    rescheduleUrl: string | null;
+    cancelUrl: string | null;
+    eventUri: string | null;
 }
 
 // Re-export for convenience
