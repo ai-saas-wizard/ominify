@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { listOffers } from "@/lib/offers";
 import { TierForm } from "../_components/tier-form";
 
 export const dynamic = "force-dynamic";
 
-export default function NewPricingTierPage() {
+export default async function NewPricingTierPage() {
+    const offers = await listOffers();
+    const offerOptions = offers
+        .filter((o) => o.is_active)
+        .map((o) => ({ id: o.id, name: o.name, slug: o.slug }));
+
     return (
         <div className="p-4 lg:p-8 max-w-4xl mx-auto space-y-6">
             <Link
@@ -19,7 +25,7 @@ export default function NewPricingTierPage() {
                     Create a Product + Price in Stripe Dashboard first, then paste the Price ID here.
                 </p>
             </div>
-            <TierForm mode="create" />
+            <TierForm mode="create" offers={offerOptions} />
         </div>
     );
 }

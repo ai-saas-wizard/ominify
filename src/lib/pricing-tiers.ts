@@ -40,14 +40,23 @@ export interface PricingTier {
     landing_features: string[];
     landing_cta_label: string | null;
     phases: TierPhase[] | null;
+    /** Offer this tier belongs to (null = no offer; standalone tier). */
+    offer_id: string | null;
+    /** Display order within an offer (lower = first). Ignored when offer_id is null. */
+    sort_order: number;
+    /** "Most Popular" badge on the tier card within an offer. */
+    is_recommended: boolean;
     created_at: string;
     updated_at: string;
 }
 
-const SELECT_COLS =
+export const PRICING_TIER_SELECT_COLS =
     "id,slug,display_name,price_usd,monthly_minutes,rollover_cap,stripe_price_id," +
     "is_public,is_active,description,landing_eyebrow,landing_headline," +
-    "landing_subheadline,landing_features,landing_cta_label,phases,created_at,updated_at";
+    "landing_subheadline,landing_features,landing_cta_label,phases," +
+    "offer_id,sort_order,is_recommended,created_at,updated_at";
+
+const SELECT_COLS = PRICING_TIER_SELECT_COLS;
 
 interface PricingTierRow {
     id: string;
@@ -66,6 +75,9 @@ interface PricingTierRow {
     landing_features: unknown;
     landing_cta_label: string | null;
     phases: unknown;
+    offer_id: string | null;
+    sort_order: number | string | null;
+    is_recommended: boolean | null;
     created_at: string;
     updated_at: string;
 }
@@ -179,9 +191,17 @@ function rowToTier(row: PricingTierRow): PricingTier {
         landing_features: features,
         landing_cta_label: row.landing_cta_label,
         phases: normalizePhases(row.phases),
+        offer_id: row.offer_id,
+        sort_order: Number(row.sort_order ?? 0),
+        is_recommended: row.is_recommended ?? false,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
+}
+
+/** Re-exported so other modules (e.g. offers.ts) can build typed tier rows. */
+export function pricingTierRowToTier(row: unknown): PricingTier {
+    return rowToTier(row as PricingTierRow);
 }
 
 /**

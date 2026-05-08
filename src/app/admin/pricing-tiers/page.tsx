@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Plus, Globe, EyeOff } from "lucide-react";
+import { Plus, Globe, EyeOff, Sparkles } from "lucide-react";
 import { listAllTiers, getTierPhases } from "@/lib/pricing-tiers";
+import { listOffers } from "@/lib/offers";
 import { getAppUrl } from "@/lib/app-url";
 import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
 import { TierRowActions } from "./_components/tier-row-actions";
@@ -8,7 +9,8 @@ import { TierRowActions } from "./_components/tier-row-actions";
 export const dynamic = "force-dynamic";
 
 export default async function PricingTiersAdminPage() {
-    const tiers = await listAllTiers();
+    const [tiers, offers] = await Promise.all([listAllTiers(), listOffers()]);
+    const offersById = new Map(offers.map((o) => [o.id, o]));
     const appUrl = getAppUrl();
 
     return (
@@ -35,6 +37,7 @@ export default async function PricingTiersAdminPage() {
                     <thead className="bg-gray-50 border-b border-gray-200">
                         <tr className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                             <th className="px-4 py-3">Tier</th>
+                            <th className="px-4 py-3">Offer</th>
                             <th className="px-4 py-3">Price</th>
                             <th className="px-4 py-3">Minutes</th>
                             <th className="px-4 py-3">Stripe price</th>
@@ -47,6 +50,7 @@ export default async function PricingTiersAdminPage() {
                         {tiers.map((tier) => {
                             const offerUrl = `${appUrl}/offers/${tier.slug}`;
                             const phases = getTierPhases(tier);
+                            const offer = tier.offer_id ? offersById.get(tier.offer_id) : null;
                             return (
                                 <tr key={tier.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-3">
@@ -59,8 +63,24 @@ export default async function PricingTiersAdminPage() {
                                                     <Globe className="w-3 h-3" /> Public
                                                 </span>
                                             )}
+                                            {tier.is_recommended && (
+                                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded uppercase tracking-wide">
+                                                    <Sparkles className="w-3 h-3" /> Featured
+                                                </span>
+                                            )}
                                         </div>
                                         <code className="text-xs text-gray-500">{tier.slug}</code>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-700">
+                                        {offer ? (
+                                            <div>
+                                                <div className="font-medium text-gray-900">{offer.name}</div>
+                                                <code className="text-xs text-gray-500">{offer.slug}</code>
+                                                <div className="text-xs text-gray-400">order: {tier.sort_order}</div>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-gray-400">—</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         <PhaseSummary phases={phases} variant="compact" />
@@ -104,7 +124,7 @@ export default async function PricingTiersAdminPage() {
                         })}
                         {tiers.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                                <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
                                     No tiers yet. Create one to get started.
                                 </td>
                             </tr>
@@ -113,12 +133,19 @@ export default async function PricingTiersAdminPage() {
                 </table>
             </div>
 
-            <div className="text-xs text-gray-500 max-w-3xl">
-                <strong className="text-gray-700">How segmentation works:</strong> Visitors who land on
-                a tier&apos;s campaign URL get tagged with a 30-day cookie. When they sign up, their
-                client account is locked to that tier&apos;s Stripe price. The public tier is the
-                fallback for visitors who sign up directly. Tier assignment can only be changed
-                by an admin after sign-up.
+            <div className="text-xs text-gray-500 max-w-3xl space-y-2">
+                <p>
+                    <strong className="text-gray-700">How segmentation works:</strong> Visitors who land
+                    on a tier&apos;s URL (or pick a tier card on a multi-tier offer) get tagged with a
+                    30-day cookie. When they sign up, their client account is locked to that tier&apos;s
+                    Stripe price. The public tier is the fallback for visitors who sign up directly.
+                    Tier assignment can only be changed by an admin after sign-up.
+                </p>
+                <p>
+                    To bundle multiple tiers under one campaign URL, create an{" "}
+                    <a href="/admin/offers" className="text-emerald-700 underline">offer</a>{" "}
+                    and assign tiers to it via the Offer dropdown above.
+                </p>
             </div>
         </div>
     );

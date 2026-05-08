@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getTierById } from "@/lib/pricing-tiers";
+import { listOffers } from "@/lib/offers";
 import { TierForm } from "../../_components/tier-form";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +13,11 @@ export default async function EditPricingTierPage({
     params: Promise<{ id: string }>;
 }) {
     const { id } = await params;
-    const tier = await getTierById(id);
+    const [tier, offers] = await Promise.all([getTierById(id), listOffers()]);
     if (!tier) notFound();
+    const offerOptions = offers
+        .filter((o) => o.is_active || o.id === tier.offer_id)
+        .map((o) => ({ id: o.id, name: o.name, slug: o.slug }));
 
     return (
         <div className="p-4 lg:p-8 max-w-4xl mx-auto space-y-6">
@@ -38,6 +42,7 @@ export default async function EditPricingTierPage({
             </div>
             <TierForm
                 mode="edit"
+                offers={offerOptions}
                 initial={{
                     id: tier.id,
                     slug: tier.slug,
@@ -54,6 +59,9 @@ export default async function EditPricingTierPage({
                     landing_features: tier.landing_features,
                     landing_cta_label: tier.landing_cta_label,
                     phases: tier.phases,
+                    offer_id: tier.offer_id,
+                    sort_order: tier.sort_order,
+                    is_recommended: tier.is_recommended,
                 }}
             />
         </div>

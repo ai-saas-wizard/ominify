@@ -18,6 +18,12 @@ import {
 } from "./phases-editor";
 import type { TierPhase } from "@/lib/pricing-tiers";
 
+export interface OfferOption {
+    id: string;
+    name: string;
+    slug: string;
+}
+
 export interface TierFormInitial {
     id?: string;
     slug: string;
@@ -34,6 +40,9 @@ export interface TierFormInitial {
     landing_features: string[];
     landing_cta_label: string | null;
     phases: TierPhase[] | null;
+    offer_id: string | null;
+    sort_order: number;
+    is_recommended: boolean;
 }
 
 const DEFAULTS: TierFormInitial = {
@@ -51,6 +60,9 @@ const DEFAULTS: TierFormInitial = {
     landing_features: [],
     landing_cta_label: "",
     phases: null,
+    offer_id: null,
+    sort_order: 0,
+    is_recommended: false,
 };
 
 function tierPhasesToEditable(phases: TierPhase[] | null): EditablePhase[] {
@@ -93,9 +105,11 @@ function suggestionFromBase(base: string): string {
 export function TierForm({
     initial,
     mode,
+    offers,
 }: {
     initial?: TierFormInitial;
     mode: "create" | "edit";
+    offers: OfferOption[];
 }) {
     const router = useRouter();
     const [pending, startTransition] = useTransition();
@@ -105,6 +119,9 @@ export function TierForm({
     const [slug, setSlug] = useState(init.slug);
     const [features, setFeatures] = useState(init.landing_features.join("\n"));
     const [isPublic, setIsPublic] = useState(init.is_public);
+    const [offerId, setOfferId] = useState<string>(init.offer_id ?? "");
+    const [sortOrder, setSortOrder] = useState(String(init.sort_order ?? 0));
+    const [isRecommended, setIsRecommended] = useState(init.is_recommended);
 
     // Multi-phase state. When enabled, top-level price fields mirror phase 1
     // and are disabled; on submit we serialize phases as JSON.
@@ -140,6 +157,9 @@ export function TierForm({
         formData.set("landing_features", features);
         formData.set("is_public", isPublic ? "on" : "");
         formData.set("phases", phasesToJson(multiPhase, phases));
+        formData.set("offer_id", offerId);
+        formData.set("sort_order", sortOrder);
+        formData.set("is_recommended", isRecommended ? "on" : "");
         // When multi-phase is on, controlled fields drive the submitted values
         // (the inputs are disabled but state still owns the truth).
         if (multiPhase) {
@@ -310,6 +330,65 @@ export function TierForm({
                         placeholder="Notes for admins — not shown to customers."
                     />
                 </div>
+            </section>
+
+            {/* Offer assignment */}
+            <section className="space-y-4">
+                <h2 className="text-base font-semibold text-gray-900">Offer assignment</h2>
+                <p className="text-xs text-gray-500 -mt-2">
+                    Optionally include this tier as one card on a multi-tier offer page.
+                    When set, the tier is rendered alongside other tiers in the same offer.
+                </p>
+
+                <div>
+                    <Label htmlFor="offer_id">Offer</Label>
+                    <select
+                        id="offer_id"
+                        name="offer_id"
+                        value={offerId}
+                        onChange={(e) => setOfferId(e.target.value)}
+                        className="flex h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    >
+                        <option value="">(none — standalone tier)</option>
+                        {offers.map((o) => (
+                            <option key={o.id} value={o.id}>
+                                {o.name} ({o.slug})
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                {offerId && (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <Label htmlFor="sort_order">Sort order</Label>
+                            <Input
+                                id="sort_order"
+                                name="sort_order"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={sortOrder}
+                                onChange={(e) => setSortOrder(e.target.value)}
+                            />
+                            <p className="mt-1 text-xs text-gray-400">
+                                Lower values render first.
+                            </p>
+                        </div>
+                        <div className="flex items-end">
+                            <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-gray-50/50 w-full">
+                                <Label htmlFor="is_recommended" className="cursor-pointer">
+                                    Recommended (Most Popular)
+                                </Label>
+                                <Switch
+                                    id="is_recommended"
+                                    checked={isRecommended}
+                                    onCheckedChange={setIsRecommended}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
             </section>
 
             {/* Landing page content */}

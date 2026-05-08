@@ -16,6 +16,28 @@ A `pricing_tiers` table holds a catalog of subscription tiers. Each tier has a S
 
 Admin manages tiers at [`/admin/pricing-tiers`](../src/app/admin/pricing-tiers/page.tsx) — full CRUD with copy-able campaign URLs and active/inactive toggle.
 
+### Multi-tier offers (multiple plans on one campaign URL)
+
+An **offer** is a marketing landing page that contains multiple tier cards. Use this when you want one campaign URL to surface a Starter / Pro / Enterprise picker for a specific audience (real-estate agents, chiropractors, etc.).
+
+- Offer rows live in the [`offers`](../supabase/migrations/20260510-offers.sql) table — they own the page wrapper (eyebrow, headline, subhead).
+- Each tier optionally points at an offer via [`pricing_tiers.offer_id`](../src/lib/pricing-tiers.ts) (FK, nullable). `sort_order` controls card order; `is_recommended` adds a "Most Popular" badge.
+- Resolution at [`/offers/[slug]`](../src/app/offers/[slug]/page.tsx): the route checks the offers table first; if the slug matches an offer, it renders [`<MultiTierOfferLanding>`](../src/app/offers/[slug]/_components/multi-tier-landing.tsx) with one [`<TierCard>`](../src/components/billing/tier-card.tsx) per assigned active tier. Otherwise it falls back to single-tier rendering.
+- Cookie capture: middleware still sets `omnify_tier=<slug>` to whatever the URL slug is. On a multi-tier offer page, clicking a card invokes [`selectTierAction`](../src/app/offers/[slug]/actions.ts) which **overwrites** the cookie with the chosen tier's slug, then redirects to `/sign-up`. A user who lands on the offer URL but signs up directly without clicking a card gets the public tier (the cookie's offer-slug value doesn't match any tier).
+- Stripe / billing flow is unchanged — offers are a presentation-layer concept; a customer always ends up locked to exactly one tier.
+
+#### Admin workflow
+
+1. Create the offer at [/admin/offers](../src/app/admin/offers/page.tsx) → set slug, name, landing copy.
+2. Create or edit the tiers you want to feature at [/admin/pricing-tiers](../src/app/admin/pricing-tiers/page.tsx); on each tier set the **Offer** dropdown to your new offer, plus `sort_order` and (optionally) `is_recommended` for one tier.
+3. Back on the offer's edit page, the "Tiers in this offer" section shows the assignment with up/down reorder buttons and a "remove from offer" action.
+
+Single-tier campaign URLs continue to work unchanged — you don't need to migrate existing tiers into offers.
+
+#### Slug uniqueness
+
+`offers.slug` and `pricing_tiers.slug` are each individually `UNIQUE`. Cross-table collisions are blocked at the application layer — both create/update actions check the other table and return a clear error if the slug is already in use. Existing data is grandfathered (you can rename if needed).
+
 ### Multi-phase tiers (intro / promo pricing)
 
 A tier can carry an ordered `phases` array (JSONB on `pricing_tiers.phases`). Each phase has its own `stripe_price_id`, `price_usd`, `monthly_minutes`, and `duration_months` (last phase has `null` = runs forever). Single-phase tiers leave `phases=NULL` and behave as before.
@@ -114,7 +136,13 @@ The CTA `"Start with $99/month"` for multi-phase tiers may not satisfy FTC ROSCA
 
 **Recommendation**: change the button to e.g. `"Start with $99/mo · then $379/mo"`. Get a lawyer to review before promotional pricing campaigns go live in regulated jurisdictions (US, EU, UK).
 
-### 7. Stripe test-clock end-to-end smoke test
+### 7. Drag-and-drop reorder for tiers in an offer
+
+Today: up/down buttons on the offer edit page. Acceptable for ≤ 5 tiers but feels clunky beyond that. Adding `react-dnd` or `@dnd-kit` would make the experience nicer; the underlying server action `moveTierInOfferAction` already canonicalizes `sort_order` to 1..N on every move so a drag-drop reorder can issue one bulk update at the end.
+
+**Scope**: ~½ day for a clean drag-and-drop implementation that submits a single reorder server action.
+
+### 8. Stripe test-clock end-to-end smoke test
 
 The implementation is type-checked and SDK-shape-correct, but no integration test has actually rolled the clock forward across a phase boundary. Before shipping a real campaign:
 
@@ -140,10 +168,11 @@ The implementation is type-checked and SDK-shape-correct, but no integration tes
 
 | Area | Files |
 |---|---|
-| Schema | [`supabase/migrations/20260508-pricing-tiers.sql`](../supabase/migrations/20260508-pricing-tiers.sql), [`supabase/migrations/20260509-pricing-tier-phases.sql`](../supabase/migrations/20260509-pricing-tier-phases.sql) |
-| Server helpers | [`src/lib/pricing-tiers.ts`](../src/lib/pricing-tiers.ts), [`src/lib/stripe.ts`](../src/lib/stripe.ts), [`src/lib/subscriptions.ts`](../src/lib/subscriptions.ts) |
+| Schema | [`supabase/migrations/20260508-pricing-tiers.sql`](../supabase/migrations/20260508-pricing-tiers.sql), [`supabase/migrations/20260509-pricing-tier-phases.sql`](../supabase/migrations/20260509-pricing-tier-phases.sql), [`supabase/migrations/20260510-offers.sql`](../supabase/migrations/20260510-offers.sql) |
+| Server helpers | [`src/lib/pricing-tiers.ts`](../src/lib/pricing-tiers.ts), [`src/lib/offers.ts`](../src/lib/offers.ts), [`src/lib/stripe.ts`](../src/lib/stripe.ts), [`src/lib/subscriptions.ts`](../src/lib/subscriptions.ts) |
 | Webhook | [`src/app/api/stripe/webhook/route.ts`](../src/app/api/stripe/webhook/route.ts) |
 | Checkout | [`src/app/api/stripe/subscribe/route.ts`](../src/app/api/stripe/subscribe/route.ts) |
-| Customer-facing UI | [`src/app/offers/[slug]/page.tsx`](../src/app/offers/[slug]/page.tsx), [`src/app/client/[clientId]/subscribe/page.tsx`](../src/app/client/[clientId]/subscribe/page.tsx), [`src/components/billing/phase-summary.tsx`](../src/components/billing/phase-summary.tsx), [`src/components/billing/subscribe-button.tsx`](../src/components/billing/subscribe-button.tsx), [`src/components/billing/clear-tier-cookie.tsx`](../src/components/billing/clear-tier-cookie.tsx) |
-| Admin UI | [`src/app/admin/pricing-tiers/page.tsx`](../src/app/admin/pricing-tiers/page.tsx), [`src/app/admin/pricing-tiers/new/page.tsx`](../src/app/admin/pricing-tiers/new/page.tsx), [`src/app/admin/pricing-tiers/[id]/edit/page.tsx`](../src/app/admin/pricing-tiers/[id]/edit/page.tsx), [`src/app/admin/pricing-tiers/actions.ts`](../src/app/admin/pricing-tiers/actions.ts), [`src/app/admin/pricing-tiers/_components/`](../src/app/admin/pricing-tiers/_components/) |
+| Customer-facing UI | [`src/app/offers/[slug]/page.tsx`](../src/app/offers/[slug]/page.tsx), [`src/app/offers/[slug]/_components/`](../src/app/offers/[slug]/_components/), [`src/app/offers/[slug]/actions.ts`](../src/app/offers/[slug]/actions.ts), [`src/app/client/[clientId]/subscribe/page.tsx`](../src/app/client/[clientId]/subscribe/page.tsx), [`src/components/billing/phase-summary.tsx`](../src/components/billing/phase-summary.tsx), [`src/components/billing/tier-card.tsx`](../src/components/billing/tier-card.tsx), [`src/components/billing/subscribe-button.tsx`](../src/components/billing/subscribe-button.tsx), [`src/components/billing/clear-tier-cookie.tsx`](../src/components/billing/clear-tier-cookie.tsx) |
+| Admin: tiers | [`src/app/admin/pricing-tiers/page.tsx`](../src/app/admin/pricing-tiers/page.tsx), [`src/app/admin/pricing-tiers/new/page.tsx`](../src/app/admin/pricing-tiers/new/page.tsx), [`src/app/admin/pricing-tiers/[id]/edit/page.tsx`](../src/app/admin/pricing-tiers/[id]/edit/page.tsx), [`src/app/admin/pricing-tiers/actions.ts`](../src/app/admin/pricing-tiers/actions.ts), [`src/app/admin/pricing-tiers/_components/`](../src/app/admin/pricing-tiers/_components/) |
+| Admin: offers | [`src/app/admin/offers/page.tsx`](../src/app/admin/offers/page.tsx), [`src/app/admin/offers/new/page.tsx`](../src/app/admin/offers/new/page.tsx), [`src/app/admin/offers/[id]/edit/page.tsx`](../src/app/admin/offers/[id]/edit/page.tsx), [`src/app/admin/offers/actions.ts`](../src/app/admin/offers/actions.ts), [`src/app/admin/offers/_components/`](../src/app/admin/offers/_components/) |
 | Tier capture | [`src/middleware.ts`](../src/middleware.ts), [`src/app/page.tsx`](../src/app/page.tsx), [`src/app/api/offers/clear-tier/route.ts`](../src/app/api/offers/clear-tier/route.ts) |

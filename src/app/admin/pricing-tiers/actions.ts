@@ -39,6 +39,9 @@ interface TierFormFields {
     phases: TierPhase[] | null;
     /** Set when the phases JSON was malformed; surfaced to the admin. */
     phases_parse_error: string | null;
+    offer_id: string | null;
+    sort_order: number;
+    is_recommended: boolean;
 }
 
 /**
@@ -102,6 +105,26 @@ function parseForm(form: FormData): TierFormFields {
         monthly_minutes = phases[0].monthly_minutes;
     }
 
+    const offerIdRaw = String(form.get("offer_id") ?? "").trim();
+    const offer_id = offerIdRaw === "" ? null : offerIdRaw;
+    const sortOrderRaw = Number(form.get("sort_order") ?? 0);
+    // Defensive normalization: clamp to non-negative integer; outside the
+    // form's client validation an admin (or stale form) could post junk.
+    let sort_order =
+        Number.isFinite(sortOrderRaw) && Number.isInteger(sortOrderRaw) && sortOrderRaw >= 0
+            ? sortOrderRaw
+            : 0;
+    let is_recommended = form.get("is_recommended") === "on";
+
+    // If the admin unset the offer mid-edit, the form's React state for
+    // sort_order/is_recommended may still hold stale values (the inputs are
+    // hidden but state persists). Force them to safe defaults so a tier
+    // without an offer never carries leftover ordering / featured-badge data.
+    if (offer_id === null) {
+        sort_order = 0;
+        is_recommended = false;
+    }
+
     return {
         slug,
         display_name,
@@ -118,7 +141,42 @@ function parseForm(form: FormData): TierFormFields {
         landing_cta_label,
         phases,
         phases_parse_error: phasesParse.error,
+        offer_id,
+        sort_order,
+        is_recommended,
     };
+}
+
+/**
+ * Reject creating/updating a tier with a slug that already exists in the
+ * `offers` table. We can't enforce cross-table uniqueness in Postgres
+ * without triggers, so the application owns this guarantee.
+ */
+async function checkSlugCollision(
+    slug: string,
+    excludeTierId?: string
+): Promise<string | null> {
+    const { data: offerRow } = await supabase
+        .from("offers")
+        .select("id")
+        .eq("slug", slug)
+        .maybeSingle();
+    if (offerRow) {
+        return "That slug is already in use by an offer.";
+    }
+    if (excludeTierId) {
+        // Tier slug uniqueness is enforced at the DB level too, but we
+        // pre-check so we can return a friendlier error for self-conflict.
+        const { data: tierRow } = await supabase
+            .from("pricing_tiers")
+            .select("id")
+            .eq("slug", slug)
+            .maybeSingle();
+        if (tierRow && (tierRow as { id: string }).id !== excludeTierId) {
+            return "That slug is already in use by another tier.";
+        }
+    }
+    return null;
 }
 
 function validate(fields: TierFormFields): string | null {
@@ -156,6 +214,9 @@ export async function createTierAction(form: FormData): Promise<ActionResult<{ i
     const err = validate(fields);
     if (err) return { ok: false, error: err };
 
+    const collision = await checkSlugCollision(fields.slug);
+    if (collision) return { ok: false, error: collision };
+
     if (fields.is_public) {
         await supabase
             .from("pricing_tiers")
@@ -181,6 +242,9 @@ export async function createTierAction(form: FormData): Promise<ActionResult<{ i
             landing_features: fields.landing_features,
             landing_cta_label: fields.landing_cta_label,
             phases: fields.phases,
+            offer_id: fields.offer_id,
+            sort_order: fields.sort_order,
+            is_recommended: fields.is_recommended,
         })
         .select("id")
         .single();
@@ -207,6 +271,9 @@ export async function updateTierAction(
     const err = validate(fields);
     if (err) return { ok: false, error: err };
 
+    const collision = await checkSlugCollision(fields.slug, id);
+    if (collision) return { ok: false, error: collision };
+
     if (fields.is_public) {
         await supabase
             .from("pricing_tiers")
@@ -232,6 +299,9 @@ export async function updateTierAction(
             landing_features: fields.landing_features,
             landing_cta_label: fields.landing_cta_label,
             phases: fields.phases,
+            offer_id: fields.offer_id,
+            sort_order: fields.sort_order,
+            is_recommended: fields.is_recommended,
             updated_at: new Date().toISOString(),
         })
         .eq("id", id);
