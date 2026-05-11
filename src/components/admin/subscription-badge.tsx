@@ -9,6 +9,10 @@ interface Props {
     accountType: string;
     grandfathered: boolean;
     subscriptionStatus: string | null;
+    /** True when client has signup_offer_id set but no pricing_tier_id and no live sub. */
+    pickerPending?: boolean;
+    /** True when pricing_tier_id is set but no live subscription has been paid yet. */
+    awaitingPayment?: boolean;
 }
 
 /**
@@ -21,9 +25,15 @@ export function SubscriptionBadge({
     accountType,
     grandfathered,
     subscriptionStatus,
+    pickerPending = false,
+    awaitingPayment = false,
 }: Props) {
     const [pending, startTransition] = useTransition();
 
+    // Resolution order matters — grandfathered + CUSTOM short-circuit; live
+    // Stripe statuses come next; the new local-state flags (picker pending,
+    // awaiting payment) are last because they're only meaningful when there
+    // is NO live subscription.
     const { label, color } = (() => {
         if (grandfathered)
             return { label: "GRANDFATHERED", color: "bg-blue-100 text-blue-700 border-blue-200" };
@@ -37,6 +47,10 @@ export function SubscriptionBadge({
             return { label: "PAST DUE", color: "bg-amber-100 text-amber-700 border-amber-200" };
         if (subscriptionStatus === "canceled")
             return { label: "CANCELED", color: "bg-red-100 text-red-700 border-red-200" };
+        if (pickerPending)
+            return { label: "PICKER PENDING", color: "bg-amber-100 text-amber-700 border-amber-200" };
+        if (awaitingPayment)
+            return { label: "AWAITING PAYMENT", color: "bg-indigo-100 text-indigo-700 border-indigo-200" };
         return { label: "NOT SUBSCRIBED", color: "bg-gray-100 text-gray-700 border-gray-200" };
     })();
 
