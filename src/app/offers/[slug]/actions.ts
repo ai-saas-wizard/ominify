@@ -18,10 +18,20 @@ const VALID_SLUG = /^[a-zA-Z0-9_-]{1,64}$/;
  */
 export async function selectTierAction(formData: FormData): Promise<void> {
     const tierSlug = String(formData.get("tier_slug") ?? "").trim();
-    if (!VALID_SLUG.test(tierSlug)) redirect("/sign-up");
+    if (!VALID_SLUG.test(tierSlug)) {
+        console.warn(`[selectTierAction] invalid slug shape: ${JSON.stringify(tierSlug)}`);
+        redirect("/sign-up");
+    }
 
     const tier = await getTierBySlug(tierSlug, { onlyActive: true });
-    if (!tier) redirect("/sign-up");
+    if (!tier) {
+        // Silent to the customer, loud in logs — helps catch "button didn't
+        // work" reports where the tier got deactivated after the page rendered.
+        console.warn(
+            `[selectTierAction] tier not found or inactive: slug=${tierSlug}; redirecting to /sign-up (will fall back to public tier at signup)`
+        );
+        redirect("/sign-up");
+    }
 
     const store = await cookies();
     store.set("omnify_tier", tierSlug, {

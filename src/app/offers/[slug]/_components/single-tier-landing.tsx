@@ -67,13 +67,13 @@ export function SingleTierOfferLanding({ tier }: { tier: PricingTier }) {
                     transition={{ duration: 0.6, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
                     className="relative group"
                 >
-                    {/* Soft pulsing glow */}
+                    {/* Soft pulsing glow — decorative, must never block the CTA. */}
                     <motion.div
                         aria-hidden
                         initial={{ opacity: 0 }}
                         animate={{ opacity: [0.25, 0.45, 0.25] }}
                         transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                        className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-blue-500/25 blur-2xl"
+                        className="pointer-events-none absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-blue-500/25 blur-2xl"
                     />
 
                     <div className="relative rounded-2xl border border-white/10 bg-white/[0.05] p-8 backdrop-blur-xl">

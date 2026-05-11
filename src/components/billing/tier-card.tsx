@@ -30,30 +30,35 @@ export function TierCard({ tier, index = 0 }: { tier: PricingTier; index?: numbe
                 delay: 0.15 + index * 0.08,
                 ease: [0.16, 1, 0.3, 1],
             }}
-            whileHover={{ y: -4 }}
             className="relative group"
         >
-            {/* Recommended glow */}
+            {/* Recommended glow (decorative — must not capture clicks). */}
             {tier.is_recommended && (
                 <motion.div
                     aria-hidden
                     initial={{ opacity: 0 }}
                     animate={{ opacity: [0.3, 0.55, 0.3] }}
                     transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                    className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/40 via-sky-500/30 to-blue-500/30 blur-xl"
+                    className="pointer-events-none absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/40 via-sky-500/30 to-blue-500/30 blur-xl"
                 />
             )}
 
-            {/* Hover halo (non-recommended cards) */}
+            {/* Hover halo (non-recommended cards) — pointer-events-none so it
+                never blocks the button below, even at opacity-0 it would
+                otherwise be a giant invisible click-eater. */}
             {!tier.is_recommended && (
                 <div
                     aria-hidden
-                    className="absolute -inset-px rounded-2xl bg-gradient-to-br from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 opacity-0 blur-xl transition-opacity duration-300 group-hover:from-emerald-500/20 group-hover:to-sky-500/20 group-hover:opacity-100"
+                    className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 opacity-0 blur-xl transition-opacity duration-300 group-hover:from-emerald-500/20 group-hover:to-sky-500/20 group-hover:opacity-100"
                 />
             )}
 
+            {/* Inner card — the lift on hover happens HERE, not on the parent.
+                Lifting the parent would change its hit area and cause
+                hover-flicker when the cursor is near the bottom edge (where the
+                CTA lives), making clicks drop intermittently. */}
             <div
-                className={`relative h-full rounded-2xl border bg-white/5 p-6 backdrop-blur-xl flex flex-col transition-colors duration-300 ${
+                className={`relative h-full rounded-2xl border bg-white/5 p-6 backdrop-blur-xl flex flex-col transition-all duration-300 ease-out group-hover:-translate-y-1 ${
                     tier.is_recommended
                         ? "border-emerald-400/40 bg-white/[0.06]"
                         : "border-white/10 group-hover:border-emerald-400/30"
@@ -68,7 +73,7 @@ export function TierCard({ tier, index = 0 }: { tier: PricingTier; index?: numbe
                             duration: 0.5,
                             delay: 0.4 + index * 0.08,
                         }}
-                        className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 text-[10px] font-bold tracking-[0.18em] uppercase px-3 py-1.5 rounded-full shadow-lg shadow-emerald-500/30"
+                        className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 text-[10px] font-bold tracking-[0.18em] uppercase px-3 py-1.5 rounded-full shadow-lg shadow-emerald-500/30"
                     >
                         <Sparkles className="w-3 h-3" /> Most Popular
                     </motion.div>

@@ -70,7 +70,7 @@ export function SubscribeView({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: [0.25, 0.45, 0.25] }}
                         transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                        className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-blue-500/25 blur-2xl"
+                        className="pointer-events-none absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/35 via-sky-500/25 to-blue-500/25 blur-2xl"
                     />
 
                     <div className="relative rounded-2xl border border-white/10 bg-white/[0.05] p-8 backdrop-blur-xl">
