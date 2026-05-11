@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getModelLabel } from "@/lib/display-names";
 import { getVertical } from "@/lib/verticals/registry";
 import { VOICE_NAMES } from "../constants";
 import { VoicePlayButton } from "@/components/ui/voice-selector";
@@ -352,7 +353,7 @@ function AgentReviewCard({
                         <DetailItem
                             icon={MapPin}
                             label="Model"
-                            value={modelOverride}
+                            value={getModelLabel(modelOverride)}
                         />
                     </div>
                 </div>

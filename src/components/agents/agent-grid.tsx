@@ -1,6 +1,7 @@
 "use client";
 
 import { VapiAgent } from "@/lib/vapi";
+import { getVoiceProviderLabel, getModelLabel } from "@/lib/display-names";
 import { motion } from "framer-motion";
 import { Bot, Calendar, Mic, Brain, ArrowUpRight } from "lucide-react";
 import Link from "next/link";
@@ -75,10 +76,8 @@ export const AgentGrid = ({ agents }: AgentGridProps) => {
         className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5"
       >
         {agents.map((agent) => {
-          const voiceProvider = agent.voice?.provider || "Default";
-          const modelName =
-            agent.model?.model?.split("/").pop()?.replace(/-/g, " ") ||
-            "gpt-3.5-turbo";
+          const voiceProvider = getVoiceProviderLabel(agent.voice?.provider);
+          const modelName = getModelLabel(agent.model?.model);
 
           return (
             <motion.div key={agent.id} variants={item}>

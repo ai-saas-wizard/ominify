@@ -1,6 +1,7 @@
 "use client";
 
 import { VapiAgent } from "@/lib/vapi";
+import { getVoiceProviderLabel, getModelLabel } from "@/lib/display-names";
 import { motion } from "framer-motion";
 import { Bot, Mic, Brain, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +11,8 @@ interface AgentDetailHeaderProps {
 }
 
 export function AgentDetailHeader({ agent }: AgentDetailHeaderProps) {
-  const voiceProvider = agent.voice?.provider || "Default";
-  const modelName =
-    agent.model?.model?.split("/").pop()?.replace(/-/g, " ") || "gpt-3.5-turbo";
+  const voiceProvider = getVoiceProviderLabel(agent.voice?.provider);
+  const modelName = getModelLabel(agent.model?.model);
 
   return (
     <motion.div
