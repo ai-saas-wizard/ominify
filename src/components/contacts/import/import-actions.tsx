@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useImport } from "./import-context";
 import type { StepKey } from "./import-types";
+import { MAX_IMPORT_ROWS } from "./import-limits";
 import Link from "next/link";
 
 interface ImportActionsProps {
@@ -82,7 +83,11 @@ function computeCanAdvance(step: StepKey, state: import("./import-types").Import
         case 1:
             return state.objectType === "contacts";
         case 2:
-            return state.parsedRows.length > 0;
+            return (
+                state.parsedRows.length > 0 &&
+                state.parsedRows.length <= MAX_IMPORT_ROWS &&
+                !!state.storagePath
+            );
         case 3:
             return Object.values(state.mapping).includes("phone");
         case 4: {

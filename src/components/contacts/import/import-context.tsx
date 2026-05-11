@@ -26,6 +26,10 @@ function reducer(state: ImportState, action: ImportAction): ImportState {
                 fileSize: action.file.size,
                 columns: action.columns,
                 parsedRows: action.rows,
+                // A new file invalidates any prior storage upload.
+                storagePath: null,
+                uploading: false,
+                uploadError: null,
                 // Reset downstream mapping when a new file is uploaded.
                 mapping: {},
                 skipEmpty: {},
@@ -41,10 +45,19 @@ function reducer(state: ImportState, action: ImportAction): ImportState {
                 fileSize: 0,
                 columns: [],
                 parsedRows: [],
+                storagePath: null,
+                uploading: false,
+                uploadError: null,
                 mapping: {},
                 skipEmpty: {},
                 fieldDescriptions: {},
             };
+        case "set_storage_path":
+            return { ...state, storagePath: action.value };
+        case "set_uploading":
+            return { ...state, uploading: action.value };
+        case "set_upload_error":
+            return { ...state, uploadError: action.value };
         case "set_mapping": {
             const next = { ...state.mapping, [action.column]: action.role };
             // If the user mapped to skip, auto-set skip-empty to true (no-op semantically).

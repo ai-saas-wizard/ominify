@@ -2,17 +2,64 @@
 
 import { useCallback, useRef, useState } from "react";
 import Papa from "papaparse";
+import { createClient } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "framer-motion";
-import { UploadCloud, FileText, X, CheckCircle2 } from "lucide-react";
+import { UploadCloud, FileText, X, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { useImport } from "../import-context";
+import { MAX_IMPORT_ROWS } from "../import-limits";
+import {
+    deleteContactImportUpload,
+    getContactImportUploadUrl,
+} from "@/app/actions/contact-list-actions";
 import { cn } from "@/lib/utils";
 
-export function StepUpload() {
+// Anon-key client used solely to PUT the CSV with a server-issued upload
+// token. No session/auth involved — the signed token IS the authorization.
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const STORAGE_BUCKET = "contact-imports";
+
+interface StepUploadProps {
+    clientId: string;
+}
+
+export function StepUpload({ clientId }: StepUploadProps) {
     const { state, dispatch } = useImport();
     const inputRef = useRef<HTMLInputElement>(null);
     const [dragActive, setDragActive] = useState(false);
     const [parsing, setParsing] = useState(false);
     const [parseError, setParseError] = useState<string | null>(null);
+
+    // Upload a parsed CSV file to Supabase Storage via a server-issued signed
+    // token. Skipped when the row count exceeds the cap — gating happens here
+    // and is re-enforced by the submit-step server action.
+    const uploadToStorage = useCallback(
+        async (file: File) => {
+            dispatch({ type: "set_uploading", value: true });
+            dispatch({ type: "set_upload_error", value: null });
+            try {
+                const r = await getContactImportUploadUrl(clientId, file.name);
+                if (!r.success || !r.data) {
+                    throw new Error(r.error || "Failed to get upload URL");
+                }
+                const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                const { error: upErr } = await sb.storage
+                    .from(STORAGE_BUCKET)
+                    .uploadToSignedUrl(r.data.storagePath, r.data.token, file, {
+                        contentType: "text/csv",
+                        upsert: false,
+                    });
+                if (upErr) throw new Error(upErr.message);
+                dispatch({ type: "set_storage_path", value: r.data.storagePath });
+            } catch (e) {
+                const message = e instanceof Error ? e.message : "Upload failed";
+                dispatch({ type: "set_upload_error", value: message });
+            } finally {
+                dispatch({ type: "set_uploading", value: false });
+            }
+        },
+        [clientId, dispatch],
+    );
 
     const handleFile = useCallback(
         (file: File) => {
@@ -21,6 +68,12 @@ export function StepUpload() {
                 setParseError("Only .csv files are supported.");
                 return;
             }
+            // Replacing a previously-uploaded file: drop the old object so it
+            // doesn't orphan in Storage. Fire-and-forget — failure to delete
+            // shouldn't block the new upload.
+            const previousPath = state.storagePath;
+            if (previousPath) void deleteContactImportUpload(previousPath);
+
             setParsing(true);
             Papa.parse<Record<string, string>>(file, {
                 header: true,
@@ -37,6 +90,9 @@ export function StepUpload() {
                         Object.values(r).some((v) => (v || "").trim()),
                     );
                     dispatch({ type: "set_file", file, columns: cols, rows });
+                    if (rows.length > 0 && rows.length <= MAX_IMPORT_ROWS) {
+                        void uploadToStorage(file);
+                    }
                 },
                 error: (err) => {
                     setParsing(false);
@@ -44,8 +100,14 @@ export function StepUpload() {
                 },
             });
         },
-        [dispatch],
+        [dispatch, uploadToStorage, state.storagePath],
     );
+
+    const handleClear = useCallback(() => {
+        const previousPath = state.storagePath;
+        if (previousPath) void deleteContactImportUpload(previousPath);
+        dispatch({ type: "clear_file" });
+    }, [dispatch, state.storagePath]);
 
     const onDrop = useCallback(
         (e: React.DragEvent) => {
@@ -62,7 +124,9 @@ export function StepUpload() {
             <div>
                 <h2 className="text-base font-semibold text-gray-900">Upload your file</h2>
                 <p className="mt-1 text-sm text-gray-500">
-                    CSV files only. Headers in the first row. Up to 100,000 contacts per import.
+                    CSV files only. Headers in the first row. Up to{" "}
+                    {MAX_IMPORT_ROWS.toLocaleString()} contacts per import — split larger
+                    lists into multiple files.
                 </p>
             </div>
 
@@ -141,7 +205,7 @@ export function StepUpload() {
                                         {state.fileName}
                                     </h3>
                                     <button
-                                        onClick={() => dispatch({ type: "clear_file" })}
+                                        onClick={handleClear}
                                         className="rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                                         aria-label="Remove file"
                                     >
@@ -155,10 +219,28 @@ export function StepUpload() {
                                     <span>·</span>
                                     <span>{state.columns.length} columns</span>
                                 </div>
-                                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                    File ready
-                                </div>
+                                {state.parsedRows.length > MAX_IMPORT_ROWS ? (
+                                    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                        Too many rows — limit is{" "}
+                                        {MAX_IMPORT_ROWS.toLocaleString()}
+                                    </div>
+                                ) : state.uploading ? (
+                                    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Uploading...
+                                    </div>
+                                ) : state.uploadError ? (
+                                    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                        Upload failed: {state.uploadError}
+                                    </div>
+                                ) : state.storagePath ? (
+                                    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        File ready
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
 

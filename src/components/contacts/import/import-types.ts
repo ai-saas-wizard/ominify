@@ -30,6 +30,12 @@ export interface ImportState {
     fileSize: number;
     columns: string[];
     parsedRows: Record<string, string>[];
+    /** Supabase Storage key returned after the browser uploads the raw CSV.
+     *  This (not parsedRows) is what gets sent to the server at submit time. */
+    storagePath: string | null;
+    /** True while the browser is uploading the CSV to Storage. */
+    uploading: boolean;
+    uploadError: string | null;
 
     // Mapping
     mapping: Record<string, ColumnRole>;
@@ -53,6 +59,9 @@ export type ImportAction =
     | { type: "set_step"; step: StepKey; direction: 1 | -1 }
     | { type: "set_file"; file: File; columns: string[]; rows: Record<string, string>[] }
     | { type: "clear_file" }
+    | { type: "set_storage_path"; value: string | null }
+    | { type: "set_uploading"; value: boolean }
+    | { type: "set_upload_error"; value: string | null }
     | { type: "set_mapping"; column: string; role: ColumnRole }
     | { type: "init_mapping"; mapping: Record<string, ColumnRole> }
     | { type: "set_skip_empty"; column: string; value: boolean }
@@ -76,6 +85,9 @@ export const initialState: ImportState = {
     fileSize: 0,
     columns: [],
     parsedRows: [],
+    storagePath: null,
+    uploading: false,
+    uploadError: null,
     mapping: {},
     skipEmpty: {},
     fieldDescriptions: {},

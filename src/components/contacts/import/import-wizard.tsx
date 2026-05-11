@@ -64,21 +64,19 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
         dispatch({ type: "set_submitting", value: true });
         dispatch({ type: "set_error", value: null });
 
-        // Filter rows according to mapping. The dropUnmapped flag means we strip
-        // unmapped columns from each row before sending so the server doesn't
-        // store noise.
-        const usedCols = new Set(
-            Object.entries(state.mapping)
-                .filter(([_, role]) => role !== "skip")
-                .map(([col]) => col),
-        );
-        const cleanedRows: Record<string, string>[] = state.parsedRows.map((r) => {
-            if (!state.dropUnmapped) return r;
-            const out: Record<string, string> = {};
-            for (const c of Array.from(usedCols)) out[c] = r[c] || "";
-            return out;
-        });
+        if (!state.storagePath) {
+            dispatch({
+                type: "set_error",
+                value: "File upload didn't finish. Go back to the Upload step and re-upload.",
+            });
+            dispatch({ type: "set_submitting", value: false });
+            return;
+        }
 
+        // Drop the "skip" entries from the mapping. The server applies the
+        // mapping to the rows it parses from storage; unmapped columns are
+        // simply ignored (the bytes already cost us nothing — they live in
+        // Supabase Storage, not in this request).
         const cleanedMapping: Record<string, ColumnRole> = {};
         for (const [col, role] of Object.entries(state.mapping)) {
             if (state.dropUnmapped && role === "skip") continue;
@@ -99,7 +97,7 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
                     listName: state.listName.trim(),
                     description: state.listDescription.trim() || undefined,
                     sourceFilename: state.fileName,
-                    csvRows: cleanedRows,
+                    storagePath: state.storagePath,
                     columnMapping: cleanedMapping,
                     customFieldDescriptions: fieldDescriptions,
                     tagIds: state.selectedTagIds,
@@ -126,7 +124,7 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
             } else {
                 const r = await importContactsWithoutList({
                     clientId,
-                    csvRows: cleanedRows,
+                    storagePath: state.storagePath,
                     columnMapping: cleanedMapping,
                     customFieldDescriptions: fieldDescriptions,
                     tagIds: state.selectedTagIds,
@@ -150,8 +148,9 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
                     });
                 }
             }
-        } catch (e: any) {
-            dispatch({ type: "set_error", value: e?.message || "Import failed" });
+        } catch (e) {
+            const message = e instanceof Error ? e.message : "Import failed";
+            dispatch({ type: "set_error", value: message });
         } finally {
             dispatch({ type: "set_submitting", value: false });
         }
@@ -201,7 +200,7 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
                         transition={{ type: "spring", stiffness: 320, damping: 32 }}
                     >
                         {state.step === 1 && <StepStart />}
-                        {state.step === 2 && <StepUpload />}
+                        {state.step === 2 && <StepUpload clientId={clientId} />}
                         {state.step === 3 && <StepMap />}
                         {state.step === 4 && <StepVerify clientId={clientId} />}
                     </motion.div>

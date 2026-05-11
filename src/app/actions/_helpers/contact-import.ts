@@ -51,9 +51,27 @@ function buildRoleToColumns(columnMapping: Record<string, ColumnRole>): Record<s
     return out;
 }
 
+// Batch size for the bulk UPSERT chunks. Keeps each round-trip well under
+// PostgREST's request size limits while amortising network latency across
+// hundreds of rows. 500 was empirically the sweet spot — larger batches saw
+// diminishing returns and risked PostgREST 413s.
+const UPSERT_BATCH_SIZE = 500;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
+
 // Upsert contacts from CSV-style rows. Pure contact-side logic — no sequences,
 // no enrollments. Dedupes by E.164 phone in-memory before DB writes (so a CSV
 // with a duplicate phone resolves to one upsert, second occurrence wins).
+//
+// Performance notes:
+//   - Existing contacts are fetched with ONE bulk SELECT (.in("phone", [...])).
+//   - Inserts/updates run as batched UPSERTs (500 rows / round-trip) on the
+//     (client_id, phone) unique index defined in supabase/contacts-schema.sql.
+//   - This collapses what used to be 2N sequential round-trips into ~2 + N/500.
 //
 // Merge policy on existing contacts:
 //   - NEW non-empty values win (name, email, custom_field values).
@@ -81,14 +99,23 @@ export async function upsertContactsFromRows(
 
     const roleToColumns = buildRoleToColumns(columnMapping);
 
-    // In-memory dedupe: if a CSV has the same phone twice, keep the LAST occurrence.
-    const dedupedByPhone = new Map<string, { row: Record<string, string>; rowIndex: number }>();
+    // Phase 1: parse + normalise + in-memory dedupe.
+    interface PreparedRow {
+        phone: string;
+        rowIndex: number;
+        row: Record<string, string>;
+        name: string | null;
+        email: string;
+        customFields: Record<string, string>;
+        customVariables: Record<string, string>;
+        sourceRow: Record<string, string>;
+    }
+    const dedupedByPhone = new Map<string, PreparedRow>();
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowIndex = i + 1;
-        const rawPhone = (roleToColumns.phone || [])
-            .map((col) => row[col]?.trim())
-            .find((v) => v) || "";
+        const rawPhone =
+            (roleToColumns.phone || []).map((col) => row[col]?.trim()).find((v) => v) || "";
         const phone = toE164(rawPhone);
         if (rawPhone && !phone) {
             errors.push(`Row ${rowIndex}: Invalid phone number "${rawPhone}"`);
@@ -98,118 +125,163 @@ export async function upsertContactsFromRows(
             errors.push(`Row ${rowIndex}: Missing phone number`);
             continue;
         }
-        dedupedByPhone.set(phone, { row, rowIndex });
+
+        const email =
+            (roleToColumns.email || []).map((col) => row[col]?.trim()).find((v) => v) || "";
+        const firstName =
+            (roleToColumns.first_name || []).map((col) => row[col]?.trim()).find((v) => v) || "";
+        const lastName =
+            (roleToColumns.last_name || []).map((col) => row[col]?.trim()).find((v) => v) || "";
+        const company =
+            (roleToColumns.company || []).map((col) => row[col]?.trim()).find((v) => v) || "";
+        const nameParts = [firstName, lastName].filter(Boolean);
+        const name = nameParts.length > 0 ? nameParts.join(" ") : null;
+
+        const customFields: Record<string, string> = {};
+        if (company) customFields.company = company;
+        for (const col of roleToColumns.custom_variable || []) {
+            const v = row[col]?.trim();
+            if (v) customFields[col] = v;
+        }
+
+        const customVariables: Record<string, string> = {};
+        for (const [col, role] of Object.entries(columnMapping)) {
+            if (role !== "skip" && row[col]?.trim()) {
+                customVariables[col] = row[col].trim();
+            }
+        }
+
+        const sourceRow: Record<string, string> = {};
+        for (const [col, val] of Object.entries(row)) {
+            if (val !== undefined && val !== null) sourceRow[col] = String(val);
+        }
+
+        dedupedByPhone.set(phone, {
+            phone,
+            rowIndex,
+            row,
+            name,
+            email,
+            customFields,
+            customVariables,
+            sourceRow,
+        });
     }
 
-    for (const [phone, { row, rowIndex }] of dedupedByPhone) {
-        try {
-            const email = (roleToColumns.email || [])
-                .map((col) => row[col]?.trim())
-                .find((v) => v) || "";
-            const firstName = (roleToColumns.first_name || [])
-                .map((col) => row[col]?.trim())
-                .find((v) => v) || "";
-            const lastName = (roleToColumns.last_name || [])
-                .map((col) => row[col]?.trim())
-                .find((v) => v) || "";
-            const company = (roleToColumns.company || [])
-                .map((col) => row[col]?.trim())
-                .find((v) => v) || "";
+    if (dedupedByPhone.size === 0) {
+        return { upserted, errors, contactsCreated, contactsUpdated };
+    }
 
-            const nameParts = [firstName, lastName].filter(Boolean);
-            const name = nameParts.length > 0 ? nameParts.join(" ") : null;
+    // Phase 2: ONE bulk SELECT to find every existing contact by phone.
+    interface ExistingContact {
+        id: string;
+        phone: string;
+        name: string | null;
+        email: string | null;
+        custom_fields: Record<string, unknown> | null;
+        opted_out_at: string | null;
+    }
+    const phones = Array.from(dedupedByPhone.keys());
+    const existingByPhone = new Map<string, ExistingContact>();
 
-            const customFields: Record<string, string> = {};
-            if (company) customFields.company = company;
-            for (const col of roleToColumns.custom_variable || []) {
-                const v = row[col]?.trim();
-                if (v) customFields[col] = v;
-            }
-
-            const customVariables: Record<string, string> = {};
-            for (const [col, role] of Object.entries(columnMapping)) {
-                if (role !== "skip" && row[col]?.trim()) {
-                    customVariables[col] = row[col].trim();
-                }
-            }
-
-            // Verbatim CSV row (all original headers preserved) — stored on
-            // contact_list_members.source_row so we can replay enrollment vars.
-            const sourceRow: Record<string, string> = {};
-            for (const [col, val] of Object.entries(row)) {
-                if (val !== undefined && val !== null) sourceRow[col] = String(val);
-            }
-
-            const { data: existingContact } = await supabase
-                .from("contacts")
-                .select("id, name, email, custom_fields, opted_out_at")
-                .eq("client_id", clientId)
-                .eq("phone", phone)
-                .maybeSingle();
-
-            if (existingContact?.opted_out_at) {
-                errors.push(`Row ${rowIndex}: Contact (${phone}) is opted out — skipped.`);
-                continue;
-            }
-
-            let contactId: string;
-            if (existingContact) {
-                contactId = existingContact.id;
-                const updateData: Record<string, any> = {};
-                if (name) updateData.name = name;
-                if (email) updateData.email = email;
-                if (Object.keys(customFields).length > 0) {
-                    updateData.custom_fields = {
-                        ...(existingContact.custom_fields || {}),
-                        ...customFields,
-                    };
-                }
-                if (Object.keys(updateData).length > 0) {
-                    const { error: updErr } = await supabase
-                        .from("contacts")
-                        .update(updateData)
-                        .eq("id", contactId);
-                    if (updErr) {
-                        errors.push(`Row ${rowIndex}: Failed to update contact — ${updErr.message}`);
-                        continue;
-                    }
-                    contactsUpdated++;
-                }
-            } else {
-                const { data: newContact, error: insertErr } = await supabase
-                    .from("contacts")
-                    .insert({
-                        client_id: clientId,
-                        phone,
-                        name: name || null,
-                        email: email || null,
-                        custom_fields: Object.keys(customFields).length > 0 ? customFields : {},
-                        total_calls: 0,
-                    })
-                    .select("id")
-                    .single();
-                if (insertErr || !newContact) {
-                    errors.push(
-                        `Row ${rowIndex}: Failed to create contact — ${insertErr?.message || "unknown error"}`,
-                    );
-                    continue;
-                }
-                contactId = newContact.id;
-                contactsCreated++;
-            }
-
-            upserted.push({
-                contactId,
-                rowIndex,
-                customVariables,
-                sourceRow,
-                phone,
-                name,
-                email: email || null,
-            });
-        } catch (rowError: any) {
-            errors.push(`Row ${rowIndex}: ${rowError?.message || "Unknown error"}`);
+    for (const batch of chunk(phones, 1000)) {
+        const { data, error } = await supabase
+            .from("contacts")
+            .select("id, phone, name, email, custom_fields, opted_out_at")
+            .eq("client_id", clientId)
+            .in("phone", batch);
+        if (error) {
+            errors.push(`Failed to look up existing contacts: ${error.message}`);
+            return { upserted, errors, contactsCreated, contactsUpdated };
         }
+        for (const r of (data || []) as ExistingContact[]) existingByPhone.set(r.phone, r);
+    }
+
+    // Phase 3: build upsert payloads. Skip opted-out contacts entirely.
+    interface UpsertPayload {
+        client_id: string;
+        phone: string;
+        name: string | null;
+        email: string | null;
+        custom_fields: Record<string, unknown>;
+        total_calls?: number;
+    }
+    const toUpsert: UpsertPayload[] = [];
+    const willCreate: PreparedRow[] = [];
+    const willUpdate: PreparedRow[] = [];
+
+    for (const prepared of dedupedByPhone.values()) {
+        const existing = existingByPhone.get(prepared.phone);
+
+        if (existing?.opted_out_at) {
+            errors.push(
+                `Row ${prepared.rowIndex}: Contact (${prepared.phone}) is opted out — skipped.`,
+            );
+            continue;
+        }
+
+        if (existing) {
+            // Merge: new non-empty wins, otherwise preserve existing.
+            const mergedName = prepared.name || existing.name || null;
+            const mergedEmail = prepared.email || existing.email || null;
+            const mergedCustom = {
+                ...(existing.custom_fields || {}),
+                ...prepared.customFields,
+            };
+            toUpsert.push({
+                client_id: clientId,
+                phone: prepared.phone,
+                name: mergedName,
+                email: mergedEmail,
+                custom_fields: mergedCustom,
+            });
+            willUpdate.push(prepared);
+        } else {
+            toUpsert.push({
+                client_id: clientId,
+                phone: prepared.phone,
+                name: prepared.name,
+                email: prepared.email || null,
+                custom_fields: prepared.customFields,
+                total_calls: 0,
+            });
+            willCreate.push(prepared);
+        }
+    }
+
+    // Phase 4: batched UPSERT keyed on the (client_id, phone) unique index.
+    // We need the inserted/updated ids back so we can build the UpsertedRow
+    // results — onConflict + .select() returns ids for both branches.
+    const idByPhone = new Map<string, string>();
+    for (const batch of chunk(toUpsert, UPSERT_BATCH_SIZE)) {
+        const { data, error } = await supabase
+            .from("contacts")
+            .upsert(batch, { onConflict: "client_id,phone" })
+            .select("id, phone");
+        if (error) {
+            errors.push(`Bulk upsert failed: ${error.message}`);
+            return { upserted, errors, contactsCreated, contactsUpdated };
+        }
+        for (const r of data || []) idByPhone.set(r.phone as string, r.id as string);
+    }
+
+    // Phase 5: assemble result rows, in original CSV order.
+    contactsCreated = willCreate.length;
+    contactsUpdated = willUpdate.length;
+
+    const ordered = [...dedupedByPhone.values()].sort((a, b) => a.rowIndex - b.rowIndex);
+    for (const prepared of ordered) {
+        const contactId = idByPhone.get(prepared.phone);
+        if (!contactId) continue; // opted-out or upsert failure
+        upserted.push({
+            contactId,
+            rowIndex: prepared.rowIndex,
+            customVariables: prepared.customVariables,
+            sourceRow: prepared.sourceRow,
+            phone: prepared.phone,
+            name: prepared.name,
+            email: prepared.email || null,
+        });
     }
 
     return { upserted, errors, contactsCreated, contactsUpdated };

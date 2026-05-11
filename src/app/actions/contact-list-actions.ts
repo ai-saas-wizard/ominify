@@ -1,5 +1,6 @@
 "use server";
 
+import Papa from "papaparse";
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 import {
@@ -8,15 +9,91 @@ import {
     type ColumnRole,
     type UpsertedRow,
 } from "@/app/actions/_helpers/contact-import";
+import {
+    CONTACT_IMPORTS_BUCKET,
+    buildContactImportPath,
+    deleteContactImportCsv,
+    downloadContactImportCsv,
+} from "@/app/actions/_helpers/contact-import-storage";
 import { assignTagsToContacts } from "@/app/actions/contact-tag-actions";
 import { enrollListInSequence } from "@/app/actions/sequence-actions";
+import { MAX_IMPORT_ROWS } from "@/components/contacts/import/import-limits";
+
+// Drop a CSV from the contact-imports bucket. Called from the wizard when
+// the user replaces or clears their selected file so the previous upload
+// doesn't orphan in Storage. Best-effort: never throws.
+export async function deleteContactImportUpload(storagePath: string): Promise<{
+    success: boolean;
+}> {
+    if (!storagePath) return { success: true };
+    await deleteContactImportCsv(storagePath);
+    return { success: true };
+}
+
+// Mints a pre-signed upload token so the browser can PUT a CSV directly to
+// Supabase Storage, bypassing Vercel's 4.5 MB serverless body limit. The
+// returned `storagePath` is then passed back to createListFromImport /
+// importContactsWithoutList at submit time.
+export async function getContactImportUploadUrl(
+    clientId: string,
+    fileName: string,
+): Promise<{
+    success: boolean;
+    error?: string;
+    data?: { storagePath: string; token: string };
+}> {
+    if (!clientId) return { success: false, error: "Missing clientId" };
+    if (!fileName) return { success: false, error: "Missing fileName" };
+
+    const storagePath = buildContactImportPath(clientId, fileName);
+
+    const { data, error } = await supabase.storage
+        .from(CONTACT_IMPORTS_BUCKET)
+        .createSignedUploadUrl(storagePath);
+
+    if (error || !data) {
+        return { success: false, error: error?.message || "Failed to mint upload URL" };
+    }
+
+    return { success: true, data: { storagePath, token: data.token } };
+}
+
+// Same batching strategy used in _helpers/contact-import.ts. Avoids a single
+// PostgREST request that bloats with `source_row` JSONB on large imports.
+const MEMBERS_BATCH_SIZE = 500;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
+
+// Parse a CSV downloaded from Storage into the same row+column shape the
+// browser produced. Pure wrapper around papaparse — keeps the parsing details
+// out of the action body.
+function parseCsvText(
+    text: string,
+): { columns: string[]; rows: Record<string, string>[]; error?: string } {
+    const result = Papa.parse<Record<string, string>>(text, {
+        header: true,
+        skipEmptyLines: true,
+    });
+    if (result.errors.length > 0) {
+        return { columns: [], rows: [], error: `CSV parse error: ${result.errors[0].message}` };
+    }
+    const columns = result.meta.fields || [];
+    const rows = (result.data as Record<string, string>[]).filter((r) =>
+        Object.values(r).some((v) => (v || "").trim()),
+    );
+    return { columns, rows };
+}
 
 interface CreateListInput {
     clientId: string;
     listName: string;
     description?: string;
     sourceFilename?: string;
-    csvRows: Record<string, string>[];
+    storagePath: string;
     columnMapping: Record<string, ColumnRole>;
     customFieldDescriptions?: Record<string, { description: string; dirty: boolean }>;
     tagIds?: string[];
@@ -44,7 +121,7 @@ export async function createListFromImport(input: CreateListInput): Promise<{
             listName,
             description,
             sourceFilename,
-            csvRows,
+            storagePath,
             columnMapping,
             customFieldDescriptions = {},
             tagIds = [],
@@ -54,11 +131,28 @@ export async function createListFromImport(input: CreateListInput): Promise<{
         if (!listName?.trim()) {
             return { success: false, error: "List name is required" };
         }
-        if (!csvRows || csvRows.length === 0) {
-            return { success: false, error: "No rows to import" };
+        if (!storagePath) {
+            return { success: false, error: "Missing uploaded CSV reference" };
         }
         if (!Object.values(columnMapping).includes("phone")) {
             return { success: false, error: "A phone column mapping is required" };
+        }
+
+        const downloaded = await downloadContactImportCsv(storagePath);
+        if (!downloaded.success || !downloaded.text) {
+            return { success: false, error: downloaded.error || "Failed to download CSV" };
+        }
+        const parsed = parseCsvText(downloaded.text);
+        if (parsed.error) return { success: false, error: parsed.error };
+        const csvRows = parsed.rows;
+        if (csvRows.length === 0) {
+            return { success: false, error: "No rows to import" };
+        }
+        if (csvRows.length > MAX_IMPORT_ROWS) {
+            return {
+                success: false,
+                error: `Import limited to ${MAX_IMPORT_ROWS.toLocaleString()} rows per file. Please split your list.`,
+            };
         }
 
         await registerCustomFields(clientId, columnMapping, customFieldDescriptions);
@@ -88,8 +182,10 @@ export async function createListFromImport(input: CreateListInput): Promise<{
         }
         const listId = listRow.id as string;
 
-        // Insert members in a single batch upsert, preserving each row's verbatim CSV row
-        // for later replay during sequence enrollment.
+        // Insert members in batched upserts, preserving each row's verbatim CSV
+        // row for later replay during sequence enrollment. Batching is required
+        // because `source_row` JSONB can be multi-KB per row — a single 10k-row
+        // upsert would blow PostgREST's request size limit.
         if (upsertResult.upserted.length > 0) {
             const memberRows = upsertResult.upserted.map((u) => ({
                 list_id: listId,
@@ -98,12 +194,17 @@ export async function createListFromImport(input: CreateListInput): Promise<{
                 added_via: "csv",
             }));
 
-            const { error: membersErr } = await supabase
-                .from("contact_list_members")
-                .upsert(memberRows, { onConflict: "list_id,contact_id" });
+            for (const batch of chunk(memberRows, MEMBERS_BATCH_SIZE)) {
+                const { error: membersErr } = await supabase
+                    .from("contact_list_members")
+                    .upsert(batch, { onConflict: "list_id,contact_id" });
 
-            if (membersErr) {
-                return { success: false, error: `List created but members failed: ${membersErr.message}` };
+                if (membersErr) {
+                    return {
+                        success: false,
+                        error: `List created but members failed: ${membersErr.message}`,
+                    };
+                }
             }
 
             await supabase
@@ -133,6 +234,9 @@ export async function createListFromImport(input: CreateListInput): Promise<{
         revalidatePath(`/client/${clientId}/contacts`);
         revalidatePath(`/client/${clientId}/contacts/lists`);
 
+        // Best-effort: drop the uploaded CSV now that it's been imported.
+        await deleteContactImportCsv(storagePath);
+
         return {
             success: true,
             data: {
@@ -159,17 +263,34 @@ export async function importContactsWithoutList(input: Omit<CreateListInput, "li
     try {
         const {
             clientId,
-            csvRows,
+            storagePath,
             columnMapping,
             customFieldDescriptions = {},
             tagIds = [],
             enrollIntoSequenceId,
         } = input;
-        if (!csvRows || csvRows.length === 0) {
-            return { success: false, error: "No rows to import" };
+        if (!storagePath) {
+            return { success: false, error: "Missing uploaded CSV reference" };
         }
         if (!Object.values(columnMapping).includes("phone")) {
             return { success: false, error: "A phone column mapping is required" };
+        }
+
+        const downloaded = await downloadContactImportCsv(storagePath);
+        if (!downloaded.success || !downloaded.text) {
+            return { success: false, error: downloaded.error || "Failed to download CSV" };
+        }
+        const parsed = parseCsvText(downloaded.text);
+        if (parsed.error) return { success: false, error: parsed.error };
+        const csvRows = parsed.rows;
+        if (csvRows.length === 0) {
+            return { success: false, error: "No rows to import" };
+        }
+        if (csvRows.length > MAX_IMPORT_ROWS) {
+            return {
+                success: false,
+                error: `Import limited to ${MAX_IMPORT_ROWS.toLocaleString()} rows per file. Please split your list.`,
+            };
         }
 
         await registerCustomFields(clientId, columnMapping, customFieldDescriptions);
@@ -200,6 +321,10 @@ export async function importContactsWithoutList(input: Omit<CreateListInput, "li
         }
 
         revalidatePath(`/client/${clientId}/contacts`);
+
+        // Best-effort: drop the uploaded CSV now that it's been imported.
+        await deleteContactImportCsv(storagePath);
+
         return {
             success: true,
             data: {

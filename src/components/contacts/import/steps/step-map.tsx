@@ -25,6 +25,26 @@ function detectColumnRole(columnName: string): ColumnRole {
     return "custom_variable";
 }
 
+// Columns whose values average over this many characters are auto-skipped
+// rather than imported as custom fields. Keeps payloads small and avoids
+// polluting custom_fields with prose like agent bios or product descriptions.
+const LONG_TEXT_AVG_THRESHOLD = 200;
+
+function isLongTextColumn(column: string, rows: Record<string, string>[]): boolean {
+    const sample = rows.slice(0, 100);
+    let totalLength = 0;
+    let count = 0;
+    for (const row of sample) {
+        const v = row[column];
+        if (v) {
+            totalLength += v.length;
+            count++;
+        }
+    }
+    if (count === 0) return false;
+    return totalLength / count > LONG_TEXT_AVG_THRESHOLD;
+}
+
 export function StepMap() {
     const { state, dispatch } = useImport();
     const [requirementsOpen, setRequirementsOpen] = useState(true);
@@ -34,9 +54,15 @@ export function StepMap() {
         if (state.columns.length === 0) return;
         if (Object.keys(state.mapping).length > 0) return;
         const auto: Record<string, ColumnRole> = {};
-        for (const c of state.columns) auto[c] = detectColumnRole(c);
+        for (const c of state.columns) {
+            const role = detectColumnRole(c);
+            auto[c] =
+                role === "custom_variable" && isLongTextColumn(c, state.parsedRows)
+                    ? "skip"
+                    : role;
+        }
         dispatch({ type: "init_mapping", mapping: auto });
-    }, [state.columns, state.mapping, dispatch]);
+    }, [state.columns, state.parsedRows, state.mapping, dispatch]);
 
     const counts = useMemo(() => {
         let mapped = 0;
