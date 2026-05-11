@@ -5,22 +5,30 @@ import { verifyWebhookSignature } from "@/lib/calendly";
 /**
  * Global onboarding Calendly webhook.
  *
- * Receives invitee.created/canceled/rescheduled events from Omnify's company
- * Calendly account (the team that runs white-glove onboarding calls).
+ * Receives invitee.created/canceled events from Omnify's company Calendly
+ * account (the team that runs white-glove onboarding calls). Distinct from
+ * the per-tenant Calendly webhook at /api/integrations/calendly/webhook/route.ts.
  *
- * Distinct from the per-tenant Calendly webhook at
- * /api/integrations/calendly/webhook/route.ts which is for tenants connecting
- * their own Calendly accounts to drive their AI agents' calendars.
- *
- * The clientId is matched via a hidden "a1" custom answer the inline widget
- * passes through prefill.customAnswers, with email fallback against
- * tenant_profiles via the Clerk-linked clients table.
+ * The clientId is matched via Calendly's `tracking.utm_content` field, which
+ * the inline widget populates invisibly via the `utm` prop. Fallbacks:
+ *   1. utm_content (primary — invisible to invitee, set by InlineWidget)
+ *   2. questions_and_answers (in case a "client id" question is added)
+ *   3. email match against the Clerk-linked clients table
  */
 
 type CalendlyQuestionAnswer = {
     question: string;
     answer: string;
     position?: number;
+};
+
+type CalendlyTracking = {
+    utm_campaign?: string | null;
+    utm_source?: string | null;
+    utm_medium?: string | null;
+    utm_content?: string | null;
+    utm_term?: string | null;
+    salesforce_uuid?: string | null;
 };
 
 type CalendlyInviteePayload = {
@@ -31,6 +39,7 @@ type CalendlyInviteePayload = {
     cancel_url?: string;
     reschedule_url?: string;
     questions_and_answers?: CalendlyQuestionAnswer[];
+    tracking?: CalendlyTracking;
     scheduled_event?: {
         uri: string;
         start_time: string;
@@ -43,6 +52,29 @@ type CalendlyWebhookEvent = {
     event: "invitee.created" | "invitee.canceled";
     payload: CalendlyInviteePayload;
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function extractClientIdFromTracking(
+    tracking: CalendlyTracking | undefined
+): string | null {
+    if (!tracking) return null;
+    // Primary: utm_content (set by InlineWidget's utm prop). Also try
+    // utm_term, utm_campaign, and salesforce_uuid in case operators have
+    // marketing tracking on the link and we collided.
+    const candidates = [
+        tracking.utm_content,
+        tracking.utm_term,
+        tracking.salesforce_uuid,
+        tracking.utm_campaign,
+    ];
+    for (const c of candidates) {
+        if (c && UUID_RE.test(c.trim())) {
+            return c.trim();
+        }
+    }
+    return null;
+}
 
 function extractClientIdFromAnswers(
     answers: CalendlyQuestionAnswer[] | undefined
@@ -62,7 +94,7 @@ function extractClientIdFromAnswers(
     }
     if (answers.length > 0 && answers[0]?.answer) {
         const candidate = answers[0].answer.trim();
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)) {
+        if (UUID_RE.test(candidate)) {
             return candidate;
         }
     }
@@ -166,7 +198,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Missing payload" }, { status: 400 });
     }
 
-    let clientId = extractClientIdFromAnswers(payload.questions_and_answers);
+    let clientId =
+        extractClientIdFromTracking(payload.tracking) ??
+        extractClientIdFromAnswers(payload.questions_and_answers);
     if (!clientId) {
         clientId = await resolveClientIdByEmail(payload.email);
     }

@@ -182,9 +182,13 @@ function PickerMode({
                                     prefill={{
                                         email: userEmail ?? undefined,
                                         name: userName,
-                                        customAnswers: {
-                                            a1: clientId,
-                                        },
+                                    }}
+                                    utm={{
+                                        // Calendly captures utm_content into the
+                                        // webhook payload's `tracking` object —
+                                        // invisible to the invitee, perfect for
+                                        // matching bookings back to clients.
+                                        utmContent: clientId,
                                     }}
                                     pageSettings={{
                                         backgroundColor: "ffffff",
