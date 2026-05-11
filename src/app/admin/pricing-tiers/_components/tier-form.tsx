@@ -16,7 +16,7 @@ import {
     phasesToJson,
     type EditablePhase,
 } from "./phases-editor";
-import type { TierPhase } from "@/lib/pricing-tiers";
+import type { TierPhase } from "@/lib/pricing-tiers-shared";
 
 export interface OfferOption {
     id: string;

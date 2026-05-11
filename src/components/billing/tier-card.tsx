@@ -1,76 +1,139 @@
-import { CheckCircle2, Sparkles } from "lucide-react";
-import { getTierPhases, type PricingTier } from "@/lib/pricing-tiers";
+"use client";
+
+import { motion } from "framer-motion";
+import { CheckCircle2, Sparkles, ArrowRight } from "lucide-react";
+import { getTierPhases, type PricingTier } from "@/lib/pricing-tiers-shared";
 import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
 import { selectTierAction } from "@/app/offers/[slug]/actions";
 
 /**
- * One pricing tier rendered as a card. Used on multi-tier offer pages.
+ * One pricing tier rendered as a glass card on the dark offer page.
  * Submitting the form invokes the server action, which sets the
  * `omnify_tier` cookie to this tier's slug and redirects to /sign-up.
+ *
+ * Animations:
+ * - Cards fade-up + scale on first paint (parent orchestrates stagger via index)
+ * - Recommended card has a soft pulsing glow
+ * - Hover lift + brighter ring
+ * - CTA button has spring-press on tap, gradient on hover
  */
-export function TierCard({ tier }: { tier: PricingTier }) {
+export function TierCard({ tier, index = 0 }: { tier: PricingTier; index?: number }) {
     const phases = getTierPhases(tier);
-    const features =
-        tier.landing_features.length > 0 ? tier.landing_features : null;
+    const features = tier.landing_features.length > 0 ? tier.landing_features : null;
 
     return (
-        <div
-            className={`relative bg-white rounded-2xl border p-6 flex flex-col ${
-                tier.is_recommended
-                    ? "border-emerald-500 ring-2 ring-emerald-500/20 shadow-md"
-                    : "border-gray-200"
-            }`}
+        <motion.div
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{
+                duration: 0.55,
+                delay: 0.15 + index * 0.08,
+                ease: [0.16, 1, 0.3, 1],
+            }}
+            whileHover={{ y: -4 }}
+            className="relative group"
         >
+            {/* Recommended glow */}
             {tier.is_recommended && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 bg-emerald-600 text-white text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-full">
-                    <Sparkles className="w-3 h-3" /> Most Popular
-                </div>
+                <motion.div
+                    aria-hidden
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0.3, 0.55, 0.3] }}
+                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-emerald-500/40 via-sky-500/30 to-blue-500/30 blur-xl"
+                />
             )}
 
-            <div>
-                <h3 className="text-lg font-bold text-gray-900">
-                    {tier.display_name}
-                </h3>
-                <div className="mt-2">
-                    <PhaseSummary phases={phases} />
-                </div>
-            </div>
+            {/* Hover halo (non-recommended cards) */}
+            {!tier.is_recommended && (
+                <div
+                    aria-hidden
+                    className="absolute -inset-px rounded-2xl bg-gradient-to-br from-emerald-500/0 via-emerald-500/0 to-emerald-500/0 opacity-0 blur-xl transition-opacity duration-300 group-hover:from-emerald-500/20 group-hover:to-sky-500/20 group-hover:opacity-100"
+                />
+            )}
 
-            <ul className="mt-6 space-y-2.5 text-sm flex-1">
-                {features ? (
-                    features.map((f, i) => (
-                        <li key={i} className="flex items-start gap-2 text-gray-700">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                            <span>{f}</span>
-                        </li>
-                    ))
-                ) : (
-                    <>
-                        <li className="flex items-start gap-2 text-gray-700">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                            <PhaseMinutesSummary phases={phases} />
-                        </li>
-                        <li className="flex items-start gap-2 text-gray-700">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                            <span>Cancel anytime</span>
-                        </li>
-                    </>
+            <div
+                className={`relative h-full rounded-2xl border bg-white/5 p-6 backdrop-blur-xl flex flex-col transition-colors duration-300 ${
+                    tier.is_recommended
+                        ? "border-emerald-400/40 bg-white/[0.06]"
+                        : "border-white/10 group-hover:border-emerald-400/30"
+                }`}
+            >
+                {/* Most-popular badge */}
+                {tier.is_recommended && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{
+                            duration: 0.5,
+                            delay: 0.4 + index * 0.08,
+                        }}
+                        className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 text-[10px] font-bold tracking-[0.18em] uppercase px-3 py-1.5 rounded-full shadow-lg shadow-emerald-500/30"
+                    >
+                        <Sparkles className="w-3 h-3" /> Most Popular
+                    </motion.div>
                 )}
-            </ul>
 
-            <form action={selectTierAction} className="mt-6">
-                <input type="hidden" name="tier_slug" value={tier.slug} />
-                <button
-                    type="submit"
-                    className={`w-full px-4 py-2.5 font-semibold rounded-lg transition-colors ${
-                        tier.is_recommended
-                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                            : "bg-gray-900 text-white hover:bg-gray-800"
-                    }`}
-                >
-                    {tier.landing_cta_label ?? `Choose ${tier.display_name}`}
-                </button>
-            </form>
-        </div>
+                {/* Header */}
+                <div>
+                    <h3 className="text-xl font-bold text-white tracking-tight">
+                        {tier.display_name}
+                    </h3>
+                    <div className="mt-4">
+                        <PhaseSummary phases={phases} theme="dark" />
+                    </div>
+                </div>
+
+                {/* Features */}
+                <ul className="mt-7 space-y-3 text-sm flex-1">
+                    {features ? (
+                        features.map((f, i) => (
+                            <FeatureRow key={i} text={f} />
+                        ))
+                    ) : (
+                        <>
+                            <FeatureRow>
+                                <PhaseMinutesSummary phases={phases} />
+                            </FeatureRow>
+                            <FeatureRow text="Cancel anytime" />
+                        </>
+                    )}
+                </ul>
+
+                {/* CTA */}
+                <form action={selectTierAction} className="mt-8">
+                    <input type="hidden" name="tier_slug" value={tier.slug} />
+                    <motion.button
+                        type="submit"
+                        whileHover={{ scale: 1.015 }}
+                        whileTap={{ scale: 0.97 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                        className={`group/btn w-full inline-flex items-center justify-center gap-2 px-4 py-3 font-semibold rounded-xl text-sm transition-all ${
+                            tier.is_recommended
+                                ? "bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50"
+                                : "bg-white/10 text-white border border-white/15 hover:bg-white/15 hover:border-emerald-400/40"
+                        }`}
+                    >
+                        {tier.landing_cta_label ?? `Choose ${tier.display_name}`}
+                        <ArrowRight className="w-4 h-4 transition-transform group-hover/btn:translate-x-0.5" />
+                    </motion.button>
+                </form>
+            </div>
+        </motion.div>
+    );
+}
+
+function FeatureRow({
+    text,
+    children,
+}: {
+    text?: string;
+    children?: React.ReactNode;
+}) {
+    return (
+        <li className="flex items-start gap-2.5 text-white/80">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <span>{children ?? text}</span>
+        </li>
     );
 }

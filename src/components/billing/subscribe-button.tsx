@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { motion } from "framer-motion";
+import { Check, ArrowRight, Loader2 } from "lucide-react";
 
 /**
  * Subscribe button — posts to /api/stripe/subscribe and redirects to
  * Stripe-hosted Checkout. Gated behind a TCPA/DNC consent checkbox.
  *
- * Price comes from the parent (resolved from the client's pricing tier).
- * `multiPhase` shifts the CTA copy to communicate that the price will rise
- * after the intro period.
+ * Dark-themed variant for the in-app subscribe page; matches the offer
+ * landing aesthetic. `multiPhase` shifts the CTA copy to communicate that
+ * the price will rise after the intro period.
  */
 export function SubscribeButton({
     clientId,
@@ -44,30 +45,30 @@ export function SubscribeButton({
                 throw new Error(data.error || "Failed to start checkout");
             }
             window.location.href = data.url as string;
-        } catch (e: any) {
-            setError(e?.message || "Something went wrong");
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : "Something went wrong");
             setLoading(false);
         }
     }
 
     return (
         <div className="flex flex-col gap-3">
-            <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50/50 cursor-pointer hover:border-gray-300 transition-colors">
+            <label className="flex items-start gap-3 p-3.5 rounded-xl border border-white/10 bg-white/5 cursor-pointer hover:bg-white/[0.07] hover:border-white/20 transition-colors">
                 <button
                     type="button"
                     onClick={() => setAccepted((v) => !v)}
-                    className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                    className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
                         accepted
-                            ? "border-emerald-500 bg-emerald-500"
-                            : "border-gray-300 bg-white"
+                            ? "border-emerald-400 bg-emerald-400 shadow-sm shadow-emerald-400/40"
+                            : "border-white/30 bg-transparent"
                     }`}
                     aria-pressed={accepted}
                     aria-label="Accept compliance terms"
                 >
-                    {accepted && <Check className="w-3 h-3 text-white" />}
+                    {accepted && <Check className="w-3 h-3 text-emerald-950" strokeWidth={3} />}
                 </button>
                 <span
-                    className="text-xs text-gray-600 leading-relaxed select-none"
+                    className="text-xs text-white/60 leading-relaxed select-none"
                     onClick={() => setAccepted((v) => !v)}
                 >
                     I confirm that I have obtained prior express written consent
@@ -81,7 +82,7 @@ export function SubscribeButton({
                         href="/legal/terms"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-emerald-700 underline"
+                        className="text-emerald-300 hover:text-emerald-200 underline-offset-2 underline"
                     >
                         Terms of Service
                     </a>{" "}
@@ -90,7 +91,7 @@ export function SubscribeButton({
                         href="/legal/privacy"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-emerald-700 underline"
+                        className="text-emerald-300 hover:text-emerald-200 underline-offset-2 underline"
                     >
                         Privacy Policy
                     </a>
@@ -98,20 +99,39 @@ export function SubscribeButton({
                 </span>
             </label>
 
-            <button
+            <motion.button
                 type="button"
                 onClick={handleClick}
                 disabled={loading || !accepted}
-                className="w-full px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                whileHover={accepted && !loading ? { scale: 1.015 } : undefined}
+                whileTap={accepted && !loading ? { scale: 0.97 } : undefined}
+                transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                className="group w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 font-semibold rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
             >
-                {loading
-                    ? "Redirecting to Stripe…"
-                    : ctaLabel ??
-                      (multiPhase
-                          ? `Start with $${priceUsd}/month`
-                          : `Subscribe — $${priceUsd}/month`)}
-            </button>
-            {error && <p className="text-sm text-red-600 text-center">{error}</p>}
+                {loading ? (
+                    <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Redirecting to Stripe…
+                    </>
+                ) : (
+                    <>
+                        {ctaLabel ??
+                            (multiPhase
+                                ? `Start with $${priceUsd}/month`
+                                : `Subscribe — $${priceUsd}/month`)}
+                        <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                    </>
+                )}
+            </motion.button>
+            {error && (
+                <motion.p
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-sm text-rose-300 text-center"
+                >
+                    {error}
+                </motion.p>
+            )}
         </div>
     );
 }
