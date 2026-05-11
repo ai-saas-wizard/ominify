@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { normalizeToE164, isValidPhone } from "@/lib/phone-utils";
 import { TIMEZONES } from "@/components/onboarding/constants";
 import { getVertical } from "@/lib/verticals/registry";
 import type {
@@ -225,11 +226,11 @@ export function VerticalForm({
         const inboundTransferFirstName = (
             fields.inboundTransferFirstName as string
         ).trim();
-        // validate() already passed, so toE164 is non-null for both phones.
-        const inboundTransferPhone = toE164(
+        // validate() already passed, so normalizeToE164 is non-null for both phones.
+        const inboundTransferPhone = normalizeToE164(
             fields.inboundTransferPhone as string
         )!;
-        const businessPhone = toE164(fields.businessPhone as string)!;
+        const businessPhone = normalizeToE164(fields.businessPhone as string)!;
 
         const formData: REInvestorFormData = {
             companyName: (fields.companyName as string).trim(),
@@ -501,15 +502,3 @@ function renderField(
     );
 }
 
-// ─── HELPERS ───
-
-function isValidPhone(phone: string): boolean {
-    return toE164(phone) !== null;
-}
-
-function toE164(phone: string): string | null {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length === 10) return `+1${digits}`;
-    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-    return null;
-}

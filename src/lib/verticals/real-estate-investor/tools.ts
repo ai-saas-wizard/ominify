@@ -2,6 +2,7 @@ import type {
     REInvestorFormData,
     TransferSpecialist,
 } from "../types";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 /**
  * Derives the transferCall function name from the specialist's first name.
@@ -33,7 +34,15 @@ export function buildTransferTool(
 ): Record<string, unknown> | null {
     if (!specialist.phone) return null;
 
-    const phoneE164 = formatE164(specialist.phone);
+    // Drop the tool entirely if the phone can't be normalized — VAPI rejects
+    // non-E.164 numbers and the rest of the agent should still deploy.
+    const phoneE164 = normalizeToE164(specialist.phone);
+    if (!phoneE164) {
+        console.warn(
+            `[buildTransferTool] dropping transfer tool — unparseable phone: "${specialist.phone}"`
+        );
+        return null;
+    }
     const fname = specialist.firstName || "the team";
     const role = specialist.role || "specialist";
     const toolName = transferToolNameFor(specialist);
@@ -418,18 +427,3 @@ export function buildREOutboundTools(
     return tools;
 }
 
-/**
- * Format phone number to E.164 format for VAPI.
- * "6158634486" → "+16158634486"
- * "(615) 863-4486" → "+16158634486"
- */
-function formatE164(phone: string): string {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.startsWith("1") && digits.length === 11) {
-        return `+${digits}`;
-    }
-    if (digits.length === 10) {
-        return `+1${digits}`;
-    }
-    return `+${digits}`;
-}

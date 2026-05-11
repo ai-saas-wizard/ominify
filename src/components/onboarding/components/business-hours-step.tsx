@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../types";
 import { TIMEZONES, DAYS_OF_WEEK } from "../constants";
@@ -7,12 +8,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AIFieldBadge } from "./ai-field-badge";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 interface BusinessHoursStepProps extends StepProps {
     updateHours: (day: string, field: "open" | "close" | "closed", value: string | boolean) => void;
 }
 
 export function BusinessHoursStep({ form, fieldMeta, updateField, resetFieldToAI, updateHours }: BusinessHoursStepProps) {
+    const [phoneError, setPhoneError] = useState<string | null>(null);
+    const handleEmergencyPhoneBlur = useCallback(() => {
+        const raw = form.emergency_phone;
+        if (!raw || !raw.trim()) {
+            setPhoneError(null);
+            return;
+        }
+        const normalized = normalizeToE164(raw);
+        if (normalized) {
+            if (normalized !== raw) updateField("emergency_phone", normalized);
+            setPhoneError(null);
+        } else {
+            setPhoneError("Please enter a valid phone number (e.g. +1 212 555 1212)");
+        }
+    }, [form.emergency_phone, updateField]);
     return (
         <div className="space-y-6">
             <div>
@@ -133,11 +150,16 @@ export function BusinessHoursStep({ form, fieldMeta, updateField, resetFieldToAI
                         type="tel"
                         value={form.emergency_phone}
                         onChange={(e) => updateField("emergency_phone", e.target.value)}
-                        placeholder="+1 (555) 000-0000"
+                        onBlur={handleEmergencyPhoneBlur}
+                        placeholder="+1 (212) 555-1212"
                     />
-                    <p className="text-xs text-gray-400">
-                        Number to forward urgent after-hours calls to.
-                    </p>
+                    {phoneError ? (
+                        <p className="text-xs text-red-500" role="alert">{phoneError}</p>
+                    ) : (
+                        <p className="text-xs text-gray-400">
+                            Number to forward urgent after-hours calls to. Include country code — e.g. +1 212 555 1212.
+                        </p>
+                    )}
                 </div>
             </div>
         </div>

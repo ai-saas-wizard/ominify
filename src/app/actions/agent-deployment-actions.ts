@@ -16,6 +16,7 @@ import { revalidatePath } from "next/cache";
 import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import type { CreateAssistantPayload } from "@/lib/vapi";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 // ═══════════════════════════════════════════════════════════
 // AGENT FLEET DEPLOYMENT
@@ -410,16 +411,23 @@ function buildToolsForAgent(
     }
 
     if (agentDef.required_tools.includes("transferCall") && emergencyPhone) {
-        tools.push({
-            type: "transferCall",
-            destinations: [
-                {
-                    type: "number",
-                    number: emergencyPhone,
-                    message: "Connecting you now.",
-                },
-            ],
-        });
+        const phoneE164 = normalizeToE164(emergencyPhone);
+        if (phoneE164) {
+            tools.push({
+                type: "transferCall",
+                destinations: [
+                    {
+                        type: "number",
+                        number: phoneE164,
+                        message: "Connecting you now.",
+                    },
+                ],
+            });
+        } else {
+            console.warn(
+                `[buildToolsForAgent] dropping transferCall — unparseable emergency phone: "${emergencyPhone}"`
+            );
+        }
     }
 
     return tools;
@@ -726,12 +734,19 @@ function buildToolsForAgentV2(
     }
 
     if (requiredTools.includes("transferCall") && emergencyPhone) {
-        tools.push({
-            type: "transferCall",
-            destinations: [
-                { type: "number", number: emergencyPhone, message: "Connecting you now." },
-            ],
-        });
+        const phoneE164 = normalizeToE164(emergencyPhone);
+        if (phoneE164) {
+            tools.push({
+                type: "transferCall",
+                destinations: [
+                    { type: "number", number: phoneE164, message: "Connecting you now." },
+                ],
+            });
+        } else {
+            console.warn(
+                `[buildToolsForAgentV2] dropping transferCall — unparseable emergency phone: "${emergencyPhone}"`
+            );
+        }
     }
 
     return tools;

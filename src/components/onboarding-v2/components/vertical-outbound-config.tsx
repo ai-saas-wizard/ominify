@@ -23,6 +23,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { normalizeToE164 } from "@/lib/phone-utils";
 import {
     RE_OUTBOUND_GOALS,
     buildREOutboundStarter,
@@ -195,7 +196,7 @@ export function VerticalOutboundConfig({
         buildSnapshot,
     ]);
 
-    const phoneE164 = normalizeUSPhoneE164(transferPhone);
+    const phoneE164 = normalizeToE164(transferPhone);
     const phoneInvalid = transferPhone.trim().length > 0 && !phoneE164;
 
     const handleContinue = useCallback(() => {
@@ -319,17 +320,22 @@ export function VerticalOutboundConfig({
                             </Label>
                             <Input
                                 id="ot-phone"
+                                type="tel"
                                 value={transferPhone}
                                 onChange={(e) => setTransferPhone(e.target.value)}
-                                placeholder="e.g., (615) 203-8748"
+                                placeholder="+1 (212) 555-1212"
                                 aria-invalid={phoneInvalid}
                                 className={cn(
                                     phoneInvalid && "border-red-400 focus-visible:ring-red-300"
                                 )}
                             />
-                            {phoneInvalid && (
+                            {phoneInvalid ? (
                                 <p className="mt-1 text-xs text-red-500">
-                                    Enter a 10-digit US number (e.g. 615-203-8748) or full E.164 (+1XXXXXXXXXX).
+                                    Please enter a valid phone number — include country code (e.g. +1 212 555 1212).
+                                </p>
+                            ) : (
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Include country code — e.g. +1 212 555 1212.
                                 </p>
                             )}
                         </div>
@@ -575,11 +581,3 @@ export function VerticalOutboundConfig({
     );
 }
 
-// ─── HELPERS ───
-
-function normalizeUSPhoneE164(phone: string): string | null {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length === 10) return `+1${digits}`;
-    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-    return null;
-}

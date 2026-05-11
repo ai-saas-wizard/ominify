@@ -12,6 +12,7 @@ import {
     ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { normalizeToE164 } from "@/lib/phone-utils";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import type { HandoffRulesConfig, HandoffTrigger } from "./types";
@@ -39,7 +40,28 @@ export function HandoffRulesScreen({
     onChange,
 }: HandoffRulesProps) {
     const [customTriggerText, setCustomTriggerText] = useState("");
+    const [smsError, setSmsError] = useState<string | null>(null);
     const presets = getHandoffPresetsForIndustry(industry);
+
+    function handleSmsBlur() {
+        const raw = config.notification.sms;
+        if (!raw || !raw.trim()) {
+            setSmsError(null);
+            return;
+        }
+        const normalized = normalizeToE164(raw);
+        if (normalized) {
+            if (normalized !== raw) {
+                onChange({
+                    ...config,
+                    notification: { ...config.notification, sms: normalized },
+                });
+            }
+            setSmsError(null);
+        } else {
+            setSmsError("Please enter a valid phone number (e.g. +1 212 555 1212)");
+        }
+    }
 
     function toggleSuccessCondition(id: string) {
         const current = config.success_conditions;
@@ -326,26 +348,42 @@ export function HandoffRulesScreen({
                 </label>
                 <p className="text-xs text-gray-400">
                     When a handoff or success condition fires, how should we reach you?
+                    Phone numbers must include country code — e.g. +1 212 555 1212.
                 </p>
 
                 <div className="space-y-3">
                     {/* SMS Notification */}
-                    <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200">
-                        <div className="flex items-center gap-2">
-                            <Smartphone className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-700">Text me</span>
+                    <div>
+                        <div
+                            className={cn(
+                                "flex items-center justify-between p-3 rounded-lg border",
+                                smsError ? "border-red-300" : "border-gray-200"
+                            )}
+                        >
+                            <div className="flex items-center gap-2">
+                                <Smartphone className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm text-gray-700">Text me</span>
+                            </div>
+                            <input
+                                type="tel"
+                                value={config.notification.sms}
+                                onChange={(e) => {
+                                    if (smsError) setSmsError(null);
+                                    onChange({
+                                        ...config,
+                                        notification: { ...config.notification, sms: e.target.value },
+                                    });
+                                }}
+                                onBlur={handleSmsBlur}
+                                placeholder={tenantPhone || "+1 (212) 555-1212"}
+                                className="text-sm text-right text-gray-600 bg-transparent outline-none w-44"
+                            />
                         </div>
-                        <input
-                            value={config.notification.sms}
-                            onChange={(e) =>
-                                onChange({
-                                    ...config,
-                                    notification: { ...config.notification, sms: e.target.value },
-                                })
-                            }
-                            placeholder={tenantPhone || "(555) 123-4567"}
-                            className="text-sm text-right text-gray-600 bg-transparent outline-none w-36"
-                        />
+                        {smsError && (
+                            <p className="mt-1 text-xs text-red-500" role="alert">
+                                {smsError}
+                            </p>
+                        )}
                     </div>
 
                     {/* Email Notification */}

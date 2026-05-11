@@ -20,7 +20,8 @@ import {
     formatLeadSourceLabel,
 } from "@/components/onboarding/constants";
 import type { TenantProfile, AIFieldMeta } from "../types";
-import { validatePhoneNumber, type ValidationError } from "@/lib/onboarding-validation";
+import { type ValidationError } from "@/lib/onboarding-validation";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 // ─── PROPS ───
 
@@ -185,13 +186,20 @@ export function ProfileReview({
     ).length;
 
     const handlePhoneBlur = useCallback(() => {
-        if (form.emergency_phone) {
-            const result = validatePhoneNumber(form.emergency_phone);
-            setPhoneError(result.valid ? null : (result.error || null));
-        } else {
+        const raw = form.emergency_phone;
+        if (!raw || !raw.trim()) {
             setPhoneError(null);
+            return;
         }
-    }, [form.emergency_phone]);
+        const normalized = normalizeToE164(raw);
+        if (normalized) {
+            // Persist the E.164 value so VAPI never sees the raw user input.
+            if (normalized !== raw) updateField("emergency_phone", normalized);
+            setPhoneError(null);
+        } else {
+            setPhoneError("Please enter a valid phone number (e.g. +1 212 555 1212)");
+        }
+    }, [form.emergency_phone, updateField]);
 
     const hasErrors = validationErrors && validationErrors.length > 0;
 
@@ -495,15 +503,20 @@ export function ProfileReview({
                             <div>
                                 <FieldLabel label={`Emergency Phone Number${form.after_hours_behavior === "emergency_forward" ? " *" : ""}`} field="emergency_phone" fieldMeta={fieldMeta} resetFieldToAI={resetFieldToAI} />
                                 <Input
+                                    type="tel"
                                     value={form.emergency_phone}
                                     onChange={(e) => updateField("emergency_phone", e.target.value)}
                                     onBlur={handlePhoneBlur}
-                                    placeholder="+1 (555) 123-4567"
+                                    placeholder="+1 (212) 555-1212"
                                     aria-label="Emergency phone number"
                                     className="border-gray-200 bg-white text-gray-900"
                                 />
-                                {phoneError && (
+                                {phoneError ? (
                                     <p className="mt-1 text-xs text-red-500" role="alert">{phoneError}</p>
+                                ) : (
+                                    <p className="mt-1 text-xs text-gray-400">
+                                        Include country code — e.g. +1 212 555 1212.
+                                    </p>
                                 )}
                                 <FieldError field="emergency_phone" errors={validationErrors} />
                             </div>

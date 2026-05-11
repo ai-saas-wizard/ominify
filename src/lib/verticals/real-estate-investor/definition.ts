@@ -132,8 +132,9 @@ export const reInvestorDefinition: VerticalDefinition = {
                     label: "Their phone number",
                     type: "phone",
                     required: true,
-                    placeholder: "e.g., (615) 647-9393",
-                    helpText: "Where inbound transfers route to",
+                    placeholder: "+1 (212) 555-1212",
+                    helpText:
+                        "Where inbound transfers route to. Include country code — e.g. +1 212 555 1212.",
                 },
                 {
                     key: "inboundTransferMode",
@@ -166,9 +167,9 @@ export const reInvestorDefinition: VerticalDefinition = {
                     label: "Business Callback Number",
                     type: "phone",
                     required: true,
-                    placeholder: "e.g., (615) 863-4486",
+                    placeholder: "+1 (212) 555-1212",
                     helpText:
-                        "Number the AI leaves in voicemail messages for callbacks",
+                        "Number the AI leaves in voicemail messages for callbacks. Include country code — e.g. +1 212 555 1212.",
                 },
             ],
         },
