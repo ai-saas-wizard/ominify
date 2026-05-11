@@ -6,13 +6,13 @@ import { CheckCircle2, ArrowRight } from "lucide-react";
 import { getTierPhases, type PricingTier } from "@/lib/pricing-tiers-shared";
 import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
 import { LandingBackground, LiveDot } from "@/components/billing/landing-background";
-import { selectTierAction } from "../actions";
 
 /**
- * Single-tier campaign landing on the dark brand canvas. CTA submits to
- * `selectTierAction` which sets the `omnify_tier` cookie and redirects to
- * /sign-up. Middleware no longer pre-sets the cookie on /offers/* — the
- * action is the sole writer.
+ * Single-tier campaign landing on the dark brand canvas. The CTA is a plain
+ * Link to /sign-up — middleware already set `omnify_visit=<tier-slug>` when
+ * this page loaded, and auto-provision will resolve that slug to a tier and
+ * assign `pricing_tier_id` directly at signup. No client-side cookie work
+ * needed.
  */
 export function SingleTierOfferLanding({ tier }: { tier: PricingTier }) {
     const phases = getTierPhases(tier);
@@ -102,19 +102,20 @@ export function SingleTierOfferLanding({ tier }: { tier: PricingTier }) {
                             )}
                         </ul>
 
-                        <form action={selectTierAction} className="mt-8">
-                            <input type="hidden" name="tier_slug" value={tier.slug} />
-                            <motion.button
-                                type="submit"
-                                whileHover={{ scale: 1.015 }}
-                                whileTap={{ scale: 0.97 }}
-                                transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                        <motion.div
+                            whileHover={{ scale: 1.015 }}
+                            whileTap={{ scale: 0.97 }}
+                            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                            className="mt-8"
+                        >
+                            <Link
+                                href="/sign-up"
                                 className="group/btn w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-400 text-emerald-950 font-semibold rounded-xl px-6 py-3.5 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-shadow"
                             >
                                 {tier.landing_cta_label ?? "Get Started"}
                                 <ArrowRight className="w-4 h-4 transition-transform group-hover/btn:translate-x-0.5" />
-                            </motion.button>
-                        </form>
+                            </Link>
+                        </motion.div>
 
                         <p className="mt-5 text-xs text-center text-white/40">
                             Already have an account?{" "}

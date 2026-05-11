@@ -7,14 +7,15 @@ import { getTierBySlug } from "@/lib/pricing-tiers";
 const VALID_SLUG = /^[a-zA-Z0-9_-]{1,64}$/;
 
 /**
- * Customer clicked the CTA on an offer landing page (single- or multi-tier).
- * This action is the sole writer of the `omnify_tier` cookie — middleware
- * does not set it on /offers/* URLs because the URL slug may be an offer
- * slug, not a tier slug. We validate the submitted tier slug, set the
- * cookie, then send the user to /sign-up.
+ * Multi-tier offer LP card click. The actual tier selection happens
+ * post-signup on /client/<id>/subscribe via `selectClientTierAction`. This
+ * action only stores a soft *preference hint* so the picker pre-highlights
+ * the card the customer was leaning toward — they're still free to switch.
  *
- * Silent redirect on missing/inactive tier — no enumeration leak. The cookie
- * is only set if the tier resolves cleanly.
+ * Why this is just a hint and not the source of truth: pre-signup cookies
+ * cross Clerk OAuth and have caused real bugs (silent fall-back to public
+ * tier, shared-browser leaks). The picker on the warm logged-in dashboard
+ * is the only place we commit `clients.pricing_tier_id`.
  */
 export async function selectTierAction(formData: FormData): Promise<void> {
     const tierSlug = String(formData.get("tier_slug") ?? "").trim();
@@ -25,16 +26,14 @@ export async function selectTierAction(formData: FormData): Promise<void> {
 
     const tier = await getTierBySlug(tierSlug, { onlyActive: true });
     if (!tier) {
-        // Silent to the customer, loud in logs — helps catch "button didn't
-        // work" reports where the tier got deactivated after the page rendered.
-        console.warn(
-            `[selectTierAction] tier not found or inactive: slug=${tierSlug}; redirecting to /sign-up (will fall back to public tier at signup)`
-        );
+        // No hint set if the tier doesn't exist/active — picker will render
+        // unsorted. Customer still goes through the same signup flow.
+        console.warn(`[selectTierAction] tier hint not found: ${tierSlug}`);
         redirect("/sign-up");
     }
 
     const store = await cookies();
-    store.set("omnify_tier", tierSlug, {
+    store.set("omnify_preferred_tier", tierSlug, {
         httpOnly: true,
         sameSite: "lax",
         path: "/",

@@ -6,7 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { encrypt } from "@/lib/encryption";
 import { isEncrypted } from "@/lib/encryption-helpers";
 import { hasActiveSubscription } from "@/lib/access";
-import { getTierForSignup } from "@/lib/pricing-tiers";
+import { getPublicTier } from "@/lib/pricing-tiers";
+import { resolveOfferOrTier } from "@/lib/visit-resolution";
 import Link from "next/link";
 
 // Get the single active umbrella
@@ -39,12 +40,25 @@ async function autoProvisionUmbrellaClient(
     ? (isEncrypted(umbrellaKey) ? umbrellaKey : encrypt(umbrellaKey))
     : null;
 
-  // Resolve which pricing tier to assign. The /offers/[slug] route sets a
-  // cookie via middleware; getTierForSignup falls back to the public tier
-  // when missing/invalid.
+  // Resolve the visit slug from the cookie set by middleware on
+  // /offers/<slug>. The slug is either a tier (single-tier campaign — direct
+  // pricing_tier_id assignment) or an offer (multi-tier — defer pick to the
+  // post-signup picker via signup_offer_id). Missing/invalid → public tier.
   const cookieStore = await cookies();
-  const tierSlug = cookieStore.get("omnify_tier")?.value ?? null;
-  const tier = await getTierForSignup(tierSlug);
+  const visitSlug = cookieStore.get("omnify_visit")?.value ?? null;
+  const resolution = await resolveOfferOrTier(visitSlug);
+
+  let pricing_tier_id: string | null = null;
+  let signup_offer_id: string | null = null;
+
+  if (resolution?.kind === "tier") {
+    pricing_tier_id = resolution.tier.id;
+  } else if (resolution?.kind === "offer") {
+    signup_offer_id = resolution.offer.id;
+    // pricing_tier_id stays null — set by the post-signup picker.
+  } else {
+    pricing_tier_id = (await getPublicTier()).id;
+  }
 
   // Create the client record
   const { data: newClient, error: clientError } = await supabase
@@ -56,7 +70,8 @@ async function autoProvisionUmbrellaClient(
       vapi_key: vapiKeyCiphertext,
       vapi_org_id: umbrella.vapi_org_id,
       clerk_id: userId, // Real Clerk ID — no placeholder needed
-      pricing_tier_id: tier.id,
+      pricing_tier_id,
+      signup_offer_id,
     })
     .select("id")
     .single();
@@ -98,8 +113,11 @@ async function autoProvisionUmbrellaClient(
     total_used_minutes: 0,
   });
 
+  const resolutionDesc = resolution
+    ? `${resolution.kind}=${resolution.kind === "tier" ? resolution.tier.slug : resolution.offer.slug}`
+    : "default-public";
   console.log(
-    `[AUTO-PROVISION] Created UMBRELLA client ${clientId} for ${userEmail}, assigned to umbrella ${umbrella.name} (${umbrella.id}), tier ${tier.slug}`
+    `[AUTO-PROVISION] Created UMBRELLA client ${clientId} for ${userEmail}, umbrella=${umbrella.name} (${umbrella.id}), visit=${visitSlug ?? "none"} → ${resolutionDesc}`
   );
 
   return clientId;

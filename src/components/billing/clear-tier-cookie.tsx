@@ -3,11 +3,12 @@
 import { useEffect } from "react";
 
 /**
- * Fires once on mount to clear the `omnify_tier` capture cookie. Mounted on
- * the subscribe page — by the time the user reaches it, their
- * `clients.pricing_tier_id` is already locked, so the cookie is no longer
- * needed and would otherwise leak into a different account on a shared
- * browser.
+ * Fires once on mount to clear all offer capture cookies (omnify_visit,
+ * omnify_preferred_tier, and the legacy omnify_tier). Mounted on the
+ * subscribe page — by the time the customer reaches it, their
+ * `clients.pricing_tier_id` or `signup_offer_id` is locked server-side, so
+ * the cookies are no longer needed and would otherwise leak into a
+ * different account on a shared browser.
  */
 export function ClearTierCookieOnMount() {
     useEffect(() => {

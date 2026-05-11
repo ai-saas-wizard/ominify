@@ -27,13 +27,26 @@ export default clerkMiddleware(async (auth, req) => {
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set('x-pathname', pathname);
 
-    // Note: tier capture is NOT done in middleware. On /offers/<slug> the
-    // slug may be either a tier slug (single-tier offer) or an offer slug
-    // (multi-tier picker). Setting an offer slug as the tier cookie would
-    // silently fall back to the public tier at signup. Both single- and
-    // multi-tier offer pages route the click through `selectTierAction`
-    // (src/app/offers/[slug]/actions.ts) which sets the cookie to the
-    // selected TIER slug after validating it.
+    // Visit capture: every /offers/<slug> visit gets an `omnify_visit`
+    // cookie carrying that slug verbatim. The slug may be either a tier or
+    // an offer — disambiguation happens at signup time via
+    // `resolveOfferOrTier` in src/lib/visit-resolution.ts. If it resolves to
+    // an offer, autoProvision sets clients.signup_offer_id (deferring the
+    // tier pick to the post-signup picker on /client/<id>/subscribe). If it
+    // resolves to a tier, pricing_tier_id is set directly. If it resolves
+    // to neither, the customer falls back to the public tier.
+    const offersMatch = pathname.match(/^\/offers\/([^\/]+)\/?$/);
+    if (offersMatch && /^[a-zA-Z0-9_-]{1,64}$/.test(offersMatch[1])) {
+        const response = NextResponse.next({ request: { headers: requestHeaders } });
+        response.cookies.set('omnify_visit', offersMatch[1], {
+            httpOnly: true,
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 60 * 60 * 24 * 30, // 30 days
+            secure: process.env.NODE_ENV === 'production',
+        });
+        return response;
+    }
 
     // Allow public routes
     if (isPublicRoute(req)) {

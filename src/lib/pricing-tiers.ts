@@ -171,20 +171,6 @@ export async function getTierForClient(clientId: string): Promise<PricingTier> {
 }
 
 /**
- * Resolve the tier to assign at signup time. Reads the cookie value if any;
- * falls back to the public tier when missing or invalid.
- */
-export async function getTierForSignup(
-    slugFromCookie: string | null
-): Promise<PricingTier> {
-    if (slugFromCookie) {
-        const tier = await getTierBySlug(slugFromCookie, { onlyActive: true });
-        if (tier) return tier;
-    }
-    return getPublicTier();
-}
-
-/**
  * Admin-only: list every tier (active and inactive), public tier first.
  */
 export async function listAllTiers(): Promise<PricingTier[]> {
