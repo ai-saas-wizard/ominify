@@ -2,10 +2,14 @@ import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { getTierPhases, type PricingTier } from "@/lib/pricing-tiers";
 import { PhaseSummary, PhaseMinutesSummary } from "@/components/billing/phase-summary";
+import { selectTierAction } from "../actions";
 
 /**
- * Existing single-tier campaign landing. The cookie has already been set by
- * middleware to this tier's slug; the CTA just links to /sign-up.
+ * Single-tier campaign landing. The CTA submits the tier slug via the
+ * `selectTierAction` server action, which sets the `omnify_tier` cookie and
+ * redirects to /sign-up. Cookie ownership lives in the action — middleware
+ * does not write the tier cookie on /offers/* URLs to avoid an offer slug
+ * being mistaken for a tier slug at signup time.
  */
 export function SingleTierOfferLanding({ tier }: { tier: PricingTier }) {
     const phases = getTierPhases(tier);
@@ -66,14 +70,15 @@ export function SingleTierOfferLanding({ tier }: { tier: PricingTier }) {
                         )}
                     </ul>
 
-                    <div className="mt-8">
-                        <Link
-                            href="/sign-up"
+                    <form action={selectTierAction} className="mt-8">
+                        <input type="hidden" name="tier_slug" value={tier.slug} />
+                        <button
+                            type="submit"
                             className="block w-full px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors text-center"
                         >
                             {tier.landing_cta_label ?? "Get Started"}
-                        </Link>
-                    </div>
+                        </button>
+                    </form>
 
                     <p className="mt-4 text-xs text-center text-gray-500">
                         Already have an account?{" "}

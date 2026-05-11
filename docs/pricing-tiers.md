@@ -8,7 +8,7 @@ This document covers the pricing-tiers system that drives subscription billing f
 
 A `pricing_tiers` table holds a catalog of subscription tiers. Each tier has a Stripe price ID, monthly minute allowance, rollover cap, and admin-editable landing page content. Each `clients` row carries a `pricing_tier_id` FK that locks the customer to one tier at signup.
 
-- Visitors land on `/offers/[slug]` → middleware sets a 30-day HttpOnly cookie `omnify_tier=<slug>`.
+- Visitors land on `/offers/[slug]`. Clicking the CTA invokes [`selectTierAction`](../src/app/offers/[slug]/actions.ts) which validates the tier slug, sets a 30-day HttpOnly cookie `omnify_tier=<tier-slug>`, and redirects to `/sign-up`. Middleware does **not** set the cookie automatically — the URL slug could be an offer slug (multi-tier picker) rather than a tier slug, and setting the wrong value would silently fall back to the public tier.
 - After Clerk signup, [`autoProvisionUmbrellaClient`](../src/app/page.tsx) reads the cookie, resolves the tier via [`getTierForSignup`](../src/lib/pricing-tiers.ts), and writes `pricing_tier_id` to the new client row.
 - The cookie is cleared on the subscribe page via `<ClearTierCookieOnMount>` to prevent leakage to a different account on a shared browser.
 - Subscribe page reads the client's tier server-side and renders one tier per client — the page never enumerates other tiers.
@@ -23,7 +23,7 @@ An **offer** is a marketing landing page that contains multiple tier cards. Use 
 - Offer rows live in the [`offers`](../supabase/migrations/20260510-offers.sql) table — they own the page wrapper (eyebrow, headline, subhead).
 - Each tier optionally points at an offer via [`pricing_tiers.offer_id`](../src/lib/pricing-tiers.ts) (FK, nullable). `sort_order` controls card order; `is_recommended` adds a "Most Popular" badge.
 - Resolution at [`/offers/[slug]`](../src/app/offers/[slug]/page.tsx): the route checks the offers table first; if the slug matches an offer, it renders [`<MultiTierOfferLanding>`](../src/app/offers/[slug]/_components/multi-tier-landing.tsx) with one [`<TierCard>`](../src/components/billing/tier-card.tsx) per assigned active tier. Otherwise it falls back to single-tier rendering.
-- Cookie capture: middleware still sets `omnify_tier=<slug>` to whatever the URL slug is. On a multi-tier offer page, clicking a card invokes [`selectTierAction`](../src/app/offers/[slug]/actions.ts) which **overwrites** the cookie with the chosen tier's slug, then redirects to `/sign-up`. A user who lands on the offer URL but signs up directly without clicking a card gets the public tier (the cookie's offer-slug value doesn't match any tier).
+- Cookie capture: both single- and multi-tier offer pages route the CTA through [`selectTierAction`](../src/app/offers/[slug]/actions.ts), which is the sole writer of the `omnify_tier` cookie. The action validates the tier slug exists + is active before setting the cookie. A user who lands on an offer URL but doesn't click a card has no cookie set, so they fall back to the public tier at signup — visibly and intentionally.
 - Stripe / billing flow is unchanged — offers are a presentation-layer concept; a customer always ends up locked to exactly one tier.
 
 #### Admin workflow

@@ -95,15 +95,15 @@ export async function upsertSubscription(
     const item = sub.items.data[0];
     const priceId = item?.price?.id ?? null;
 
-    // Stripe types evolve across API versions; read defensively.
-    const anyItem = item as unknown as {
+    // In Stripe API 2025-12-15.clover, `current_period_start` / `_end` live
+    // on the subscription ITEM, not on the subscription object. Read from
+    // the item with a strict typed cast. If `item` is missing (incomplete
+    // subscription with no items), both fields are null — caller code
+    // should handle that as "no known period yet."
+    const itemPeriod = item as unknown as {
         current_period_start?: number | null;
         current_period_end?: number | null;
     } | undefined;
-    const anySub = sub as unknown as {
-        current_period_start?: number | null;
-        current_period_end?: number | null;
-    };
 
     const row = {
         client_id: clientId,
@@ -113,12 +113,8 @@ export async function upsertSubscription(
         status: sub.status as SubscriptionRow["status"],
         plan_key: planKey,
         price_id: priceId,
-        current_period_start: isoFromUnix(
-            anyItem?.current_period_start ?? anySub.current_period_start ?? null
-        ),
-        current_period_end: isoFromUnix(
-            anyItem?.current_period_end ?? anySub.current_period_end ?? null
-        ),
+        current_period_start: isoFromUnix(itemPeriod?.current_period_start ?? null),
+        current_period_end: isoFromUnix(itemPeriod?.current_period_end ?? null),
         cancel_at: isoFromUnix(sub.cancel_at),
         canceled_at: isoFromUnix(sub.canceled_at),
         updated_at: new Date().toISOString(),

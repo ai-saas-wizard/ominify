@@ -195,16 +195,40 @@ export async function convertSubscriptionToSchedule(args: {
     // redelivery race), retrieve the existing schedule by re-reading the
     // subscription rather than failing.
     let schedule: Stripe.SubscriptionSchedule;
+    let createdFresh = false;
     try {
         schedule = await stripe.subscriptionSchedules.create({
             from_subscription: args.subscriptionId,
         });
+        createdFresh = true;
     } catch (err) {
         const fresh = await stripe.subscriptions.retrieve(args.subscriptionId);
         const existingScheduleId =
             typeof fresh.schedule === 'string' ? fresh.schedule : fresh.schedule?.id;
         if (!existingScheduleId) throw err;
         schedule = await stripe.subscriptionSchedules.retrieve(existingScheduleId);
+    }
+
+    // Guard against late webhook redelivery resetting an advanced schedule.
+    // If the schedule already has > 1 phase configured (i.e. our previous
+    // `update` already succeeded), or its current phase isn't the first one
+    // in the list (i.e. it's auto-transitioned to phase 2+), DO NOT replace
+    // the phase list. Stripe's `update({ phases })` is a full replacement —
+    // re-running it on a schedule that's already in phase 2 would silently
+    // reset the customer back to phase 1.
+    if (!createdFresh) {
+        const hasMultiplePhases = (schedule.phases?.length ?? 0) > 1;
+        const currentPhaseStart = schedule.current_phase?.start_date ?? null;
+        const firstPhaseStart = schedule.phases?.[0]?.start_date ?? null;
+        const alreadyAdvanced =
+            currentPhaseStart !== null &&
+            firstPhaseStart !== null &&
+            currentPhaseStart > firstPhaseStart;
+        if (hasMultiplePhases || alreadyAdvanced) {
+            // Schedule was already configured (and possibly advanced).
+            // Safe to skip — return the existing state.
+            return schedule;
+        }
     }
 
     // Step 2: replace the default phase list with our explicit phases.

@@ -17,10 +17,6 @@ const isPublicRoute = createRouteMatcher([
     '/'
 ]);
 
-// Slug shape: alphanumeric, dash, underscore; 1-64 chars. Anything outside
-// this gets ignored (no cookie set), preventing weird path injection.
-const VALID_SLUG = /^[a-zA-Z0-9_-]{1,64}$/;
-
 export default clerkMiddleware(async (auth, req) => {
     const { userId, sessionClaims } = await auth();
     const url = req.nextUrl;
@@ -31,22 +27,13 @@ export default clerkMiddleware(async (auth, req) => {
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set('x-pathname', pathname);
 
-    // Tier capture: visitors landing on /offers/<slug> get tagged with that
-    // slug via a 30-day HttpOnly cookie. Auto-provision reads this cookie at
-    // signup time. Slug validity (does it exist? is it active?) is checked at
-    // signup time, not here — middleware just stores the value cheaply.
-    const offersMatch = pathname.match(/^\/offers\/([^\/]+)\/?$/);
-    if (offersMatch && VALID_SLUG.test(offersMatch[1])) {
-        const response = NextResponse.next({ request: { headers: requestHeaders } });
-        response.cookies.set('omnify_tier', offersMatch[1], {
-            httpOnly: true,
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 60 * 60 * 24 * 30, // 30 days
-            secure: process.env.NODE_ENV === 'production',
-        });
-        return response;
-    }
+    // Note: tier capture is NOT done in middleware. On /offers/<slug> the
+    // slug may be either a tier slug (single-tier offer) or an offer slug
+    // (multi-tier picker). Setting an offer slug as the tier cookie would
+    // silently fall back to the public tier at signup. Both single- and
+    // multi-tier offer pages route the click through `selectTierAction`
+    // (src/app/offers/[slug]/actions.ts) which sets the cookie to the
+    // selected TIER slug after validating it.
 
     // Allow public routes
     if (isPublicRoute(req)) {

@@ -7,10 +7,11 @@ import { getTierBySlug } from "@/lib/pricing-tiers";
 const VALID_SLUG = /^[a-zA-Z0-9_-]{1,64}$/;
 
 /**
- * Customer clicked a tier card on a multi-tier offer page. Validate the tier
- * exists + is active, overwrite the `omnify_tier` cookie with the chosen
- * tier slug (which middleware initially set to the OFFER slug), then send
- * them to /sign-up.
+ * Customer clicked the CTA on an offer landing page (single- or multi-tier).
+ * This action is the sole writer of the `omnify_tier` cookie — middleware
+ * does not set it on /offers/* URLs because the URL slug may be an offer
+ * slug, not a tier slug. We validate the submitted tier slug, set the
+ * cookie, then send the user to /sign-up.
  *
  * Silent redirect on missing/inactive tier — no enumeration leak. The cookie
  * is only set if the tier resolves cleanly.
