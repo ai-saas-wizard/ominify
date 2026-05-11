@@ -76,6 +76,9 @@ export function StepMap() {
     }, [state.columns, state.mapping]);
 
     const hasPhone = Object.values(state.mapping).includes("phone");
+    const hasName = Object.values(state.mapping).some(
+        (r) => r === "first_name" || r === "last_name",
+    );
 
     return (
         <div className="space-y-5">
@@ -129,6 +132,22 @@ export function StepMap() {
                                         <p className="text-xs text-gray-500">
                                             A phone number is the primary contact identifier and is
                                             used for outbound voice and SMS.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    {hasName ? (
+                                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                                    ) : (
+                                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                                    )}
+                                    <div>
+                                        <p className="font-medium text-gray-800">
+                                            Name column required
+                                        </p>
+                                        <p className="text-xs text-gray-500">
+                                            To prevent cold outreach, every contact must have a name
+                                            (first or last) — rows missing a name will be skipped.
                                         </p>
                                     </div>
                                 </div>

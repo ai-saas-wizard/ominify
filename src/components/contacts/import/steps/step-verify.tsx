@@ -34,6 +34,9 @@ export function StepVerify({ clientId }: StepVerifyProps) {
 
     const mappedCount = Object.values(state.mapping).filter((r) => r !== "skip").length;
     const hasPhone = Object.values(state.mapping).includes("phone");
+    const hasName = Object.values(state.mapping).some(
+        (r) => r === "first_name" || r === "last_name",
+    );
     const customFieldCount = Object.values(state.mapping).filter((r) => r === "custom_variable").length;
     const documentedCount = Object.values(state.fieldDescriptions).filter((d) => d.text.trim()).length;
 
@@ -260,7 +263,7 @@ export function StepVerify({ clientId }: StepVerifyProps) {
             </div>
 
             {/* Stat strip */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <Stat label="Total rows" value={state.parsedRows.length.toLocaleString()} />
                 <Stat label="Mapped columns" value={`${mappedCount} / ${state.columns.length}`} />
                 <Stat
@@ -273,13 +276,19 @@ export function StepVerify({ clientId }: StepVerifyProps) {
                     value={hasPhone ? "Yes" : "Missing"}
                     accent={hasPhone ? "good" : "warn"}
                 />
+                <Stat
+                    label="Name column"
+                    value={hasName ? "Yes" : "Missing"}
+                    accent={hasName ? "good" : "warn"}
+                />
             </div>
 
-            {!hasPhone && (
+            {(!hasPhone || !hasName) && (
                 <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                     <p className="text-amber-800">
-                        Go back to the Map step and set one column as Phone before importing.
+                        Go back to the Map step and set both a Phone and a Name column before
+                        importing.
                     </p>
                 </div>
             )}

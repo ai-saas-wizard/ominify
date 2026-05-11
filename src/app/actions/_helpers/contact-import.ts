@@ -137,6 +137,14 @@ export async function upsertContactsFromRows(
         const nameParts = [firstName, lastName].filter(Boolean);
         const name = nameParts.length > 0 ? nameParts.join(" ") : null;
 
+        // Anti-cold-outreach: every row must have a name. Phone alone (or
+        // phone + email) is not enough. This matches the Mapping step's
+        // requirement that one of first_name/last_name be mapped.
+        if (!name) {
+            errors.push(`Row ${rowIndex}: Missing name — skipped to prevent cold outreach.`);
+            continue;
+        }
+
         const customFields: Record<string, string> = {};
         if (company) customFields.company = company;
         for (const col of roleToColumns.custom_variable || []) {

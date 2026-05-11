@@ -137,6 +137,16 @@ export async function createListFromImport(input: CreateListInput): Promise<{
         if (!Object.values(columnMapping).includes("phone")) {
             return { success: false, error: "A phone column mapping is required" };
         }
+        if (
+            !Object.values(columnMapping).some(
+                (r) => r === "first_name" || r === "last_name",
+            )
+        ) {
+            return {
+                success: false,
+                error: "A name column mapping (first or last) is required to prevent cold outreach",
+            };
+        }
 
         const downloaded = await downloadContactImportCsv(storagePath);
         if (!downloaded.success || !downloaded.text) {
@@ -274,6 +284,16 @@ export async function importContactsWithoutList(input: Omit<CreateListInput, "li
         }
         if (!Object.values(columnMapping).includes("phone")) {
             return { success: false, error: "A phone column mapping is required" };
+        }
+        if (
+            !Object.values(columnMapping).some(
+                (r) => r === "first_name" || r === "last_name",
+            )
+        ) {
+            return {
+                success: false,
+                error: "A name column mapping (first or last) is required to prevent cold outreach",
+            };
         }
 
         const downloaded = await downloadContactImportCsv(storagePath);

@@ -89,12 +89,25 @@ function computeCanAdvance(step: StepKey, state: import("./import-types").Import
                 !!state.storagePath
             );
         case 3:
-            return Object.values(state.mapping).includes("phone");
-        case 4: {
-            const hasPhone = Object.values(state.mapping).includes("phone");
-            return hasPhone && state.consent && (!state.createList || !!state.listName.trim());
-        }
+            return hasRequiredMappings(state.mapping);
+        case 4:
+            return (
+                hasRequiredMappings(state.mapping) &&
+                state.consent &&
+                (!state.createList || !!state.listName.trim())
+            );
         default:
             return false;
     }
+}
+
+// Mapping must include both phone (the system identifier) and a name column
+// (anti-cold-outreach: a contact without a name shouldn't be messaged).
+function hasRequiredMappings(
+    mapping: Record<string, import("./import-types").ColumnRole>,
+): boolean {
+    const roles = Object.values(mapping);
+    const hasPhone = roles.includes("phone");
+    const hasName = roles.some((r) => r === "first_name" || r === "last_name");
+    return hasPhone && hasName;
 }
