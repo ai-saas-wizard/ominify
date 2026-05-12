@@ -127,7 +127,7 @@ export function WalkthroughBody() {
                         {/* Frame */}
                         <div className="relative rounded-2xl border border-white/10 bg-black/40 p-2 shadow-2xl backdrop-blur">
                             <iframe
-                                src="https://www.youtube.com/embed/KSOjqzhN4GY?rel=0"
+                                src="https://www.youtube.com/embed/AG4ZAVOblNA?rel=0"
                                 title="Omnify Walkthrough — Real Estate"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                 allowFullScreen
