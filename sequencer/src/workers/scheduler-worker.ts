@@ -85,6 +85,11 @@ import { utcToZonedTime, zonedTimeToUtc, formatInTimeZone } from 'date-fns-tz';
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
 const TEST_MODE_DELAY_SECONDS = 30; // Compressed delay for test enrollments
+// Lease window pushed onto next_step_at when claiming a row. Concurrent ticks
+// (or a second scheduler process) will skip rows whose next_step_at is now
+// in the future, preventing duplicate dispatch. If processStep crashes, the
+// lease expires and the row becomes eligible again.
+const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutes
 
 interface ContactFieldDef {
     field_key: string;
@@ -250,6 +255,33 @@ function renderTemplate(
  * second batched query keyed by client_id.
  */
 async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
+    // Atomic claim: bump next_step_at into the future and return only the
+    // rows we actually moved. PostgreSQL serializes concurrent UPDATEs, so
+    // overlapping ticks (or a second scheduler) won't both claim the same
+    // enrollment — duplicate-dispatch is prevented at the DB layer.
+    const nowIso = new Date().toISOString();
+    const leaseUntilIso = new Date(Date.now() + CLAIM_LEASE_MS).toISOString();
+
+    const { data: claimedRows, error: claimErr } = await supabase
+        .from('sequence_enrollments')
+        .update({ next_step_at: leaseUntilIso, updated_at: nowIso })
+        .eq('status', 'active')
+        .lte('next_step_at', nowIso)
+        .select('id')
+        .order('next_step_at', { ascending: true })
+        .limit(BATCH_SIZE);
+
+    if (claimErr) {
+        console.error('[SCHEDULER] Error claiming due enrollments:', claimErr);
+        return [];
+    }
+    if (!claimedRows || claimedRows.length === 0) {
+        return [];
+    }
+
+    const claimedIds = claimedRows.map((r: any) => r.id);
+
+    // Re-fetch with full context now that we hold the lease.
     const { data, error } = await supabase
         .from('sequence_enrollments')
         .select(`
@@ -257,13 +289,10 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
             sequences (*),
             contacts (*)
         `)
-        .eq('status', 'active')
-        .lte('next_step_at', new Date().toISOString())
-        .order('next_step_at', { ascending: true })
-        .limit(BATCH_SIZE);
+        .in('id', claimedIds);
 
     if (error) {
-        console.error('[SCHEDULER] Error fetching due enrollments:', error);
+        console.error('[SCHEDULER] Error fetching claimed enrollments:', error);
         return [];
     }
 
@@ -1178,15 +1207,25 @@ async function tick(): Promise<void> {
 /**
  * Start the scheduler
  */
+let shuttingDown = false;
+
 async function start(): Promise<void> {
     console.log('[SCHEDULER] Starting scheduler worker...');
     console.log(`[SCHEDULER] Poll interval: ${POLL_INTERVAL_MS}ms, Batch size: ${BATCH_SIZE}`);
 
-    // Run initial tick
-    await tick();
-
-    // Set up interval
-    setInterval(tick, POLL_INTERVAL_MS);
+    // Recursive setTimeout (not setInterval) so a slow tick can never
+    // overlap itself — the next tick is only scheduled after this one ends.
+    const loop = async () => {
+        if (shuttingDown) return;
+        try {
+            await tick();
+        } catch (err) {
+            console.error('[SCHEDULER] Unhandled tick error:', err);
+        } finally {
+            if (!shuttingDown) setTimeout(loop, POLL_INTERVAL_MS);
+        }
+    };
+    void loop();
 
     console.log('[SCHEDULER] Scheduler running');
 }
@@ -1194,11 +1233,13 @@ async function start(): Promise<void> {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
     console.log('[SCHEDULER] Received SIGTERM, shutting down...');
+    shuttingDown = true;
     process.exit(0);
 });
 
 process.on('SIGINT', () => {
     console.log('[SCHEDULER] Received SIGINT, shutting down...');
+    shuttingDown = true;
     process.exit(0);
 });
 
