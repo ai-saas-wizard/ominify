@@ -12,6 +12,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getQueueStats } from '../../lib/redis.js';
 import { supabase } from '../../lib/db.js';
 import { concurrencyManager } from '../../lib/concurrency-manager.js';
+import { requireBearer } from '../middleware/webhook-auth.js';
 
 let schedulerLastTick = Date.now();
 
@@ -36,6 +37,10 @@ async function countDueEnrollments(): Promise<number> {
 }
 
 export async function healthRoutes(fastify: FastifyInstance) {
+    // Every /admin/* route requires Authorization: Bearer <ADMIN_API_TOKEN>.
+    // /health and /ready remain unauthenticated for load-balancer probes.
+    const adminAuth = requireBearer('ADMIN_API_TOKEN');
+
     /**
      * Health check
      * GET /health
@@ -93,7 +98,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
      * Admin: List umbrellas
      * GET /admin/umbrellas
      */
-    fastify.get('/admin/umbrellas', async (request, reply) => {
+    fastify.get('/admin/umbrellas', { preHandler: adminAuth }, async (request, reply) => {
         const { data, error } = await supabase
             .from('vapi_umbrellas')
             .select(`
@@ -127,6 +132,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
      */
     fastify.post<{ Body: { tenantId: string; targetUmbrellaId: string; reason?: string } }>(
         '/admin/umbrellas/migrate',
+        { preHandler: adminAuth },
         async (request, reply) => {
             const { tenantId, targetUmbrellaId, reason } = request.body;
 
@@ -186,7 +192,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
      * Admin: Get enrollment stats
      * GET /admin/stats
      */
-    fastify.get('/admin/stats', async (request, reply) => {
+    fastify.get('/admin/stats', { preHandler: adminAuth }, async (request, reply) => {
         // Per-status counts via parallel HEAD queries — avoids loading every
         // enrollment row into memory (the prior implementation OOMs at scale).
         const ENROLLMENT_STATUSES = [

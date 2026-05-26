@@ -14,6 +14,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eventQueue } from '../../lib/redis.js';
+import { requireBearer } from '../middleware/webhook-auth.js';
 
 // 1x1 transparent GIF (43 bytes)
 const TRACKING_PIXEL = Buffer.from(
@@ -22,6 +23,12 @@ const TRACKING_PIXEL = Buffer.from(
 );
 
 export async function emailWebhooks(fastify: FastifyInstance) {
+    // Inbound email replies come from a provider (Mailgun, SendGrid Inbound
+    // Parse, etc.) that should send a shared bearer token. Tracking
+    // pixel/click endpoints stay public — they're sent directly to
+    // recipients and can't carry a secret.
+    const inboundAuth = requireBearer('EMAIL_INBOUND_API_TOKEN');
+
     // ═══════════════════════════════════════════════════════════════════
     // Inbound Email Reply Webhook
     // ═══════════════════════════════════════════════════════════════════
@@ -39,7 +46,7 @@ export async function emailWebhooks(fastify: FastifyInstance) {
      * - text: plain text body
      * - html: HTML body (optional)
      */
-    fastify.post('/inbound', async (request: FastifyRequest, reply: FastifyReply) => {
+    fastify.post('/inbound', { preHandler: inboundAuth }, async (request: FastifyRequest, reply: FastifyReply) => {
         const body = request.body as any;
 
         const toAddress = body.to || body.To || body.envelope?.to?.[0] || '';

@@ -10,6 +10,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { supabase } from '../../lib/db.js';
+import { requireBearer } from '../middleware/webhook-auth.js';
 import type { Sequence, Contact } from '../../lib/types.js';
 import { addSeconds } from 'date-fns';
 
@@ -305,12 +306,18 @@ async function ingestLead(
 }
 
 export async function leadIngestion(fastify: FastifyInstance) {
+    // Every lead-ingestion route requires Authorization: Bearer <LEAD_INGESTION_API_TOKEN>.
+    // Lead sources can't sign their payloads, so a shared bearer is the
+    // practical floor of protection here.
+    const leadAuth = requireBearer('LEAD_INGESTION_API_TOKEN');
+
     /**
      * Google Ads Lead webhook
      * POST /webhooks/leads/google-ads/:tenantId
      */
     fastify.post<{ Params: TenantParams; Body: GoogleAdsLead }>(
         '/google-ads/:tenantId',
+        { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
             const leadData = parseGoogleAdsLead(request.body);
@@ -331,6 +338,7 @@ export async function leadIngestion(fastify: FastifyInstance) {
      */
     fastify.post<{ Params: TenantParams; Body: FacebookLead }>(
         '/facebook/:tenantId',
+        { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
             const leadData = parseFacebookLead(request.body);
@@ -351,6 +359,7 @@ export async function leadIngestion(fastify: FastifyInstance) {
      */
     fastify.post<{ Params: TenantParams; Body: GenericLead }>(
         '/generic/:tenantId',
+        { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
             const leadData = request.body;
@@ -372,6 +381,7 @@ export async function leadIngestion(fastify: FastifyInstance) {
      */
     fastify.post<{ Params: TenantParams; Body: { leads: GenericLead[] } }>(
         '/csv/:tenantId',
+        { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
             const { leads } = request.body;

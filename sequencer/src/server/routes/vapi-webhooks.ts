@@ -18,6 +18,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eventQueue } from '../../lib/redis.js';
 import { concurrencyManager } from '../../lib/concurrency-manager.js';
 import { supabase } from '../../lib/db.js';
+import { requireVapiSecret } from '../middleware/webhook-auth.js';
 import type { EventJobPayload } from '../../lib/types.js';
 
 interface VapiArtifactMessage {
@@ -389,6 +390,7 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
      */
     fastify.post<{ Body: VapiWebhookPayload }>(
         '/call-events',
+        { preHandler: requireVapiSecret },
         async (request, reply) => {
             const payload = request.body;
             const messageType = payload.message?.type;
@@ -555,6 +557,7 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
      */
     fastify.post<{ Body: VapiConcurrencySyncPayload }>(
         '/concurrency-sync',
+        { preHandler: requireVapiSecret },
         async (request, reply) => {
             const { orgId, current, limit, timestamp } = request.body;
 

@@ -9,6 +9,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eventQueue } from '../../lib/redis.js';
 import { supabase } from '../../lib/db.js';
+import { requireTwilioSignature } from '../middleware/webhook-auth.js';
 import type { EventJobPayload } from '../../lib/types.js';
 
 interface SmsStatusParams {
@@ -97,6 +98,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
         '/sms-inbound/:tenantId',
         async (request, reply) => {
             const { tenantId } = request.params;
+            if (!(await requireTwilioSignature(request, reply, tenantId))) return;
             const { From: from, To: to, Body: body, MessageSid: messageSid } = request.body;
 
             console.log(`[TWILIO] Inbound SMS from ${from} to ${to}: "${body?.substring(0, 50)}..."`);
@@ -129,6 +131,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
         '/sms-status/:tenantId',
         async (request, reply) => {
             const { tenantId } = request.params;
+            if (!(await requireTwilioSignature(request, reply, tenantId))) return;
             const { MessageSid: messageSid, MessageStatus: status, To: to, ErrorCode: errorCode } = request.body;
 
             console.log(`[TWILIO] SMS status: ${messageSid} -> ${status}`);
@@ -174,6 +177,10 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 reply.type('text/xml');
                 return '<Response></Response>';
             }
+
+            // Validate signature against this tenant's authToken before
+            // accepting any state change.
+            if (!(await requireTwilioSignature(request, reply, tenantId))) return;
 
             // Find enrollment
             const enrollmentId = await findEnrollmentByPhone(tenantId, from);

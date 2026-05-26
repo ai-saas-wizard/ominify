@@ -24,9 +24,16 @@ const fastify = Fastify({
     },
 });
 
-// Register CORS
+// Register CORS — webhook endpoints are server-to-server so CORS is
+// only relevant for the few admin endpoints called from the dashboard.
+// Allow only origins explicitly listed in CORS_ALLOWED_ORIGINS (comma-
+// separated); fall back to no CORS reflection.
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 fastify.register(cors, {
-    origin: true,
+    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
 });
 
 // Register route modules
