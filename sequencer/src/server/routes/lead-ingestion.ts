@@ -218,7 +218,7 @@ async function enrollInSequence(
         .single();
 
     const nextStepAt = firstStep
-        ? addSeconds(new Date(), firstStep.delay_seconds)
+        ? addSeconds(new Date(), (firstStep.delay_minutes ?? 0) * 60)
         : new Date();
 
     // Create enrollment

@@ -175,7 +175,7 @@ export interface SequenceStep {
     sequence_id: string;
     step_order: number;
     channel: ChannelType;
-    delay_seconds: number;
+    delay_minutes: number;
     delay_type: 'after_previous' | 'after_enrollment' | 'specific_time';
     specific_time: string | null;
     content: SmsContent | EmailContent | VoiceContent;

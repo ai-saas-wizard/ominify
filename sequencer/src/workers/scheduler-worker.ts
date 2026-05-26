@@ -980,14 +980,15 @@ async function advanceToNextStep(
     }
 
     // Calculate next step time with emotion-based delay adjustment
-    let adjustedDelaySeconds = nextStep.delay_seconds;
+    // DB column is delay_minutes (per type-b-schema.sql); convert to seconds for scheduling math.
+    const baseDelaySeconds = (nextStep.delay_minutes ?? 0) * 60;
+    let adjustedDelaySeconds = baseDelaySeconds;
 
     // Test mode: compress all delays to 30 seconds
     const isTestEnrollment = enrollment.is_test === true;
     if (isTestEnrollment) {
-        const originalDelay = nextStep.delay_seconds;
         adjustedDelaySeconds = TEST_MODE_DELAY_SECONDS;
-        console.log(`[SCHEDULER] Test mode: delay compressed ${originalDelay}s → ${adjustedDelaySeconds}s for enrollment ${enrollment.id}`);
+        console.log(`[SCHEDULER] Test mode: delay compressed ${baseDelaySeconds}s → ${adjustedDelaySeconds}s for enrollment ${enrollment.id}`);
     } else if (emotionalState) {
         const multiplier = getEmotionBasedDelayMultiplier({
             sentimentTrend: emotionalState.sentimentTrend,
@@ -997,9 +998,8 @@ async function advanceToNextStep(
         });
 
         if (multiplier !== 1.0) {
-            const originalDelay = nextStep.delay_seconds;
-            adjustedDelaySeconds = Math.round(originalDelay * multiplier);
-            console.log(`[SCHEDULER] EI delay adjustment: ${originalDelay}s → ${adjustedDelaySeconds}s (x${multiplier}, trend=${emotionalState.sentimentTrend})`);
+            adjustedDelaySeconds = Math.round(baseDelaySeconds * multiplier);
+            console.log(`[SCHEDULER] EI delay adjustment: ${baseDelaySeconds}s → ${adjustedDelaySeconds}s (x${multiplier}, trend=${emotionalState.sentimentTrend})`);
         }
     }
 
