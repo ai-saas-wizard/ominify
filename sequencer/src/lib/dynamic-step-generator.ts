@@ -419,25 +419,33 @@ export async function endDynamicSequence(
 
 /**
  * Set enrollment to active with next_step_at after step generation.
+ * The scheduler picks up the next step via step_order = current_step_order + 1,
+ * so currentStepOrder stays as-is here; the newly-generated step lives at +1.
  */
 export async function activateEnrollmentForNextStep(
     enrollmentId: string,
     delaySeconds: number,
-    newStepOrder: number
+    currentStepOrder: number
 ): Promise<void> {
     const nextStepAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+
+    const { data: prior } = await supabase
+        .from('sequence_enrollments')
+        .select('total_attempts')
+        .eq('id', enrollmentId)
+        .single();
 
     await supabase
         .from('sequence_enrollments')
         .update({
             status: 'active',
-            current_step_order: newStepOrder,
+            current_step_order: currentStepOrder,
             next_step_at: nextStepAt,
             outcome_timeout_at: null,
-            total_attempts: newStepOrder,
+            total_attempts: (prior?.total_attempts ?? 0) + 1,
             updated_at: new Date().toISOString(),
         })
         .eq('id', enrollmentId);
 
-    console.log(`[JIT] Enrollment ${enrollmentId} activated — next step ${newStepOrder + 1} at ${nextStepAt}`);
+    console.log(`[JIT] Enrollment ${enrollmentId} activated — next step ${currentStepOrder + 1} at ${nextStepAt}`);
 }
