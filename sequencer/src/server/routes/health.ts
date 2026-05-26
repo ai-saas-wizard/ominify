@@ -187,15 +187,23 @@ export async function healthRoutes(fastify: FastifyInstance) {
      * GET /admin/stats
      */
     fastify.get('/admin/stats', async (request, reply) => {
-        // Build enrollment stats by status using direct queries
-        const { data: enrollmentRows } = await supabase
-            .from('sequence_enrollments')
-            .select('status');
+        // Per-status counts via parallel HEAD queries — avoids loading every
+        // enrollment row into memory (the prior implementation OOMs at scale).
+        const ENROLLMENT_STATUSES = [
+            'active', 'paused', 'completed', 'replied', 'booked',
+            'failed', 'manual_stop', 'awaiting_outcome', 'generating_next_step',
+        ] as const;
 
-        const enrollmentCounts: Record<string, number> = {};
-        (enrollmentRows || []).forEach((e: any) => {
-            enrollmentCounts[e.status] = (enrollmentCounts[e.status] || 0) + 1;
-        });
+        const counts = await Promise.all(
+            ENROLLMENT_STATUSES.map(async (status) => {
+                const { count } = await supabase
+                    .from('sequence_enrollments')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', status);
+                return [status, count ?? 0] as const;
+            })
+        );
+        const enrollmentCounts: Record<string, number> = Object.fromEntries(counts);
 
         // Get total execution count
         const { count: totalExecutions } = await supabase
