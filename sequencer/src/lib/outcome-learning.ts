@@ -828,66 +828,59 @@ export async function evaluateTest(stepId: string): Promise<boolean> {
     const MIN_SAMPLE = 30;
     if (variants.some(v => v.total_sent < MIN_SAMPLE)) return false;
 
-    // Simplified chi-squared test for two proportions
-    // Compare each pair of variants
-    let winnerFound = false;
+    // Compute per-variant rates once
+    const enriched = variants.map(v => ({
+        ...v,
+        conv_rate: v.total_sent > 0 ? v.total_conversions / v.total_sent : 0,
+        reply_rate_calc: v.total_sent > 0 ? v.total_replies / v.total_sent : 0,
+    }));
 
-    for (let i = 0; i < variants.length; i++) {
-        for (let j = i + 1; j < variants.length; j++) {
-            const a = variants[i];
-            const b = variants[j];
+    // Pick the leader by conversion rate; everyone else is a loser tested
+    // against the leader. This gives one canonical winner and one p_value
+    // per loser describing how it compares to the leader.
+    const leader = enriched.reduce((best, v) => (v.conv_rate > best.conv_rate ? v : best));
+    const losers = enriched.filter(v => v.id !== leader.id);
 
-            const n1 = a.total_sent;
-            const n2 = b.total_sent;
-            const p1 = n1 > 0 ? a.total_conversions / n1 : 0;
-            const p2 = n2 > 0 ? b.total_conversions / n2 : 0;
-
-            // Pooled proportion
-            const p = (a.total_conversions + b.total_conversions) / (n1 + n2);
-            const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
-
-            if (se === 0) continue;
-
-            // Z-score
-            const z = Math.abs(p1 - p2) / se;
-
-            // Two-tailed p-value (approximation)
-            const pValue = 2 * (1 - normalCDF(z));
-
-            // Update variants with computed metrics
-            const convRate1 = n1 > 0 ? a.total_conversions / n1 : 0;
-            const convRate2 = n2 > 0 ? b.total_conversions / n2 : 0;
-            const replyRate1 = n1 > 0 ? a.total_replies / n1 : 0;
-            const replyRate2 = n2 > 0 ? b.total_replies / n2 : 0;
-
-            await supabase.from('step_variants').update({
-                conversion_rate: convRate1,
-                reply_rate: replyRate1,
-                p_value: pValue,
-                updated_at: new Date().toISOString(),
-            }).eq('id', a.id);
-
-            await supabase.from('step_variants').update({
-                conversion_rate: convRate2,
-                reply_rate: replyRate2,
-                p_value: pValue,
-                updated_at: new Date().toISOString(),
-            }).eq('id', b.id);
-
-            // If significant, mark winner
-            if (pValue < 0.05) {
-                const winnerId = p1 > p2 ? a.id : b.id;
-                await supabase.from('step_variants').update({
-                    is_winner: true,
-                }).eq('id', winnerId);
-
-                winnerFound = true;
-                console.log(`[LEARNING] A/B test winner found for step ${stepId}: variant ${winnerId} (p=${pValue.toFixed(4)})`);
-            }
-        }
+    // Compute p-value for each loser vs leader
+    const loserPValues = new Map<string, number>();
+    for (const loser of losers) {
+        const n1 = leader.total_sent;
+        const n2 = loser.total_sent;
+        const p = (leader.total_conversions + loser.total_conversions) / (n1 + n2);
+        const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+        if (se === 0) continue;
+        const z = Math.abs(leader.conv_rate - loser.conv_rate) / se;
+        loserPValues.set(loser.id, 2 * (1 - normalCDF(z)));
     }
 
-    return winnerFound;
+    // Only declare a winner if the leader beats at least one loser at p<0.05
+    const leaderIsSignificant = [...loserPValues.values()].some(pv => pv < 0.05);
+
+    // Persist: leader gets its own row (p_value=null since no self-compare),
+    // each loser gets its p_value vs leader. Exactly one is_winner.
+    await supabase.from('step_variants').update({
+        conversion_rate: leader.conv_rate,
+        reply_rate: leader.reply_rate_calc,
+        p_value: null,
+        is_winner: leaderIsSignificant,
+        updated_at: new Date().toISOString(),
+    }).eq('id', leader.id);
+
+    for (const loser of losers) {
+        await supabase.from('step_variants').update({
+            conversion_rate: loser.conv_rate,
+            reply_rate: loser.reply_rate_calc,
+            p_value: loserPValues.get(loser.id) ?? null,
+            is_winner: false,
+            updated_at: new Date().toISOString(),
+        }).eq('id', loser.id);
+    }
+
+    if (leaderIsSignificant) {
+        console.log(`[LEARNING] A/B test winner found for step ${stepId}: variant ${leader.id} (conv=${leader.conv_rate.toFixed(4)})`);
+    }
+
+    return leaderIsSignificant;
 }
 
 /**
