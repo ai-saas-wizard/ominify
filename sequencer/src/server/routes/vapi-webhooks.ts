@@ -15,7 +15,7 @@
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eventQueue } from '../../lib/redis.js';
+import { eventQueue, redis } from '../../lib/redis.js';
 import { concurrencyManager } from '../../lib/concurrency-manager.js';
 import { supabase } from '../../lib/db.js';
 import { requireVapiSecret } from '../middleware/webhook-auth.js';
@@ -126,22 +126,34 @@ interface VapiConcurrencySyncPayload {
     timestamp: string;
 }
 
-// Track processed call IDs to prevent double-processing
-// (VAPI can send both status-update:ended AND end-of-call-report for the same call)
-const processedCalls = new Map<string, number>(); // callId -> timestamp
-const DEDUP_WINDOW_MS = 60_000; // 60 seconds
+// Persist call-dedup state in Redis so a webhook-server restart between
+// status-update:ended and end-of-call-report can't let both events through
+// and double-release the concurrency slot.
+const DEDUP_TTL_SEC = 600; // 10 minutes — long calls can have minutes between events
 
 /**
- * Clean up old entries from the dedup cache every 5 minutes
+ * Atomically claim a callId for processing. Returns true on first claim,
+ * false if another webhook already processed this call.
  */
-setInterval(() => {
-    const now = Date.now();
-    for (const [callId, ts] of processedCalls) {
-        if (now - ts > DEDUP_WINDOW_MS * 5) {
-            processedCalls.delete(callId);
-        }
+async function tryClaimCall(callId: string): Promise<boolean> {
+    try {
+        // NX = set only if not exists; EX = 10min TTL
+        const res = await redis.set(`vapi:dedup:${callId}`, '1', 'EX', DEDUP_TTL_SEC, 'NX');
+        return res === 'OK';
+    } catch (err) {
+        console.error('[VAPI] Redis dedup error, allowing through:', err);
+        return true; // fail-open: better to risk a duplicate than to drop both
     }
-}, 5 * 60_000);
+}
+
+async function isCallProcessed(callId: string): Promise<boolean> {
+    try {
+        const v = await redis.get(`vapi:dedup:${callId}`);
+        return v !== null;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Extract a flat transcript string from the payload.
@@ -414,13 +426,12 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
 
                     // If call ended, process the outcome
                     if (status === 'ended') {
-                        // Dedup: skip if already processed this callId (end-of-call-report may follow)
-                        if (callId && processedCalls.has(callId)) {
+                        // Dedup via Redis SETNX so a process restart between
+                        // status-update:ended and end-of-call-report can't
+                        // double-process.
+                        if (callId && !(await tryClaimCall(callId))) {
                             console.log(`[VAPI] Call ${callId} already processed (dedup), skipping status-update`);
                             break;
-                        }
-                        if (callId) {
-                            processedCalls.set(callId, Date.now());
                         }
 
                         const endedReason = payload.message.endedReason || payload.message.call?.endedReason;
@@ -460,7 +471,7 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                     const reportCallId = call.id || callId;
 
                     // Dedup: if already processed via status-update, update with richer data instead of double-processing
-                    if (reportCallId && processedCalls.has(reportCallId)) {
+                    if (reportCallId && (await isCallProcessed(reportCallId))) {
                         console.log(`[VAPI] Call ${reportCallId} already processed via status-update, enriching with end-of-call-report data`);
 
                         // Enrich the execution log with any additional data from the report
@@ -482,7 +493,7 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                     }
 
                     if (reportCallId) {
-                        processedCalls.set(reportCallId, Date.now());
+                        await tryClaimCall(reportCallId);
                     }
 
                     const transcript = extractTranscript(payload);
