@@ -79,8 +79,8 @@ import type {
     InlineVapiAgent,
     StepBrief,
 } from '../lib/types.js';
-import { format, addSeconds, isWithinInterval, setHours, setMinutes } from 'date-fns';
-import { utcToZonedTime } from 'date-fns-tz';
+import { format, addSeconds, isWithinInterval, addDays } from 'date-fns';
+import { utcToZonedTime, zonedTimeToUtc, formatInTimeZone } from 'date-fns-tz';
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
@@ -156,21 +156,14 @@ function isWithinBusinessHours(
  */
 function getNextBusinessHoursStart(
     timezone: string,
-    businessHours: TenantProfile['business_hours']
+    _businessHours: TenantProfile['business_hours']
 ): Date {
-    // Simple implementation: next 8am in timezone
+    // Next 08:00 in tenant timezone (DST-safe; ignores host TZ entirely).
     const now = new Date();
     const zonedNow = utcToZonedTime(now, timezone);
-    const hour = zonedNow.getHours();
-
-    if (hour < 8) {
-        // Today at 8am
-        return setMinutes(setHours(now, 8), 0);
-    } else {
-        // Tomorrow at 8am
-        const tomorrow = addSeconds(now, 24 * 60 * 60);
-        return setMinutes(setHours(tomorrow, 8), 0);
-    }
+    const targetZoned = zonedNow.getHours() < 8 ? zonedNow : addDays(zonedNow, 1);
+    const dateStr = formatInTimeZone(targetZoned, timezone, 'yyyy-MM-dd');
+    return zonedTimeToUtc(`${dateStr}T08:00:00`, timezone);
 }
 
 /**
