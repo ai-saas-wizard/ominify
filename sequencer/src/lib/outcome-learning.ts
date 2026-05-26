@@ -794,20 +794,11 @@ export async function selectVariant(
  * Record that a variant was sent (increment total_sent).
  */
 export async function recordVariantSent(variantId: string): Promise<void> {
-    const { data: variant } = await supabase
-        .from('step_variants')
-        .select('total_sent')
-        .eq('id', variantId)
-        .single();
-
-    if (variant) {
-        await supabase
-            .from('step_variants')
-            .update({
-                total_sent: (variant.total_sent || 0) + 1,
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', variantId);
+    // Atomic in Postgres (see migration 20260526-sequencer-atomic-helpers.sql).
+    // The prior SELECT-then-write undercounted under concurrent dispatch.
+    const { error } = await supabase.rpc('increment_variant_sent', { p_variant_id: variantId });
+    if (error) {
+        console.error('[LEARNING] increment_variant_sent failed:', error);
     }
 }
 

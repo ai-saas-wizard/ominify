@@ -347,25 +347,19 @@ export async function updateEnrollmentEI(
         }));
 
         // Get existing objections
-        const { data: enrollment } = await supabase
-            .from('sequence_enrollments')
-            .select('objections_detected')
-            .eq('id', enrollmentId)
-            .single();
-
-        const existingObjections = (enrollment?.objections_detected as any[]) || [];
-
-        // Merge — deduplicate by type+detail
-        const allObjections = [...existingObjections];
-        for (const obj of newObjections) {
-            const exists = allObjections.some(
-                (e: any) => e.type === obj.type && e.detail === obj.detail
-            );
-            if (!exists) {
-                allObjections.push(obj);
+        // Merge objections atomically in Postgres (dedupe on type+detail).
+        // See migration 20260526-sequencer-atomic-helpers.sql.
+        if (newObjections && newObjections.length > 0) {
+            const { error: mergeErr } = await supabase.rpc('merge_objections', {
+                p_enrollment_id: enrollmentId,
+                p_new_objections: newObjections,
+            });
+            if (mergeErr) {
+                console.error('[EI] merge_objections failed:', mergeErr);
             }
         }
 
+        // The remaining EI fields are last-write-wins by design.
         await supabase
             .from('sequence_enrollments')
             .update({
@@ -373,7 +367,6 @@ export async function updateEnrollmentEI(
                 sentiment_trend: sentimentTrend,
                 needs_human_intervention: analysis.needs_human_intervention,
                 last_emotion: analysis.primary_emotion,
-                objections_detected: allObjections,
                 recommended_tone: analysis.recommended_tone,
                 is_hot_lead: analysis.is_hot_lead,
                 is_at_risk: analysis.is_at_risk,

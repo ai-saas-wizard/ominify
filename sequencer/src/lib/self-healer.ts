@@ -355,7 +355,9 @@ export async function executeHealingAction(
         }
 
         case 'extend_delay': {
-            // Reschedule the current step with an extended delay
+            // Reschedule the current step with an extended delay. Combine the
+            // next_step_at bump and the step decrement into a single UPDATE so
+            // the scheduler can't observe a half-applied state in between.
             const delaySeconds = action.details.delay_seconds || 300;
             const nextTime = new Date(Date.now() + delaySeconds * 1000);
 
@@ -363,15 +365,8 @@ export async function executeHealingAction(
                 .from('sequence_enrollments')
                 .update({
                     next_step_at: nextTime.toISOString(),
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', enrollmentId);
-
-            // Decrement step so it re-tries the current step
-            await supabase
-                .from('sequence_enrollments')
-                .update({
                     current_step_order: enrollment.current_step_order - 1,
+                    updated_at: new Date().toISOString(),
                 })
                 .eq('id', enrollmentId);
 
@@ -656,25 +651,14 @@ async function appendHealingToEnrollment(
     enrollmentId: string,
     healingEntry: any,
 ): Promise<void> {
-    try {
-        const { data } = await supabase
-            .from('sequence_enrollments')
-            .select('healing_actions_taken')
-            .eq('id', enrollmentId)
-            .single();
-
-        const existing = (data?.healing_actions_taken as any[]) || [];
-        existing.push(healingEntry);
-
-        await supabase
-            .from('sequence_enrollments')
-            .update({
-                healing_actions_taken: existing,
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', enrollmentId);
-    } catch (err) {
-        console.error('[HEALER] Error appending healing to enrollment:', err);
+    // Atomic JSONB append (see migration 20260526-sequencer-atomic-helpers.sql).
+    // The prior SELECT-push-UPDATE lost entries when two healings raced.
+    const { error } = await supabase.rpc('append_healing_to_enrollment', {
+        p_enrollment_id: enrollmentId,
+        p_healing: healingEntry,
+    });
+    if (error) {
+        console.error('[HEALER] append_healing_to_enrollment failed:', error);
     }
 }
 
