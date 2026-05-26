@@ -96,7 +96,7 @@ export async function handleInboundSMS(params: {
         const { data: tenantProfile } = await supabase
             .from('tenant_profiles')
             .select('*')
-            .eq('tenant_id', clientId)
+            .eq('client_id', clientId)
             .single();
 
         // 5. Build conversation context (same pattern as conversation-memory.ts)

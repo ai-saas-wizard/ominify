@@ -942,12 +942,12 @@ export async function computeIndustryBenchmarks(
     // Get all sequence_analytics for this industry in the period
     const { data: tenantProfiles } = await supabase
         .from('tenant_profiles')
-        .select('tenant_id')
+        .select('client_id')
         .eq('industry', industry);
 
     if (!tenantProfiles || tenantProfiles.length === 0) return;
 
-    const clientIds = tenantProfiles.map(tp => tp.tenant_id);
+    const clientIds = tenantProfiles.map(tp => tp.client_id);
 
     const { data: analytics } = await supabase
         .from('sequence_analytics')
@@ -1026,7 +1026,7 @@ export async function compareToIndustry(
     const { data: profile } = await supabase
         .from('tenant_profiles')
         .select('industry')
-        .eq('tenant_id', sequence.client_id)
+        .eq('client_id', sequence.client_id)
         .single();
 
     if (!profile) return null;

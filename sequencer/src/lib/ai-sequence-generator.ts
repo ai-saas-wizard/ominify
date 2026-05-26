@@ -40,7 +40,7 @@ async function getTenantProfile(tenantId: string): Promise<TenantProfile | null>
     const { data, error } = await supabase
         .from('tenant_profiles')
         .select('*')
-        .eq('tenant_id', tenantId)
+        .eq('client_id', tenantId)
         .single();
 
     if (error || !data) {

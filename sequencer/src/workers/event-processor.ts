@@ -160,7 +160,7 @@ async function maybeTriggerDynamicGeneration(
         const { data: tenantProfile } = await supabase
             .from('tenant_profiles')
             .select('*')
-            .eq('tenant_id', enrollment.tenant_id)
+            .eq('client_id', enrollment.tenant_id)
             .single();
 
         if (!tenantProfile) {
