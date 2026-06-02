@@ -12,6 +12,7 @@ const isPublicRoute = createRouteMatcher([
     '/api/stripe/webhook',
     '/api/webhooks/vapi',
     '/api/vapi/tools/(.*)',
+    '/api/client/(.*)/leads',
     '/api/integrations/google-calendar/callback',
     '/api/offers/clear-tier',
     '/'
