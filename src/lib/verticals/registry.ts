@@ -1,5 +1,6 @@
 import type { VerticalDefinition } from "./types";
 import { reInvestorDefinition } from "./real-estate-investor/definition";
+import { saasDefinition } from "./saas/definition";
 
 // ─── VERTICAL REGISTRY ───
 // To add a new vertical:
@@ -9,6 +10,7 @@ import { reInvestorDefinition } from "./real-estate-investor/definition";
 
 const VERTICAL_REGISTRY: Record<string, VerticalDefinition> = {
     real_estate_investor: reInvestorDefinition,
+    saas_companies: saasDefinition,
 };
 
 export function getVertical(id: string): VerticalDefinition | undefined {

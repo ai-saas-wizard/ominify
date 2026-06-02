@@ -14,12 +14,18 @@ import { ScheduleCallScreen } from "./components/schedule-call-screen";
 import { VerticalForm } from "./components/vertical-form";
 import { VerticalOutboundConfig } from "./components/vertical-outbound-config";
 import { VerticalReview } from "./components/vertical-review";
+import { SaaSVerticalForm } from "./components/saas-vertical-form";
+import { SaaSOutboundConfig } from "./components/saas-outbound-config";
+import { SaaSReview } from "./components/saas-review";
 import { useAIAnalysisV2 } from "./hooks/use-ai-analysis-v2";
 import { useProfileForm } from "./hooks/use-profile-form";
 import { useAgentChat } from "./hooks/use-agent-chat";
 import { useConversationFlows } from "./hooks/use-conversation-flows";
 import { useDeployment } from "./hooks/use-deployment";
-import { deployVerticalAgents } from "@/app/actions/vertical-deployment-actions";
+import {
+    deployVerticalAgents,
+    deploySaaSAgents,
+} from "@/app/actions/vertical-deployment-actions";
 import { recordOnboardingCallIntent } from "@/app/actions/onboarding-call-actions";
 import type {
     OnboardingV2Phase,
@@ -28,8 +34,12 @@ import type {
     AgentModification,
     DeploymentProgress,
 } from "./types";
-import type { REInvestorFormData } from "@/lib/verticals/types";
+import type { REInvestorFormData, SaaSFormData } from "@/lib/verticals/types";
 import { DEFAULT_VOICE } from "@/lib/voices";
+
+// Form data carried through the vertical onboarding flow. Each vertical uses
+// its own typed shape; the wizard branches on `selectedVerticalId`.
+type VerticalFormDataUnion = REInvestorFormData | SaaSFormData;
 
 export function OnboardingV2Wizard({
     clientId,
@@ -47,7 +57,8 @@ export function OnboardingV2Wizard({
 
     // ─── VERTICAL STATE ───
     const [selectedVerticalId, setSelectedVerticalId] = useState<string | null>(null);
-    const [verticalFormData, setVerticalFormData] = useState<REInvestorFormData | null>(null);
+    const [verticalFormData, setVerticalFormData] = useState<VerticalFormDataUnion | null>(null);
+    const isSaaS = selectedVerticalId === "saas_companies";
     const [verticalDeploying, setVerticalDeploying] = useState(false);
     const [verticalDeployProgress, setVerticalDeployProgress] = useState<DeploymentProgress | null>(null);
 
@@ -121,7 +132,7 @@ export function OnboardingV2Wizard({
     }, []);
 
     // ─── VERTICAL FORM ───
-    const handleVerticalFormContinue = useCallback((data: REInvestorFormData) => {
+    const handleVerticalFormContinue = useCallback((data: VerticalFormDataUnion) => {
         setVerticalFormData(data);
         setBusinessName(data.companyName);
         setPhase("vertical_outbound_config");
@@ -133,7 +144,7 @@ export function OnboardingV2Wizard({
 
     // ─── VERTICAL OUTBOUND CONFIG ───
     const handleOutboundConfigContinue = useCallback(
-        (updated: REInvestorFormData) => {
+        (updated: VerticalFormDataUnion) => {
             setVerticalFormData(updated);
             setPhase("vertical_review");
         },
@@ -151,44 +162,72 @@ export function OnboardingV2Wizard({
         setVerticalDeploying(true);
         setPhase("deploying");
 
-        // Set up progress tracking for vertical deployment (inbound + outbound)
-        setVerticalDeployProgress({
-            totalAgents: 2,
-            completedAgents: 0,
-            currentAgent: "Inbound Receptionist",
-            steps: [
-                {
-                    id: "re_inbound_receptionist",
-                    agentTypeId: "re_inbound_receptionist",
-                    label: `${verticalFormData.companyName} - Inbound Receptionist`,
-                    status: "in_progress",
-                    substeps: [
-                        { label: "Building system prompt from template", status: "in_progress" },
-                        { label: "Creating voice agent", status: "pending" },
-                        { label: "Saving to database", status: "pending" },
-                    ],
-                },
-                {
-                    id: "re_outbound_follow_up",
-                    agentTypeId: "re_outbound_follow_up",
-                    label: `${verticalFormData.companyName} - Outbound Follow-Up`,
-                    status: "pending",
-                    substeps: [
-                        { label: "Building system prompt from template", status: "pending" },
-                        { label: "Creating voice agent", status: "pending" },
-                        { label: "Saving to database", status: "pending" },
-                    ],
-                },
-            ],
-            error: null,
-        });
+        // Set up progress tracking. SaaS deploys a single outbound agent;
+        // Real Estate deploys an inbound + outbound pair.
+        setVerticalDeployProgress(
+            isSaaS
+                ? {
+                      totalAgents: 1,
+                      completedAgents: 0,
+                      currentAgent: "Outbound Sales Agent",
+                      steps: [
+                          {
+                              id: "saas_outbound_sales",
+                              agentTypeId: "saas_outbound_sales",
+                              label: `${verticalFormData.companyName} - Outbound Sales Agent`,
+                              status: "in_progress",
+                              substeps: [
+                                  { label: "Building system prompt from template", status: "in_progress" },
+                                  { label: "Creating voice agent", status: "pending" },
+                                  { label: "Saving to database", status: "pending" },
+                              ],
+                          },
+                      ],
+                      error: null,
+                  }
+                : {
+                      totalAgents: 2,
+                      completedAgents: 0,
+                      currentAgent: "Inbound Receptionist",
+                      steps: [
+                          {
+                              id: "re_inbound_receptionist",
+                              agentTypeId: "re_inbound_receptionist",
+                              label: `${verticalFormData.companyName} - Inbound Receptionist`,
+                              status: "in_progress",
+                              substeps: [
+                                  { label: "Building system prompt from template", status: "in_progress" },
+                                  { label: "Creating voice agent", status: "pending" },
+                                  { label: "Saving to database", status: "pending" },
+                              ],
+                          },
+                          {
+                              id: "re_outbound_follow_up",
+                              agentTypeId: "re_outbound_follow_up",
+                              label: `${verticalFormData.companyName} - Outbound Follow-Up`,
+                              status: "pending",
+                              substeps: [
+                                  { label: "Building system prompt from template", status: "pending" },
+                                  { label: "Creating voice agent", status: "pending" },
+                                  { label: "Saving to database", status: "pending" },
+                              ],
+                          },
+                      ],
+                      error: null,
+                  }
+        );
 
         try {
             // Brief visual delay so the user sees the in_progress state before the deploy returns.
             await new Promise((r) => setTimeout(r, 800));
 
-            // Deploy: creates BOTH VAPI assistants + saves both to DB
-            const result = await deployVerticalAgents(clientId, verticalFormData);
+            // Deploy. SaaS → single outbound agent; RE → inbound + outbound pair.
+            const result = isSaaS
+                ? await deploySaaSAgents(clientId, verticalFormData as SaaSFormData)
+                : await deployVerticalAgents(
+                      clientId,
+                      verticalFormData as REInvestorFormData
+                  );
 
             const partialFailure =
                 result.success && result.agents.some((a) => a.error);
@@ -292,7 +331,7 @@ export function OnboardingV2Wizard({
         } finally {
             setVerticalDeploying(false);
         }
-    }, [clientId, verticalFormData, verticalDeploying]);
+    }, [clientId, verticalFormData, verticalDeploying, isSaaS]);
 
     const handleVerticalReviewBack = useCallback(() => {
         setPhase("vertical_outbound_config");
@@ -705,12 +744,25 @@ export function OnboardingV2Wizard({
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <VerticalForm
-                            verticalId={selectedVerticalId}
-                            initialData={verticalFormData || undefined}
-                            onContinue={handleVerticalFormContinue}
-                            onBack={handleVerticalFormBack}
-                        />
+                        {isSaaS ? (
+                            <SaaSVerticalForm
+                                initialData={
+                                    (verticalFormData as SaaSFormData) || undefined
+                                }
+                                onContinue={handleVerticalFormContinue}
+                                onBack={handleVerticalFormBack}
+                            />
+                        ) : (
+                            <VerticalForm
+                                verticalId={selectedVerticalId}
+                                initialData={
+                                    (verticalFormData as REInvestorFormData) ||
+                                    undefined
+                                }
+                                onContinue={handleVerticalFormContinue}
+                                onBack={handleVerticalFormBack}
+                            />
+                        )}
                     </motion.div>
                 )}
 
@@ -722,11 +774,19 @@ export function OnboardingV2Wizard({
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <VerticalOutboundConfig
-                            formData={verticalFormData}
-                            onContinue={handleOutboundConfigContinue}
-                            onBack={handleOutboundConfigBack}
-                        />
+                        {isSaaS ? (
+                            <SaaSOutboundConfig
+                                formData={verticalFormData as SaaSFormData}
+                                onContinue={handleOutboundConfigContinue}
+                                onBack={handleOutboundConfigBack}
+                            />
+                        ) : (
+                            <VerticalOutboundConfig
+                                formData={verticalFormData as REInvestorFormData}
+                                onContinue={handleOutboundConfigContinue}
+                                onBack={handleOutboundConfigBack}
+                            />
+                        )}
                     </motion.div>
                 )}
 
@@ -738,13 +798,22 @@ export function OnboardingV2Wizard({
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <VerticalReview
-                            verticalId={selectedVerticalId}
-                            formData={verticalFormData}
-                            onDeploy={handleVerticalDeploy}
-                            onBack={handleVerticalReviewBack}
-                            isDeploying={verticalDeploying}
-                        />
+                        {isSaaS ? (
+                            <SaaSReview
+                                formData={verticalFormData as SaaSFormData}
+                                onDeploy={handleVerticalDeploy}
+                                onBack={handleVerticalReviewBack}
+                                isDeploying={verticalDeploying}
+                            />
+                        ) : (
+                            <VerticalReview
+                                verticalId={selectedVerticalId}
+                                formData={verticalFormData as REInvestorFormData}
+                                onDeploy={handleVerticalDeploy}
+                                onBack={handleVerticalReviewBack}
+                                isDeploying={verticalDeploying}
+                            />
+                        )}
                     </motion.div>
                 )}
 

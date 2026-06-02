@@ -147,6 +147,47 @@ export interface REInvestorFormData {
     outboundFirstMessage: string;
 }
 
+// ─── SAAS COMPANIES VERTICAL (outbound-only) ───
+
+/**
+ * Outbound agent goal options for the SaaS Companies vertical.
+ * Each goal maps to a starter system prompt the user can edit during onboarding.
+ * The agent's job is to BOOK A DEMO on the calendar (warm-transfer hot leads
+ * to a human closer as the escalation path).
+ */
+export type SaaSOutboundGoal =
+    | "book_demo_inbound_lead" // marketing-sourced lead — warm, primary
+    | "cold_outreach" // first-touch cold outbound
+    | "reengage_no_show" // follow-up to a missed / un-booked demo
+    | "custom";
+
+/**
+ * Typed form data specific to the SaaS Companies vertical.
+ * Used by the SaaS prompt builders and `deploySaaSAgents`.
+ * Reuses the shared {@link TransferSpecialist} shape for the human-closer handoff.
+ */
+export interface SaaSFormData {
+    companyName: string; // e.g. "Omnify" — what the agent says
+    productOneLiner: string; // one-sentence description of the product
+    ownerName: string;
+    ownerEmail: string;
+    agentPersonaName: string; // e.g. "Alex" — the AI agent's name
+    icpDescription: string; // who we're calling (the marketing leads)
+    valueProps: string; // top talking points (free text / one per line)
+    commonObjections: string; // optional — objections to expect
+    pricingSummary: string; // optional — feeds the data-integrity rule
+    demoType: string; // "zoom" | "phone" — how the demo happens
+    timezone: string;
+    businessPhone: string; // callback number left in voicemail
+    // Human-closer the outbound agent warm-transfers hot leads to.
+    outboundTransfer: TransferSpecialist;
+    // Outbound agent config (collected on the outbound-config phase).
+    outboundGoal: SaaSOutboundGoal;
+    outboundScenario: string; // optional free-text scenario
+    outboundPrompt: string;
+    outboundFirstMessage: string;
+}
+
 // ─── VALIDATION ───
 
 export interface VerticalValidationError {

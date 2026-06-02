@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { getAllVerticals } from "@/lib/verticals/registry";
 import type { VerticalDefinition } from "@/lib/verticals/types";
 
-import { Building2, Home, Wrench, Stethoscope, Scale, Car } from "lucide-react";
+import { Building2, Home, Wrench, Stethoscope, Scale, Car, Rocket, Cloud } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
     Building2,
@@ -15,6 +15,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
     Stethoscope,
     Scale,
     Car,
+    Rocket,
+    Cloud,
 };
 
 interface PathSelectionScreenProps {
