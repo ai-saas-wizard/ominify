@@ -44,6 +44,12 @@ export function VerticalAgentSelect({
         (a) => a.direction === "outbound"
     );
 
+    // Outbound card copy is vertical-aware (RE wording preserved exactly).
+    const outboundDescription =
+        verticalId === "saas_companies"
+            ? "Call marketing-sourced leads, qualify fit, and book product demos via Google Calendar."
+            : "Place outbound calls to re-engage sellers, follow up on missed appointments, or run cold outreach. Pick a goal next.";
+
     return (
         <div className="flex min-h-screen items-center justify-center p-6">
             <motion.div
@@ -86,7 +92,7 @@ export function VerticalAgentSelect({
                     {hasOutbound && (
                         <AgentCard
                             title="Outbound Agent"
-                            description="Place outbound calls to re-engage sellers, follow up on missed appointments, or run cold outreach. Pick a goal next."
+                            description={outboundDescription}
                             icon="PhoneOutgoing"
                             badge="Outbound"
                             badgeColor="bg-amber-50 text-amber-600 ring-amber-200"

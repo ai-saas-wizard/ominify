@@ -20,11 +20,16 @@ import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
+import { buildSaaSOutboundTools } from "@/lib/verticals/saas/tools";
+import {
+    SAAS_STRUCTURED_OUTPUT_SCHEMA,
+    SAAS_STRUCTURED_OUTPUT_PROMPT,
+} from "@/lib/verticals/saas/structured-output";
 import { getCalendarToolIdsForClient } from "@/app/actions/umbrella-tools-actions";
 import { getREStructuredOutputIdForClient } from "@/app/actions/umbrella-structured-outputs-actions";
 import { getAppUrl } from "@/lib/app-url";
 import { formatVapiError } from "@/lib/vapi-errors";
-import type { REInvestorFormData } from "@/lib/verticals/types";
+import type { REInvestorFormData, SaaSFormData } from "@/lib/verticals/types";
 import { revalidatePath } from "next/cache";
 
 // ═══════════════════════════════════════════════════════════
@@ -51,6 +56,11 @@ export type CreateSingleAgentInput =
           kind: "vertical_re_outbound";
           agentName: string;
           formData: REInvestorFormData;
+      }
+    | {
+          kind: "vertical_saas_outbound";
+          agentName: string;
+          formData: SaaSFormData;
       };
 
 export interface CreateSingleAgentResult {
@@ -84,6 +94,10 @@ export async function createSingleAgent(
 
     if (input.kind === "vertical_re_outbound") {
         return createREOutboundAgent(clientId, input, vapiKey, appUrl);
+    }
+
+    if (input.kind === "vertical_saas_outbound") {
+        return createSaaSOutboundAgent(clientId, input, vapiKey, appUrl);
     }
 
     return createREAgent(clientId, input, vapiKey, appUrl);
@@ -611,6 +625,180 @@ async function createREOutboundAgent(
         };
     } catch (error: any) {
         console.error("[CREATE SINGLE AGENT] RE outbound error:", error);
+        return {
+            success: false,
+            error: error.message || "Unexpected error creating outbound agent",
+        };
+    }
+}
+
+// ─── SAAS OUTBOUND PATH ───
+
+async function createSaaSOutboundAgent(
+    clientId: string,
+    input: Extract<CreateSingleAgentInput, { kind: "vertical_saas_outbound" }>,
+    vapiKey: string,
+    appUrl: string
+): Promise<CreateSingleAgentResult> {
+    const vertical = getVertical("saas_companies");
+    const agentDef = vertical?.agents.find(
+        (a) => a.id === "saas_outbound_sales"
+    );
+    if (!vertical || !agentDef)
+        return { success: false, error: "SaaS outbound agent definition not found" };
+
+    const { formData, agentName } = input;
+
+    if (!formData.outboundPrompt || !formData.outboundFirstMessage) {
+        return {
+            success: false,
+            error: "Outbound prompt or first message is empty",
+        };
+    }
+
+    try {
+        // Umbrella-scoped calendar tools (null for CUSTOM → inline). SaaS uses
+        // INLINE structured output (no umbrella-global resource), so the agent
+        // always carries the SaaS analysisPlan.
+        const calendarToolIds = await getCalendarToolIdsForClient(clientId);
+        const tools = buildSaaSOutboundTools(clientId, appUrl, formData, {
+            calendarToolIds: calendarToolIds ?? undefined,
+        });
+        const toolIdRefs = calendarToolIds
+            ? Object.values(calendarToolIds).filter(
+                  (v): v is string => !!v
+              )
+            : [];
+
+        const { data: assistant, error: vapiErr } = await createAssistant(
+            {
+                name: agentName,
+                firstMessage: formData.outboundFirstMessage,
+                model: {
+                    provider: "openai",
+                    model: agentDef.llmModel,
+                    messages: [
+                        { role: "system", content: formData.outboundPrompt },
+                    ],
+                    tools: [...tools, { type: "endCall" }],
+                    ...(toolIdRefs.length > 0 ? { toolIds: toolIdRefs } : {}),
+                    temperature: agentDef.llmTemperature,
+                    maxTokens: agentDef.llmMaxTokens,
+                },
+                voice: {
+                    provider: agentDef.voiceProvider,
+                    voiceId: agentDef.voiceId,
+                    model: agentDef.voiceModel,
+                    speed: agentDef.voiceConfig.speed,
+                    stability: agentDef.voiceConfig.stability,
+                    similarityBoost: agentDef.voiceConfig.similarityBoost,
+                    style: agentDef.voiceConfig.style,
+                    useSpeakerBoost: agentDef.voiceConfig.useSpeakerBoost,
+                },
+                transcriber: {
+                    provider: "deepgram",
+                    language: "en",
+                    model: agentDef.transcriberModel,
+                    numerals: true,
+                },
+                server: {
+                    url: `${appUrl}/api/webhooks/vapi`,
+                    timeoutSeconds: 20,
+                },
+                serverMessages: ["status-update", "end-of-call-report"],
+                clientMessages: [],
+                recordingEnabled: true,
+                endCallFunctionEnabled: true,
+                dialKeypadFunctionEnabled: true,
+                firstMessageMode: agentDef.firstMessageMode,
+                maxDurationSeconds: agentDef.maxDurationSeconds,
+                endCallPhrases: agentDef.endCallPhrases,
+                startSpeakingPlan: agentDef.startSpeakingPlan,
+                stopSpeakingPlan: agentDef.stopSpeakingPlan,
+                messagePlan: { idleMessages: ["Are you still there?"] },
+                voicemailDetection: {
+                    provider: "twilio",
+                    enabled: true,
+                    voicemailDetectionTypes: [
+                        "machine_end_beep",
+                        "machine_end_silence",
+                    ],
+                },
+                metadata: {
+                    clientId,
+                    agentType: "outbound",
+                    agentCategory: agentDef.category,
+                    templateVersion: "vertical-saas-outbound-v1-adhoc",
+                },
+                analysisPlan: {
+                    structuredDataSchema: SAAS_STRUCTURED_OUTPUT_SCHEMA,
+                    structuredDataPrompt: SAAS_STRUCTURED_OUTPUT_PROMPT,
+                    minMessagesThreshold: 5,
+                },
+            },
+            vapiKey
+        );
+
+        if (!assistant) {
+            console.error("[CREATE SINGLE AGENT] VAPI rejected SaaS outbound assistant:", {
+                status: vapiErr?.status,
+                body: vapiErr?.body,
+            });
+            return { success: false, error: formatVapiError(vapiErr) };
+        }
+
+        const { data: agent, error: insertError } = await supabase
+            .from("agents")
+            .insert({
+                client_id: clientId,
+                vapi_id: assistant.id,
+                name: agentName,
+                agent_type: "outbound",
+                agent_type_id: agentDef.id,
+                agent_config: {
+                    voice_id: agentDef.voiceId,
+                    voice_name: `${formData.agentPersonaName} (SaaS)`,
+                    vertical: "saas_companies",
+                    persona_name: formData.agentPersonaName,
+                    product_one_liner: formData.productOneLiner,
+                    icp: formData.icpDescription,
+                    demo_type: formData.demoType,
+                    transfer: {
+                        first_name: formData.outboundTransfer.firstName,
+                        role: formData.outboundTransfer.role,
+                        phone: formData.outboundTransfer.phone,
+                        mode: formData.outboundTransfer.mode,
+                    },
+                    business_phone: formData.businessPhone,
+                    outbound_goal: formData.outboundGoal,
+                    outbound_scenario: formData.outboundScenario || null,
+                },
+                auto_created: false,
+                template_version: "vertical-saas-outbound-v1-adhoc",
+            })
+            .select("id")
+            .single();
+
+        if (insertError) {
+            console.error(
+                "[CREATE SINGLE AGENT] SaaS DB insert failed:",
+                insertError
+            );
+            return {
+                success: false,
+                error: `Agent created on VAPI but DB save failed: ${insertError.message}`,
+                vapiId: assistant.id,
+            };
+        }
+
+        revalidatePath(`/client/${clientId}/agents`);
+        return {
+            success: true,
+            agentId: agent?.id,
+            vapiId: assistant.id,
+        };
+    } catch (error: any) {
+        console.error("[CREATE SINGLE AGENT] SaaS outbound error:", error);
         return {
             success: false,
             error: error.message || "Unexpected error creating outbound agent",

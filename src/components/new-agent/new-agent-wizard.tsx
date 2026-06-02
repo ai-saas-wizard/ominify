@@ -3,11 +3,13 @@
 import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, X, Rocket } from "lucide-react";
+import { ArrowLeft, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { PathSelectionScreen } from "@/components/onboarding-v2/components/path-selection-screen";
 import { VerticalForm } from "@/components/onboarding-v2/components/vertical-form";
 import { VerticalOutboundConfig } from "@/components/onboarding-v2/components/vertical-outbound-config";
+import { SaaSVerticalForm } from "@/components/onboarding-v2/components/saas-vertical-form";
+import { SaaSOutboundConfig } from "@/components/onboarding-v2/components/saas-outbound-config";
 import { VerticalAgentSelect } from "./vertical-agent-select";
 import { VerticalOutboundGoalSelect } from "./vertical-outbound-goal-select";
 import { VerticalOutboundSharedForm } from "./vertical-outbound-shared-form";
@@ -18,9 +20,11 @@ import {
     type CreateSingleAgentInput,
 } from "@/app/actions/create-single-agent-actions";
 import { RE_OUTBOUND_GOALS } from "@/lib/verticals/real-estate-investor/outbound-prompt-templates";
+import { SAAS_OUTBOUND_GOALS } from "@/lib/verticals/saas/outbound-prompt-templates";
 import type {
     REInvestorFormData,
     REOutboundGoal,
+    SaaSFormData,
 } from "@/lib/verticals/types";
 
 type Phase =
@@ -31,7 +35,8 @@ type Phase =
     | "vertical_outbound_goal_select"
     | "vertical_outbound_shared"
     | "vertical_outbound_config"
-    | "saas_notice"
+    | "saas_form"
+    | "saas_outbound_config"
     | "deploying"
     | "error";
 
@@ -102,8 +107,11 @@ export function NewAgentWizard({
                 outboundDefaults?.outboundTransfer ??
                 EMPTY_RE_FORM_DATA.outboundTransfer,
         }));
+    const [saasFormData, setSaasFormData] = useState<SaaSFormData | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
+
+    const isSaaS = selectedVerticalId === "saas_companies";
 
     const deploy = (input: CreateSingleAgentInput) => {
         setPhase("deploying");
@@ -128,13 +136,8 @@ export function NewAgentWizard({
 
     const handleSelectVertical = (verticalId: string) => {
         setSelectedVerticalId(verticalId);
-        // The SaaS vertical (outbound-only) isn't wired into the ad-hoc
-        // new-agent flow yet — it's set up via the onboarding wizard. Guard so
-        // its registry card doesn't fall into the RE-typed agent-select path.
-        if (verticalId === "saas_companies") {
-            setPhase("saas_notice");
-            return;
-        }
+        // VerticalAgentSelect reads vertical.agents, so SaaS (outbound-only)
+        // shows just the Outbound card and routes into the SaaS sub-flow below.
         setPhase("vertical_agent_select");
     };
 
@@ -143,7 +146,25 @@ export function NewAgentWizard({
     };
 
     const handleSelectOutbound = () => {
-        setPhase("vertical_outbound_goal_select");
+        // SaaS uses its own form → config sub-flow; RE uses goal → shared → config.
+        setPhase(isSaaS ? "saas_form" : "vertical_outbound_goal_select");
+    };
+
+    const handleSaasFormContinue = (data: SaaSFormData) => {
+        setSaasFormData(data);
+        setPhase("saas_outbound_config");
+    };
+
+    const handleSaasConfigContinue = (updated: SaaSFormData) => {
+        setSaasFormData(updated);
+        const shortLabel =
+            SAAS_OUTBOUND_GOALS.find((g) => g.value === updated.outboundGoal)
+                ?.shortLabel ?? "Outbound";
+        deploy({
+            kind: "vertical_saas_outbound",
+            formData: updated,
+            agentName: `${updated.companyName} - ${shortLabel}`,
+        });
     };
 
     const handleSelectGoal = (goal: REOutboundGoal) => {
@@ -255,10 +276,24 @@ export function NewAgentWizard({
                 />
             )}
 
-            {phase === "saas_notice" && (
-                <SaaSNotice
-                    clientId={clientId}
-                    onBack={() => setPhase("path_selection")}
+            {phase === "saas_form" && (
+                <SaaSVerticalForm
+                    initialData={
+                        saasFormData ?? {
+                            companyName: clientName,
+                            timezone: tenantTimezone,
+                        }
+                    }
+                    onContinue={handleSaasFormContinue}
+                    onBack={() => setPhase("vertical_agent_select")}
+                />
+            )}
+
+            {phase === "saas_outbound_config" && saasFormData && (
+                <SaaSOutboundConfig
+                    formData={saasFormData}
+                    onContinue={handleSaasConfigContinue}
+                    onBack={() => setPhase("saas_form")}
                 />
             )}
 
@@ -417,60 +452,6 @@ function Deploying() {
                     <p className="mt-1 text-sm text-gray-500">
                         Wiring up the voice, prompt, and calendar tools.
                     </p>
-                </div>
-            </motion.div>
-        </div>
-    );
-}
-
-// ─── SAAS NOTICE (vertical not yet wired into ad-hoc new-agent flow) ───
-
-function SaaSNotice({
-    clientId,
-    onBack,
-}: {
-    clientId: string;
-    onBack: () => void;
-}) {
-    return (
-        <div className="flex min-h-screen items-center justify-center p-6">
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
-                className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-8 shadow-sm"
-            >
-                <button
-                    onClick={onBack}
-                    className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    Back
-                </button>
-
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50">
-                    <Rocket className="h-6 w-6 text-emerald-600" />
-                </div>
-
-                <h1 className="mt-4 text-2xl font-bold text-gray-900">
-                    Set up your SaaS sales agent in onboarding
-                </h1>
-                <p className="mt-2 text-sm text-gray-500">
-                    The SaaS Companies outbound agent is configured through the
-                    onboarding wizard, where you can tune the pitch, the demo
-                    goal, and the human-closer transfer. Head there to deploy it.
-                </p>
-
-                <div className="mt-6 flex items-center justify-end gap-3">
-                    <Button variant="outline" onClick={onBack}>
-                        Back
-                    </Button>
-                    <Link href={`/client/${clientId}/onboarding`}>
-                        <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-                            <Rocket className="h-4 w-4" />
-                            Go to onboarding
-                        </Button>
-                    </Link>
                 </div>
             </motion.div>
         </div>
