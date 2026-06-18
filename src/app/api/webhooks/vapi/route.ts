@@ -18,6 +18,45 @@ import crypto from "crypto";
 const ENFORCE_VAPI_SIGNATURE = process.env.ENFORCE_WEBHOOK_SIGNATURES === "true";
 const VAPI_WEBHOOK_SECRET = process.env.VAPI_WEBHOOK_SECRET;
 
+// Sequencer service URL (the EC2 webhook server, e.g. http://<ip>:3000).
+// When set, VAPI events for sequencer-originated outbound calls — identified
+// by metadata.enrollmentId, which the sequencer's vapi-worker stamps on every
+// call it places — are forwarded to the sequencer so it can release VAPI
+// concurrency slots, advance enrollments, and generate the next step.
+// Inbound/dashboard calls carry no such metadata and are NOT forwarded.
+const SEQUENCER_WEBHOOK_URL = process.env.SEQUENCER_WEBHOOK_URL;
+
+/**
+ * Forward a raw (unwrapped) VAPI payload to the sequencer's
+ * /webhooks/vapi/call-events endpoint. The sequencer authenticates with the
+ * same VAPI_WEBHOOK_SECRET via the X-Vapi-Secret header. Best-effort: capped
+ * at 5s and never throws into the main handler (a forward failure degrades to
+ * the sequencer's own awaiting_outcome timeout reconciler rather than breaking
+ * VAPI's response).
+ */
+async function forwardToSequencer(payload: unknown): Promise<void> {
+    if (!SEQUENCER_WEBHOOK_URL) return;
+    try {
+        const res = await fetch(
+            `${SEQUENCER_WEBHOOK_URL.replace(/\/$/, "")}/webhooks/vapi/call-events`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Vapi-Secret": VAPI_WEBHOOK_SECRET || "",
+                },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(5000),
+            }
+        );
+        if (!res.ok) {
+            console.warn(`[VAPI→SEQ] Forward returned ${res.status}`);
+        }
+    } catch (err: any) {
+        console.warn(`[VAPI→SEQ] Forward failed: ${err?.message ?? err}`);
+    }
+}
+
 /**
  * Central Vapi Webhook Receiver
  * 
@@ -895,6 +934,18 @@ export async function POST(request: Request) {
         if (!call) {
             console.log('[VAPI WEBHOOK] Skipping - no call object');
             return NextResponse.json({ received: true });
+        }
+
+        // Forward sequencer-originated calls to the sequencer service. Gated on
+        // metadata.enrollmentId so only the sequencer's own outbound calls are
+        // forwarded (inbound/dashboard calls are not). Awaited — not fire-and-
+        // forget — so the serverless runtime doesn't terminate before the POST
+        // completes; it's capped at 5s and swallows its own errors, and the
+        // sequencer dedups status-update:ended vs end-of-call-report, so
+        // forwarding both is safe. Client-webhook forwarding below still runs
+        // for these calls (their CRM integrations keep firing).
+        if ((call as any)?.metadata?.enrollmentId) {
+            await forwardToSequencer(payload);
         }
 
         console.log('[VAPI WEBHOOK] Processing call:', call.id, 'type:', messageType, 'message.status:', messageStatus, 'call.status:', call.status);
