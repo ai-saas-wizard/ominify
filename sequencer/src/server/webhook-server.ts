@@ -10,6 +10,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import { twilioWebhooks } from './routes/twilio-webhooks.js';
 import { vapiWebhooks } from './routes/vapi-webhooks.js';
 import { leadIngestion } from './routes/lead-ingestion.js';
@@ -35,6 +36,10 @@ const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
 fastify.register(cors, {
     origin: allowedOrigins.length > 0 ? allowedOrigins : false,
 });
+
+// Twilio posts webhooks as application/x-www-form-urlencoded — without a
+// form-body parser Fastify replies 415 before any handler runs.
+fastify.register(formbody);
 
 // Register route modules
 fastify.register(twilioWebhooks, { prefix: '/webhooks/twilio' });

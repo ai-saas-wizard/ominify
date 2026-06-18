@@ -13,8 +13,18 @@ import type { FastifyRequest, FastifyReply, preHandlerHookHandler } from 'fastif
 import Twilio from 'twilio';
 import { supabase } from '../../lib/db.js';
 import { decrypt } from '../../lib/encryption.js';
+import { timingSafeEqualStr } from '../../lib/signing.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
+
+/**
+ * Dev-only escape hatch. NEVER honored in production — a single env var
+ * must not be able to open every endpoint (including admin) on a live deploy.
+ */
+export function isWebhookAuthDisabled(): boolean {
+    return process.env.SEQUENCER_DISABLE_WEBHOOK_AUTH === '1'
+        && process.env.NODE_ENV !== 'production';
+}
 
 const tenantAuthTokenCache = new Map<string, { token: string; expiresAt: number }>();
 const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -23,13 +33,17 @@ async function loadTenantTwilioAuthToken(tenantId: string): Promise<string | nul
     const cached = tenantAuthTokenCache.get(tenantId);
     if (cached && cached.expiresAt > Date.now()) return cached.token;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('tenant_twilio_accounts')
         .select('auth_token_encrypted')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
-        .single();
+        .eq('client_id', tenantId)
+        .eq('status', 'active')
+        .maybeSingle();
 
+    if (error) {
+        console.error(`[WEBHOOK-AUTH] Failed to load Twilio account for tenant ${tenantId}:`, error);
+        return null;
+    }
     if (!data?.auth_token_encrypted) return null;
     try {
         const token = decrypt(data.auth_token_encrypted);
@@ -51,7 +65,7 @@ export async function requireTwilioSignature(
     reply: FastifyReply,
     tenantId: string,
 ): Promise<boolean> {
-    if (process.env.SEQUENCER_DISABLE_WEBHOOK_AUTH === '1') return true;
+    if (isWebhookAuthDisabled()) return true;
 
     const signature = (request.headers['x-twilio-signature'] || request.headers['X-Twilio-Signature']) as string | undefined;
     if (!signature) {
@@ -84,7 +98,7 @@ export async function requireTwilioSignature(
  * (no soft mode, since VAPI webhooks mutate enrollment state).
  */
 export const requireVapiSecret: preHandlerHookHandler = async (request, reply) => {
-    if (process.env.SEQUENCER_DISABLE_WEBHOOK_AUTH === '1') return;
+    if (isWebhookAuthDisabled()) return;
 
     const expected = process.env.VAPI_WEBHOOK_SECRET;
     if (!expected) {
@@ -93,7 +107,7 @@ export const requireVapiSecret: preHandlerHookHandler = async (request, reply) =
         return reply;
     }
     const provided = (request.headers['x-vapi-secret'] || request.headers['x-vapi-signature']) as string | undefined;
-    if (provided !== expected) {
+    if (!timingSafeEqualStr(provided, expected)) {
         reply.status(403).send({ error: 'Invalid VAPI secret' });
         return reply;
     }
@@ -105,7 +119,7 @@ export const requireVapiSecret: preHandlerHookHandler = async (request, reply) =
  */
 export function requireBearer(envName: string): preHandlerHookHandler {
     return async (request, reply) => {
-        if (process.env.SEQUENCER_DISABLE_WEBHOOK_AUTH === '1') return;
+        if (isWebhookAuthDisabled()) return;
 
         const expected = process.env[envName];
         if (!expected) {
@@ -119,7 +133,7 @@ export function requireBearer(envName: string): preHandlerHookHandler {
             return reply;
         }
         const token = header.slice(7).trim();
-        if (token !== expected) {
+        if (!timingSafeEqualStr(token, expected)) {
             reply.status(403).send({ error: 'Invalid token' });
             return reply;
         }

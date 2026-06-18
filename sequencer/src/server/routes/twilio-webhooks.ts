@@ -10,6 +10,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eventQueue } from '../../lib/redis.js';
 import { supabase } from '../../lib/db.js';
 import { requireTwilioSignature } from '../middleware/webhook-auth.js';
+import { phoneLookupCandidates } from '../../lib/phone.js';
 import type { EventJobPayload } from '../../lib/types.js';
 
 interface SmsStatusParams {
@@ -48,30 +49,35 @@ interface TwilioSmsWebhook {
 async function findTenantByPhoneNumber(phoneNumber: string): Promise<string | null> {
     const { data, error } = await supabase
         .from('tenant_phone_numbers')
-        .select('tenant_id')
+        .select('client_id')
         .eq('phone_number', phoneNumber)
-        .eq('is_active', true)
-        .single();
+        .eq('status', 'active')
+        .maybeSingle();
 
     if (error || !data) {
         console.log(`[TWILIO] No tenant found for phone ${phoneNumber}`);
         return null;
     }
 
-    return data.tenant_id;
+    return data.client_id;
 }
 
 /**
  * Find enrollment by contact phone within tenant
  */
 async function findEnrollmentByPhone(tenantId: string, contactPhone: string): Promise<string | null> {
-    // First find the contact
+    // First find the contact — match both the E.164 form Twilio delivers
+    // and the raw form, so legacy un-normalized rows still resolve.
+    const candidates = phoneLookupCandidates(contactPhone);
+    if (candidates.length === 0) return null;
+
     const { data: contact } = await supabase
         .from('contacts')
         .select('id')
         .eq('client_id', tenantId)
-        .eq('phone', contactPhone)
-        .single();
+        .in('phone', candidates)
+        .limit(1)
+        .maybeSingle();
 
     if (!contact) return null;
 
@@ -81,7 +87,7 @@ async function findEnrollmentByPhone(tenantId: string, contactPhone: string): Pr
         .select('id')
         .eq('tenant_id', tenantId)
         .eq('contact_id', contact.id)
-        .in('status', ['active', 'awaiting_outcome', 'generating_next_step'])
+        .in('status', ['active', 'paused', 'awaiting_outcome', 'generating_next_step'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -113,9 +119,12 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 enrollmentId: enrollmentId || undefined,
                 messageBody: body,
                 fromPhone: from,
+                messageSid,
             };
 
-            await eventQueue.add('event:sms-reply', event);
+            // Deterministic jobId — Twilio retries/replays of the same
+            // MessageSid dedupe at the queue.
+            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in:${messageSid}` });
 
             // Return TwiML response (empty = no auto-reply)
             reply.type('text/xml');
@@ -136,23 +145,28 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
 
             console.log(`[TWILIO] SMS status: ${messageSid} -> ${status}`);
 
-            // Find enrollment (look up by message SID in execution log)
+            // Find enrollment (look up by message SID in execution log),
+            // scoped to this tenant via the enrollment join so one tenant's
+            // callback can't resolve another tenant's log row.
             const { data: log } = await supabase
                 .from('sequence_execution_log')
-                .select('enrollment_id, step_id')
+                .select('enrollment_id, step_id, sequence_enrollments!inner(tenant_id)')
                 .eq('provider_id', messageSid)
-                .single();
+                .eq('sequence_enrollments.tenant_id', tenantId)
+                .maybeSingle();
 
-            // Queue the event
-            const event: EventJobPayload = {
+            // Queue the event — providerId lets the event processor update
+            // the execution log by provider_id.
+            const event: EventJobPayload & { providerId: string } = {
                 type: 'sms-delivery',
                 tenantId,
                 enrollmentId: log?.enrollment_id,
                 stepId: log?.step_id,
                 deliveryStatus: status,
+                providerId: messageSid,
             };
 
-            await eventQueue.add('event:sms-delivery', event);
+            await eventQueue.add('event:sms-delivery', event, { jobId: `sms-status:${messageSid}:${status}` });
 
             reply.status(200).send({ ok: true });
         }
@@ -192,9 +206,10 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 enrollmentId: enrollmentId || undefined,
                 messageBody: body,
                 fromPhone: from,
+                messageSid,
             };
 
-            await eventQueue.add('event:sms-reply', event);
+            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in:${messageSid}` });
 
             reply.type('text/xml');
             return '<Response></Response>';

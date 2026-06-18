@@ -28,7 +28,7 @@ import type {
     EmotionalAnalysis,
 } from './types.js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000, maxRetries: 1 });
 
 // Minimum confidence to use a mutation (below this, use original)
 const MIN_CONFIDENCE = 0.50;
@@ -51,10 +51,10 @@ export function shouldMutate(
     // Master toggle check
     if (!sequence.enable_adaptive_mutation) return false;
 
-    // Step-level override: if explicitly disabled, skip
-    // If step has enable_ai_mutation explicitly set to false, respect it
-    // Otherwise, sequence-level setting applies
-    if (step.enable_ai_mutation === false && !sequence.enable_adaptive_mutation) return false;
+    // Step-level opt-out: an explicit false ALWAYS wins, even when the
+    // sequence-level toggle is on (the previous compound condition was dead
+    // code behind the master-toggle guard above).
+    if (step.enable_ai_mutation === false) return false;
 
     // No context to mutate from — nothing to personalize
     if (!conversationContext || conversationContext.interaction_count.total === 0) return false;
@@ -122,7 +122,11 @@ export async function mutateStepContent(
         return {
             content: mutatedContent,
             reason: parsed.reason || 'AI-adapted based on conversation context',
-            confidence: Math.max(0, Math.min(1, parsed.confidence || 0.7)),
+            // typeof check so an explicit confidence of 0 stays 0 (|| turned
+            // it into 0.7 and let it pass the confidence gate)
+            confidence: typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
+                ? Math.max(0, Math.min(1, parsed.confidence))
+                : 0.7,
             model: 'gpt-4o',
         };
     } catch (err) {

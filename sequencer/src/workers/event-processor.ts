@@ -32,7 +32,16 @@ import {
     createNotification,
 } from '../lib/emotional-intelligence.js';
 import { handleFailure } from '../lib/self-healer.js';
+import {
+    isStopMessage,
+    isStopEmailBody,
+    isStartMessage,
+    isHelpMessage,
+    optOutContact,
+    reoptInContact,
+} from '../lib/opt-out.js';
 import { computeStepAttribution } from '../lib/outcome-learning.js';
+import { phoneLookupCandidates } from '../lib/phone.js';
 import {
     generateNextStep,
     getExecutedSteps,
@@ -117,6 +126,39 @@ async function updateEnrollmentStatus(
 }
 
 /**
+ * A/B variant attribution (last-touch): credit the most recently sent
+ * variant for this enrollment with a reply or a conversion. Closes the
+ * learning loop — step_variants counters were previously written nowhere.
+ */
+async function attributeVariantOutcome(
+    enrollmentId: string,
+    kind: 'reply' | 'conversion'
+): Promise<void> {
+    const { data: logRow, error: logErr } = await supabase
+        .from('sequence_execution_log')
+        .select('variant_id')
+        .eq('enrollment_id', enrollmentId)
+        .not('variant_id', 'is', null)
+        .order('executed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (logErr) {
+        console.error(`[EVENT] Variant attribution lookup failed for enrollment ${enrollmentId}:`, logErr);
+        return;
+    }
+    if (!logRow?.variant_id) return;
+
+    const rpcName = kind === 'reply' ? 'increment_variant_replies' : 'increment_variant_conversions';
+    const { error: rpcErr } = await supabase.rpc(rpcName, { p_variant_id: logRow.variant_id });
+    if (rpcErr) {
+        console.error(`[EVENT] ${rpcName} failed for variant ${logRow.variant_id}:`, rpcErr);
+    } else {
+        console.log(`[EVENT] Variant ${logRow.variant_id} credited with ${kind} (enrollment ${enrollmentId})`);
+    }
+}
+
+/**
  * Maybe trigger dynamic (JIT) step generation after an outcome event.
  * Only fires for dynamic sequences where enrollment is awaiting_outcome.
  */
@@ -192,7 +234,7 @@ async function maybeTriggerDynamicGeneration(
             const newStepOrder = (enrollment.current_step_order || 0) + 1;
             const vapiId = await getSequenceVapiAssistantId(sequence.id);
 
-            await insertGeneratedStep({
+            const insertedStep = await insertGeneratedStep({
                 sequenceId: sequence.id,
                 enrollmentId,
                 stepOrder: newStepOrder,
@@ -200,21 +242,55 @@ async function maybeTriggerDynamicGeneration(
                 vapiAssistantId: vapiId,
             });
 
+            if (!insertedStep) {
+                // Hard failure inserting the generated step — do NOT activate,
+                // or the scheduler would dispatch whatever row sits at that
+                // step_order (possibly another lead's content). Revert so the
+                // timeout path can retry.
+                console.error(`[EVENT] insertGeneratedStep returned null for ${enrollmentId} (step ${newStepOrder}) — reverting to awaiting_outcome`);
+                const { error: revertErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({ status: 'awaiting_outcome', updated_at: new Date().toISOString() })
+                    .eq('id', enrollmentId);
+                if (revertErr) {
+                    console.error(`[EVENT] Failed to revert ${enrollmentId} to awaiting_outcome:`, revertErr);
+                }
+                return;
+            }
+
             await activateEnrollmentForNextStep(
                 enrollmentId,
                 result.step.delay_seconds || 0,
                 enrollment.current_step_order
             );
+        } else if (result.end_reason === 'generation_failed') {
+            // Transient LLM failure (empty/invalid response) — retry via the
+            // timeout poll instead of permanently ending the sequence.
+            console.error(`[EVENT] Generation failed for enrollment ${enrollmentId} — retrying in 15min`);
+            const { error: retryErr } = await supabase
+                .from('sequence_enrollments')
+                .update({
+                    status: 'awaiting_outcome',
+                    outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', enrollmentId);
+            if (retryErr) {
+                console.error(`[EVENT] Failed to schedule generation retry for ${enrollmentId}:`, retryErr);
+            }
         } else {
             await endDynamicSequence(enrollmentId, result.end_reason || 'ai_decided', result.reasoning);
         }
     } catch (error) {
         console.error(`[EVENT] Dynamic generation failed for ${enrollmentId}:`, error);
         // Revert to awaiting_outcome so timeout can retry
-        await supabase
+        const { error: revertErr } = await supabase
             .from('sequence_enrollments')
             .update({ status: 'awaiting_outcome', updated_at: new Date().toISOString() })
             .eq('id', enrollmentId);
+        if (revertErr) {
+            console.error(`[EVENT] Failed to revert ${enrollmentId} to awaiting_outcome:`, revertErr);
+        }
     }
 }
 
@@ -226,9 +302,10 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
 
     console.log(`[EVENT] Call outcome: ${disposition}, duration: ${duration}s, booked: ${appointmentBooked}`);
 
-    // 1. Release concurrency slot
+    // 1. Release concurrency slot (pass the slot token so only the slot
+    // this enrollment actually holds is released)
     if (umbrellaId && tenantId) {
-        await concurrencyManager.release(umbrellaId, tenantId);
+        await concurrencyManager.release(umbrellaId, tenantId, enrollmentId);
         console.log(`[EVENT] Released concurrency slot for umbrella ${umbrellaId}, tenant ${tenantId}`);
     }
 
@@ -241,12 +318,14 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
     // "transferred" counts as answered — the caller spoke to the bot and was connected to a human
     const wasAnswered = disposition === 'answered' || disposition === 'completed' || disposition === 'transferred';
 
-    // Increment calls_made
-    const { data: enrollment } = await supabase
-        .from('sequence_enrollments')
-        .select('calls_made')
-        .eq('id', enrollmentId)
-        .single();
+    // Increment calls_made atomically (the old select-then-update raced
+    // concurrent outcome events and lost increments)
+    const { error: callsErr } = await supabase.rpc('increment_enrollment_calls', {
+        enrollment_id: enrollmentId,
+    });
+    if (callsErr) {
+        console.error(`[EVENT] increment_enrollment_calls failed for ${enrollmentId}:`, callsErr);
+    }
 
     const updates: Partial<{
         status: EnrollmentStatus;
@@ -255,9 +334,7 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
         appointment_booked: boolean;
         completed_at: string;
         calls_made: number;
-    }> = {
-        calls_made: (enrollment?.calls_made || 0) + 1,
-    };
+    }> = {};
 
     if (wasAnswered) {
         updates.contact_answered_call = true;
@@ -274,10 +351,15 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
             } catch (err) {
                 console.error('[EVENT] Attribution computation failed:', err);
             }
+
+            // A/B loop: credit the last-sent variant with the conversion
+            await attributeVariantOutcome(enrollmentId, 'conversion');
         }
     }
 
-    await updateEnrollmentStatus(enrollmentId, updates);
+    if (Object.keys(updates).length > 0) {
+        await updateEnrollmentStatus(enrollmentId, updates);
+    }
 
     // Phase 4: Self-Healing — trigger healing on call failures
     if (!wasAnswered && enrollmentId && event.stepId) {
@@ -376,16 +458,22 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
                     contactName
                 );
 
-                // Handle recommended actions from EI
+                // Handle recommended actions from EI. Push outcome_timeout_at
+                // forward so the dynamic timeout generator doesn't race the human.
                 if (eiAnalysis.recommended_action === 'escalate_to_human') {
-                    await supabase
+                    const { error: escErr } = await supabase
                         .from('sequence_enrollments')
                         .update({
                             needs_human_intervention: true,
+                            outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
                             updated_at: new Date().toISOString(),
                         })
                         .eq('id', enrollmentId);
-                    console.log(`[EVENT] Enrollment ${enrollmentId} flagged for human intervention`);
+                    if (escErr) {
+                        console.error(`[EVENT] Failed to flag ${enrollmentId} for human intervention:`, escErr);
+                    } else {
+                        console.log(`[EVENT] Enrollment ${enrollmentId} flagged for human intervention`);
+                    }
                 }
             }
         }
@@ -444,6 +532,7 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
     // 1. Run EI analysis on the reply (replaces old classifyReplyIntent)
     let eiAnalysis: EmotionalAnalysis | null = null;
     let conversationHistory = '';
+    let contactId: string | null = null;
 
     if (enrollmentId) {
         const { data: enroll } = await supabase
@@ -453,6 +542,51 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             .single();
 
         if (enroll) {
+            contactId = enroll.contact_id;
+
+            // 0. Deterministic STOP/START/HELP keyword handling — MUST run
+            // before any LLM call. TCPA/carrier compliance cannot depend on
+            // GPT availability or classification accuracy.
+            if (isStopMessage(messageBody)) {
+                console.log(`[EVENT] STOP keyword detected for enrollment ${enrollmentId} — opting out contact ${enroll.contact_id}`);
+                await optOutContact(supabase, enroll.contact_id, 'sms', 'keyword');
+                await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+                const { error: stopLogErr } = await supabase.from('sequence_execution_log').insert({
+                    enrollment_id: enrollmentId,
+                    step_id: null,
+                    channel: 'sms',
+                    action: 'opt_out_keyword',
+                    provider_id: null,
+                    provider_response: { body: messageBody.substring(0, 200) },
+                    executed_at: new Date().toISOString(),
+                });
+                if (stopLogErr) {
+                    console.error(`[EVENT] Failed to log STOP keyword for ${enrollmentId}:`, stopLogErr);
+                }
+                return; // Skip the LLM entirely
+            }
+
+            if (isStartMessage(messageBody)) {
+                console.log(`[EVENT] START keyword detected — re-opting in contact ${enroll.contact_id}`);
+                await reoptInContact(supabase, enroll.contact_id);
+                return;
+            }
+
+            if (isHelpMessage(messageBody)) {
+                console.log(`[EVENT] HELP keyword detected for enrollment ${enrollmentId} — notifying tenant`);
+                await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+                await createNotification({
+                    clientId: enroll.tenant_id,
+                    enrollmentId,
+                    contactId: enroll.contact_id,
+                    type: 'needs_human',
+                    title: 'HELP keyword received',
+                    body: `Contact replied: "${messageBody.substring(0, 100)}"`,
+                    priority: 'high',
+                });
+                return;
+            }
+
             // Build conversation history for context-aware analysis
             conversationHistory = await buildConversationHistoryString(enroll.contact_id);
 
@@ -527,6 +661,28 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
     }
 
     if (!enrollmentId) {
+        // STOP must be honored even when no in-flight enrollment resolves
+        // (just-completed sequence, paused lead, contact ingested without
+        // enrollment) — otherwise opted_out_at is never set and the lead
+        // can be re-enrolled and re-contacted later.
+        if (isStopMessage(messageBody) && tenantId && event.fromPhone) {
+            const { data: untrackedContact, error: lookupErr } = await supabase
+                .from('contacts')
+                .select('id')
+                .eq('client_id', tenantId)
+                .in('phone', phoneLookupCandidates(event.fromPhone))
+                .limit(1)
+                .maybeSingle();
+            if (lookupErr) {
+                console.error('[EVENT] Contact lookup for untracked STOP failed:', lookupErr);
+            }
+            if (untrackedContact) {
+                console.log(`[EVENT] STOP keyword from untracked contact ${untrackedContact.id} — opting out`);
+                await optOutContact(supabase, untrackedContact.id, 'sms', 'keyword_untracked');
+                return;
+            }
+        }
+
         console.log('[EVENT] No enrollmentId in SMS reply, creating notification only');
         if (tenantId && messageBody) {
             await createNotification({
@@ -549,6 +705,12 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
                 status: 'manual_stop',
                 contact_replied: true,
             });
+            // Persist the opt-out at the CONTACT level (the keyword check
+            // above missed it — this is the LLM classifying a free-form
+            // opt-out like "please don't text me again").
+            if (contactId) {
+                await optOutContact(supabase, contactId, 'sms', 'ei_intent');
+            }
             console.log(`[EVENT] Enrollment ${enrollmentId} stopped (opt-out)`);
             break;
 
@@ -567,14 +729,25 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             }
             break;
 
-        case 'not_interested':
-            await updateEnrollmentStatus(enrollmentId, {
-                status: 'completed',
-                contact_replied: true,
-                completed_at: new Date().toISOString(),
-            });
-            console.log(`[EVENT] Enrollment ${enrollmentId} not interested, sequence ended`);
+        case 'not_interested': {
+            // 'unenrolled' (not 'completed') — counting lead-lost as
+            // completed inflates completion analytics.
+            const { error: unenrollErr } = await supabase
+                .from('sequence_enrollments')
+                .update({
+                    status: 'unenrolled',
+                    contact_replied: true,
+                    completed_at: new Date().toISOString(),
+                    completed_reason: 'not_interested',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', enrollmentId);
+            if (unenrollErr) {
+                console.error(`[EVENT] Failed to unenroll ${enrollmentId} (not_interested):`, unenrollErr);
+            }
+            console.log(`[EVENT] Enrollment ${enrollmentId} not interested, unenrolled`);
             break;
+        }
 
         case 'objection':
             await updateEnrollmentStatus(enrollmentId, {
@@ -584,25 +757,39 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             break;
 
         default:
+            // EI failed or returned an unmapped intent. The deterministic
+            // keyword check already ran above, so this cannot be a missed
+            // STOP/START/HELP — treat as a plain reply.
             await updateEnrollmentStatus(enrollmentId, {
                 contact_replied: true,
             });
             console.log(`[EVENT] Enrollment ${enrollmentId} replied (${intent})`);
     }
 
+    // A/B loop: credit the last-sent variant with this reply (last-touch)
+    await attributeVariantOutcome(enrollmentId, 'reply');
+
     // 6. Handle EI recommended actions
     if (eiAnalysis) {
         switch (eiAnalysis.recommended_action) {
-            case 'escalate_to_human':
-                await supabase
+            case 'escalate_to_human': {
+                // Push outcome_timeout_at forward so the dynamic timeout
+                // generator doesn't race the human.
+                const { error: escErr } = await supabase
                     .from('sequence_enrollments')
                     .update({
                         needs_human_intervention: true,
+                        outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq('id', enrollmentId);
-                console.log(`[EVENT] Enrollment ${enrollmentId} escalated to human`);
+                if (escErr) {
+                    console.error(`[EVENT] Failed to escalate ${enrollmentId} to human:`, escErr);
+                } else {
+                    console.log(`[EVENT] Enrollment ${enrollmentId} escalated to human`);
+                }
                 break;
+            }
 
             case 'fast_track':
                 // Move the next step time to now (speed up the sequence)
@@ -731,14 +918,36 @@ async function maybeTriggerChatbotReply(
                     return false;
                 }
 
-                // Send the reply SMS via the sms-send queue
+                // Send the reply SMS via the sms-send queue. dedupKey is keyed
+                // off the inbound MessageSid so a replayed/retried event job
+                // can't double-send the same chatbot reply.
+                const inboundSid = (event as any).messageSid || (event as any).providerId || (event as any).eventJobId || null;
+                if (!inboundSid) {
+                    console.log(`[EVENT] Chatbot reply for ${enrollmentId} has no inbound MessageSid — dedupKey falls back to timestamp`);
+                }
                 await smsQueue.add('sms:chatbot-reply', {
                     tenantId: enrollment.tenant_id,
                     contactPhone: contact?.phone || fromPhone,
                     body: result.message,
                     enrollmentId,
-                    stepId: '', // No specific step — this is a chatbot reply
+                    stepId: null, // No specific step — this is a chatbot reply
+                    dedupKey: `chatbot:${enrollmentId}:${inboundSid || Date.now()}`,
                 });
+
+                // Extend the dynamic-outcome timeout: the lead is mid-
+                // conversation with the chatbot; without this the timeout
+                // fires and JIT-generates a parallel step over the chat.
+                const { error: timeoutErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId)
+                    .eq('status', 'awaiting_outcome');
+                if (timeoutErr) {
+                    console.error(`[EVENT] Failed to extend outcome_timeout_at for ${enrollmentId}:`, timeoutErr);
+                }
 
                 // Record the outbound chatbot interaction with metadata
                 const turnNumber = result.metadata?.turn || 1;
@@ -785,6 +994,9 @@ async function maybeTriggerChatbotReply(
                     console.error('[EVENT] Attribution computation failed:', err);
                 }
 
+                // A/B loop: credit the last-sent variant with the conversion
+                await attributeVariantOutcome(enrollmentId, 'conversion');
+
                 // Notify the tenant
                 await createNotification({
                     clientId: enrollment.tenant_id,
@@ -802,14 +1014,19 @@ async function maybeTriggerChatbotReply(
             }
 
             case 'escalate': {
-                // Flag enrollment for human intervention
-                await supabase
+                // Flag enrollment for human intervention. Push the dynamic
+                // timeout forward so the generator doesn't race the human.
+                const { error: escErr } = await supabase
                     .from('sequence_enrollments')
                     .update({
                         needs_human_intervention: true,
+                        outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq('id', enrollmentId);
+                if (escErr) {
+                    console.error(`[EVENT] Failed to flag ${enrollmentId} for human intervention:`, escErr);
+                }
 
                 // Notify the tenant
                 await createNotification({
@@ -836,15 +1053,9 @@ async function maybeTriggerChatbotReply(
                     contact_replied: true,
                 });
 
-                // Persist opt-out at the CONTACT level so every sequence skips them.
-                await supabase
-                    .from('contacts')
-                    .update({
-                        opted_out_at: new Date().toISOString(),
-                        opted_out_channel: 'sms',
-                    })
-                    .eq('id', enrollment.contact_id)
-                    .is('opted_out_at', null);
+                // Persist opt-out at the CONTACT level and stop every other
+                // in-flight enrollment for this contact.
+                await optOutContact(supabase, enrollment.contact_id, 'sms', 'chatbot');
 
                 // Record the opt-out interaction
                 await recordInteraction({
@@ -878,17 +1089,43 @@ async function maybeTriggerChatbotReply(
  */
 async function handleSmsDelivery(event: EventJobPayload): Promise<void> {
     const { enrollmentId, stepId, deliveryStatus, tenantId } = event;
+    const providerId = (event as any).providerId as string | undefined;
 
     console.log(`[EVENT] SMS delivery status: ${deliveryStatus}`);
 
-    if (stepId) {
-        await supabase
+    // Update the execution log by provider_id (Twilio MessageSid) — never by
+    // bare step_id: step rows are shared across enrollments, so a step_id
+    // filter smears one contact's delivery status over everyone's.
+    if (providerId) {
+        let updateQuery = supabase
             .from('sequence_execution_log')
             .update({
                 sms_status: deliveryStatus,
             })
+            .eq('provider_id', providerId);
+        if (enrollmentId) {
+            // Extra guard when the enrollment is known
+            updateQuery = updateQuery.eq('enrollment_id', enrollmentId);
+        }
+        const { error: logErr } = await updateQuery;
+        if (logErr) {
+            console.error(`[EVENT] Failed to update SMS delivery status for provider ${providerId}:`, logErr);
+        }
+    } else if (enrollmentId && stepId) {
+        // Fallback for events without a providerId — enrollment-scoped
+        const { error: logErr } = await supabase
+            .from('sequence_execution_log')
+            .update({
+                sms_status: deliveryStatus,
+            })
+            .eq('enrollment_id', enrollmentId)
             .eq('step_id', stepId)
             .eq('channel', 'sms');
+        if (logErr) {
+            console.error(`[EVENT] Failed to update SMS delivery status for enrollment ${enrollmentId}:`, logErr);
+        }
+    } else {
+        console.log('[EVENT] SMS delivery event without providerId or enrollment/step — skipping log update');
     }
 
     // Phase 4: Self-Healing — trigger healing on SMS delivery failures
@@ -912,34 +1149,38 @@ async function handleSmsDelivery(event: EventJobPayload): Promise<void> {
  * Handle email opened event
  */
 async function handleEmailOpened(event: EventJobPayload): Promise<void> {
-    const { enrollmentId, stepId } = event;
+    const { enrollmentId } = event;
+    const executionLogId = (event as any).executionLogId as string | undefined;
 
     console.log(`[EVENT] Email opened for enrollment ${enrollmentId}`);
 
-    if (stepId) {
-        await supabase
-            .from('sequence_execution_log')
-            .update({
-                email_status: 'opened',
-            })
-            .eq('step_id', stepId)
-            .eq('channel', 'email');
+    if (!executionLogId) {
+        console.log('[EVENT] Email-opened event without executionLogId — skipping log update');
+        return;
     }
 
-    // Update interaction record with opened status
-    if (stepId) {
-        const { data: logEntry } = await supabase
-            .from('sequence_execution_log')
-            .select('provider_id')
-            .eq('step_id', stepId)
-            .eq('channel', 'email')
-            .single();
+    // Update the exact execution-log row (tracking URLs now encode the log
+    // id) — step_id is shared across enrollments and must not be used.
+    const { data: logRow, error: logErr } = await supabase
+        .from('sequence_execution_log')
+        .update({
+            email_status: 'opened',
+        })
+        .eq('id', executionLogId)
+        .select('provider_id, enrollment_id')
+        .maybeSingle();
 
-        if (logEntry?.provider_id) {
-            const existing = await findInteractionByProviderId(logEntry.provider_id);
-            if (existing) {
-                await updateInteraction(existing.id, { outcome: 'opened' });
-            }
+    if (logErr) {
+        console.error(`[EVENT] Failed to update execution log ${executionLogId} (opened):`, logErr);
+        return;
+    }
+
+    // Update interaction record with opened status, keyed off this row's
+    // per-enrollment provider_id
+    if (logRow?.provider_id) {
+        const existing = await findInteractionByProviderId(logRow.provider_id);
+        if (existing) {
+            await updateInteraction(existing.id, { outcome: 'opened' });
         }
     }
 }
@@ -948,34 +1189,38 @@ async function handleEmailOpened(event: EventJobPayload): Promise<void> {
  * Handle email clicked event
  */
 async function handleEmailClicked(event: EventJobPayload): Promise<void> {
-    const { enrollmentId, stepId } = event;
+    const { enrollmentId } = event;
+    const executionLogId = (event as any).executionLogId as string | undefined;
 
     console.log(`[EVENT] Email link clicked for enrollment ${enrollmentId}`);
 
-    if (stepId) {
-        await supabase
-            .from('sequence_execution_log')
-            .update({
-                email_status: 'clicked',
-            })
-            .eq('step_id', stepId)
-            .eq('channel', 'email');
+    if (!executionLogId) {
+        console.log('[EVENT] Email-clicked event without executionLogId — skipping log update');
+        return;
     }
 
-    // Update interaction record with clicked status
-    if (stepId) {
-        const { data: logEntry } = await supabase
-            .from('sequence_execution_log')
-            .select('provider_id')
-            .eq('step_id', stepId)
-            .eq('channel', 'email')
-            .single();
+    // Update the exact execution-log row (tracking URLs now encode the log
+    // id) — step_id is shared across enrollments and must not be used.
+    const { data: logRow, error: logErr } = await supabase
+        .from('sequence_execution_log')
+        .update({
+            email_status: 'clicked',
+        })
+        .eq('id', executionLogId)
+        .select('provider_id, enrollment_id')
+        .maybeSingle();
 
-        if (logEntry?.provider_id) {
-            const existing = await findInteractionByProviderId(logEntry.provider_id);
-            if (existing) {
-                await updateInteraction(existing.id, { outcome: 'clicked' });
-            }
+    if (logErr) {
+        console.error(`[EVENT] Failed to update execution log ${executionLogId} (clicked):`, logErr);
+        return;
+    }
+
+    // Update interaction record with clicked status, keyed off this row's
+    // per-enrollment provider_id
+    if (logRow?.provider_id) {
+        const existing = await findInteractionByProviderId(logRow.provider_id);
+        if (existing) {
+            await updateInteraction(existing.id, { outcome: 'clicked' });
         }
     }
 }
@@ -985,46 +1230,87 @@ async function handleEmailClicked(event: EventJobPayload): Promise<void> {
  */
 async function handleEmailBounced(event: EventJobPayload): Promise<void> {
     const { enrollmentId, stepId, tenantId } = event;
-    const bounceType = (event as any).bounceType || 'hard'; // 'hard' or 'soft'
+    const executionLogId = ((event as any).execution_log_id ?? (event as any).executionLogId) as string | undefined;
+    const providerId = ((event as any).provider_id ?? (event as any).providerId) as string | undefined;
+    const bounceType = ((event as any).bounce_type ?? (event as any).bounceType ?? 'hard') as string; // 'hard' or 'soft'
 
     console.log(`[EVENT] Email bounced (${bounceType}) for enrollment ${enrollmentId}`);
 
-    if (stepId) {
-        await supabase
+    // Locate + update the execution log row by id or provider_id — never by
+    // bare step_id (step rows are shared across enrollments).
+    let logRow: { enrollment_id: string | null; step_id: string | null; provider_id: string | null } | null = null;
+
+    if (executionLogId) {
+        const { data, error: logErr } = await supabase
             .from('sequence_execution_log')
             .update({ email_status: 'bounced' })
-            .eq('step_id', stepId)
-            .eq('channel', 'email');
+            .eq('id', executionLogId)
+            .select('enrollment_id, step_id, provider_id')
+            .maybeSingle();
+        if (logErr) {
+            console.error(`[EVENT] Failed to update execution log ${executionLogId} (bounced):`, logErr);
+        }
+        logRow = data ?? null;
+    } else if (providerId) {
+        const { data, error: logErr } = await supabase
+            .from('sequence_execution_log')
+            .update({ email_status: 'bounced' })
+            .eq('provider_id', providerId)
+            .select('enrollment_id, step_id, provider_id');
+        if (logErr) {
+            console.error(`[EVENT] Failed to update execution log by provider ${providerId} (bounced):`, logErr);
+        }
+        logRow = data?.[0] ?? null;
+    } else {
+        console.log('[EVENT] Email bounce without execution_log_id/provider_id — skipping log update');
     }
 
-    // Update interaction record
-    if (stepId) {
-        const { data: logEntry } = await supabase
-            .from('sequence_execution_log')
-            .select('provider_id')
-            .eq('step_id', stepId)
-            .eq('channel', 'email')
-            .single();
+    // Update interaction record keyed off the row's per-enrollment provider_id
+    if (logRow?.provider_id) {
+        const existing = await findInteractionByProviderId(logRow.provider_id);
+        if (existing) {
+            await updateInteraction(existing.id, { outcome: 'bounced' });
+        }
+    }
 
-        if (logEntry?.provider_id) {
-            const existing = await findInteractionByProviderId(logEntry.provider_id);
-            if (existing) {
-                await updateInteraction(existing.id, { outcome: 'bounced' });
+    const resolvedEnrollmentId = enrollmentId || logRow?.enrollment_id || undefined;
+    const resolvedStepId = stepId || logRow?.step_id || undefined;
+
+    // Hard bounce is permanent — mark the contact's email invalid now so the
+    // scheduler's contact-validity gate stops emailing this address. (The
+    // healer's mark_invalid only fires on the 2nd bounce.)
+    if (bounceType === 'hard' && resolvedEnrollmentId) {
+        const { data: enrollRow, error: enrollErr } = await supabase
+            .from('sequence_enrollments')
+            .select('contact_id')
+            .eq('id', resolvedEnrollmentId)
+            .single();
+        if (enrollErr) {
+            console.error(`[EVENT] Could not resolve contact for enrollment ${resolvedEnrollmentId}:`, enrollErr);
+        } else if (enrollRow?.contact_id) {
+            const { error: invalidErr } = await supabase
+                .from('contacts')
+                .update({ email_valid: false })
+                .eq('id', enrollRow.contact_id);
+            if (invalidErr) {
+                console.error(`[EVENT] Failed to mark email invalid for contact ${enrollRow.contact_id}:`, invalidErr);
+            } else {
+                console.log(`[EVENT] Marked contact ${enrollRow.contact_id} email invalid (hard bounce)`);
             }
         }
     }
 
     // Trigger self-healing
-    if (enrollmentId && stepId) {
-        await handleFailure(enrollmentId, stepId, 'email_bounced', {
+    if (resolvedEnrollmentId && resolvedStepId) {
+        await handleFailure(resolvedEnrollmentId, resolvedStepId, 'email_bounced', {
             bounceType,
             tenantId,
         });
     }
 
     // Dynamic (JIT) — bounce means failed delivery, need to try another channel
-    if (enrollmentId) {
-        await maybeTriggerDynamicGeneration(enrollmentId, {
+    if (resolvedEnrollmentId) {
+        await maybeTriggerDynamicGeneration(resolvedEnrollmentId, {
             type: 'email_bounced',
             details: `${bounceType} bounce`,
             channel: 'email',
@@ -1107,6 +1393,50 @@ async function handleEmailReply(event: EventJobPayload): Promise<void> {
         if (enroll) {
             tenantId = enroll.tenant_id;
 
+            // 0. Deterministic STOP/START/HELP keyword handling — MUST run
+            // before any LLM call (CAN-SPAM/compliance cannot depend on GPT).
+            // isStopEmailBody checks the first non-quoted line — real email
+            // replies carry quoted text/signatures below the actual reply.
+            if (isStopMessage(messageBody) || isStopEmailBody(messageBody)) {
+                console.log(`[EVENT] STOP keyword detected in email reply for enrollment ${enrollmentId} — opting out contact ${enroll.contact_id}`);
+                await optOutContact(supabase, enroll.contact_id, 'email', 'keyword');
+                await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+                const { error: stopLogErr } = await supabase.from('sequence_execution_log').insert({
+                    enrollment_id: enrollmentId,
+                    step_id: null,
+                    channel: 'email',
+                    action: 'opt_out_keyword',
+                    provider_id: null,
+                    provider_response: { body: messageBody.substring(0, 200), subject: emailSubject || null },
+                    executed_at: new Date().toISOString(),
+                });
+                if (stopLogErr) {
+                    console.error(`[EVENT] Failed to log STOP keyword for ${enrollmentId}:`, stopLogErr);
+                }
+                return; // Skip the LLM entirely
+            }
+
+            if (isStartMessage(messageBody)) {
+                console.log(`[EVENT] START keyword detected in email reply — re-opting in contact ${enroll.contact_id}`);
+                await reoptInContact(supabase, enroll.contact_id);
+                return;
+            }
+
+            if (isHelpMessage(messageBody)) {
+                console.log(`[EVENT] HELP keyword detected in email reply for enrollment ${enrollmentId} — notifying tenant`);
+                await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+                await createNotification({
+                    clientId: enroll.tenant_id,
+                    enrollmentId,
+                    contactId: enroll.contact_id,
+                    type: 'needs_human',
+                    title: 'HELP keyword received (email)',
+                    body: `Contact replied: "${messageBody.substring(0, 100)}"`,
+                    priority: 'high',
+                });
+                return;
+            }
+
             // 1. EI Analysis on the reply
             let eiAnalysis: EmotionalAnalysis | null = null;
             const conversationHistory = await buildConversationHistoryString(enroll.contact_id);
@@ -1170,9 +1500,31 @@ async function handleEmailReply(event: EventJobPayload): Promise<void> {
 
             if (intent === 'stop') {
                 await updateEnrollmentStatus(enrollmentId, { status: 'manual_stop', contact_replied: true });
+                // Persist the opt-out at the CONTACT level (keyword check
+                // above missed it — LLM caught a free-form opt-out)
+                await optOutContact(supabase, enroll.contact_id, 'email', 'ei_intent');
+            } else if (intent === 'not_interested') {
+                // 'unenrolled' (not 'completed') — counting lead-lost as
+                // completed inflates completion analytics.
+                const { error: unenrollErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        status: 'unenrolled',
+                        contact_replied: true,
+                        completed_at: new Date().toISOString(),
+                        completed_reason: 'not_interested',
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId);
+                if (unenrollErr) {
+                    console.error(`[EVENT] Failed to unenroll ${enrollmentId} (not_interested):`, unenrollErr);
+                }
             } else if (intent === 'interested' || intent === 'ready_to_buy') {
                 try { await computeStepAttribution(enrollmentId, 'replied'); } catch {}
             }
+
+            // A/B loop: credit the last-sent variant with this reply (last-touch)
+            await attributeVariantOutcome(enrollmentId, 'reply');
 
             // 6. Pipeline auto-advance
             const { data: enrollForPipeline } = await supabase
@@ -1278,7 +1630,9 @@ async function maybeTriggerEmailReply(
                 if (!result.message) return false;
 
                 if (replyMode === 'auto') {
-                    // Send the reply email via the email queue
+                    // Send the reply email via the email queue. dedupKey keyed
+                    // off the stable event-job id so a retried event job can't
+                    // double-send the same chatbot reply.
                     await emailQueue.add('email:chatbot-reply', {
                         tenantId: enrollment.tenant_id,
                         contactEmail: contact?.email || event.fromEmail || '',
@@ -1286,7 +1640,8 @@ async function maybeTriggerEmailReply(
                         bodyHtml: result.message,
                         bodyText: result.message,
                         enrollmentId,
-                        stepId: '',
+                        stepId: null, // No specific step — this is a chatbot reply
+                        dedupKey: `chatbot-email:${enrollmentId}:${(event as any).eventJobId || Date.now()}`,
                     });
 
                     await recordInteraction({
@@ -1331,6 +1686,8 @@ async function maybeTriggerEmailReply(
                     completed_at: new Date().toISOString(),
                 });
                 try { await computeStepAttribution(enrollmentId, (result.conversion_type || 'replied') as any); } catch {}
+                // A/B loop: credit the last-sent variant with the conversion
+                await attributeVariantOutcome(enrollmentId, 'conversion');
                 await createNotification({
                     clientId: enrollment.tenant_id,
                     enrollmentId,
@@ -1345,10 +1702,19 @@ async function maybeTriggerEmailReply(
             }
 
             case 'escalate': {
-                await supabase
+                // Push the dynamic timeout forward so the generator doesn't
+                // race the human.
+                const { error: escErr } = await supabase
                     .from('sequence_enrollments')
-                    .update({ needs_human_intervention: true, updated_at: new Date().toISOString() })
+                    .update({
+                        needs_human_intervention: true,
+                        outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
                     .eq('id', enrollmentId);
+                if (escErr) {
+                    console.error(`[EVENT] Failed to flag ${enrollmentId} for human intervention:`, escErr);
+                }
                 await createNotification({
                     clientId: enrollment.tenant_id,
                     enrollmentId,
@@ -1367,14 +1733,9 @@ async function maybeTriggerEmailReply(
                     status: 'manual_stop' as EnrollmentStatus,
                     contact_replied: true,
                 });
-                await supabase
-                    .from('contacts')
-                    .update({
-                        opted_out_at: new Date().toISOString(),
-                        opted_out_channel: 'email',
-                    })
-                    .eq('id', enrollment.contact_id)
-                    .is('opted_out_at', null);
+                // Persist opt-out at the CONTACT level and stop every other
+                // in-flight enrollment for this contact.
+                await optOutContact(supabase, enrollment.contact_id, 'email', 'chatbot');
                 return true;
             }
 
@@ -1392,6 +1753,11 @@ async function maybeTriggerEmailReply(
  */
 async function processEvent(job: Job<EventJobPayload>): Promise<void> {
     const event = job.data;
+
+    // The BullMQ job id is stable across retries of the same event, so
+    // downstream dispatches can use it as an idempotency fallback when the
+    // payload carries no provider message id.
+    (event as any).eventJobId = job.id;
 
     console.log(`[EVENT] Processing event: ${event.type}`);
 

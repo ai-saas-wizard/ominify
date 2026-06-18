@@ -36,6 +36,10 @@
 
 import { supabase } from './db.js';
 import { smsQueue, emailQueue, vapiQueue } from './redis.js';
+import { isTCPACompliant, getNextBusinessHoursStart } from './compliance.js';
+import { isContactOptedOut } from './opt-out.js';
+import { claimOnce } from './idempotency.js';
+import { createNotification } from './emotional-intelligence.js';
 import type {
     FailureType,
     HealingAction,
@@ -44,9 +48,28 @@ import type {
     FailureRecord,
     ChannelType,
     SmsContent,
+    VoiceContent,
     Contact,
     SequenceEnrollment,
 } from './types.js';
+
+// Global cap on healing actions per enrollment — past this we escalate to a
+// human instead of looping through automated recovery forever.
+const MAX_HEALING_ACTIONS = 5;
+
+// Cap on call_busy → extend_delay retries per enrollment+step — past this we
+// mark the step failed and let the sequence advance (previously retried every
+// 15 minutes forever).
+const MAX_BUSY_EXTENDS = 3;
+
+/**
+ * Returned by handleFailure when the enrollment hit the global healing cap.
+ * The scheduler must treat this as no-dispatch (nothing was sent).
+ */
+export interface MaxHealingReachedAction {
+    type: 'max_healing_reached';
+    details: { reason: string };
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Failure Diagnosis — the decision tree
@@ -56,17 +79,20 @@ import type {
  * Analyze the failure and decide the best healing action.
  */
 export function diagnoseFailure(ctx: FailureContext): HealingAction {
-    const { failureType, failureHistory, contact, enrollment } = ctx;
+    const { failureType, failureHistory, contact, enrollment, step } = ctx;
     const channelOverrides = (enrollment as any).channel_overrides || {};
 
-    // Count failures by type / channel
-    const smsFailures = failureHistory.filter(f =>
+    // Count failures by type, scoped to THIS step. Failure history used to be
+    // counted enrollment-globally (step_order was hardcoded 0), so unrelated
+    // failures on earlier steps escalated later steps prematurely.
+    const stepFailures = failureHistory.filter(f => f.step_order === step.step_order);
+    const smsFailures = stepFailures.filter(f =>
         f.failure_type === 'sms_undelivered' || f.failure_type === 'sms_failed'
     ).length;
-    const callNoAnswers = failureHistory.filter(f =>
+    const callNoAnswers = stepFailures.filter(f =>
         f.failure_type === 'call_no_answer'
     ).length;
-    const emailBounces = failureHistory.filter(f =>
+    const emailBounces = stepFailures.filter(f =>
         f.failure_type === 'email_bounced'
     ).length;
 
@@ -211,6 +237,24 @@ export function diagnoseFailure(ctx: FailureContext): HealingAction {
         }
 
         case 'call_busy': {
+            // Cap the busy → extend_delay loop: past MAX_BUSY_EXTENDS for
+            // this enrollment+step, mark the step failed and let the
+            // sequence advance instead of retrying every 15 min forever.
+            const busyExtends = (((enrollment as any).healing_actions_taken as any[]) || []).filter(h =>
+                h?.failure_type === 'call_busy' &&
+                h?.type === 'extend_delay' &&
+                h?.step_order === step.step_order
+            ).length;
+
+            if (busyExtends >= MAX_BUSY_EXTENDS) {
+                return {
+                    type: 'skip_and_advance',
+                    details: {
+                        reason: `Call busy ${busyExtends + 1} times on step ${step.step_order} — giving up on this step and advancing`,
+                    },
+                };
+            }
+
             return {
                 type: 'extend_delay',
                 details: {
@@ -338,7 +382,13 @@ export async function executeHealingAction(
         }
 
         case 'inject_fallback_sms': {
-            // Send an immediate SMS as a fallback
+            // Send an immediate SMS as a fallback (gated on opt-out + TCPA)
+            const gate = await getHealingDispatchGate(ctx);
+            if (!gate.allowed) {
+                console.log(`[HEALER] Skipping fallback SMS for enrollment ${enrollmentId}: ${gate.reason}`);
+                break;
+            }
+
             const smsContent = action.details.new_content as SmsContent;
             const firstName = contact.first_name || contact.name?.split(' ')[0] || '';
             const body = smsContent.body.replace(/\{\{first_name\}\}/g, firstName);
@@ -349,8 +399,28 @@ export async function executeHealingAction(
                 body,
                 enrollmentId,
                 stepId,
-            });
-            console.log(`[HEALER] Injected fallback SMS for enrollment ${enrollmentId}`);
+                dedupKey: healingDedupKey(ctx),
+            }, gate.delayMs > 0 ? { delay: gate.delayMs } : {});
+            console.log(`[HEALER] Injected fallback SMS for enrollment ${enrollmentId}${gate.delayMs > 0 ? ` (delayed ${Math.round(gate.delayMs / 1000)}s for TCPA window)` : ''}`);
+
+            // Re-queue the original voice call with the requested delay, as
+            // the decision-tree header promises. Previously the call was
+            // silently dropped and only the SMS went out.
+            if (action.details.delay_seconds && step.channel === 'voice') {
+                const callDelayMs = Math.max(action.details.delay_seconds * 1000, gate.delayMs);
+                await vapiQueue.add('vapi:call', {
+                    tenantId: (enrollment as any).tenant_id || clientId,
+                    contactPhone: contact.phone,
+                    assistantConfig: step.content as VoiceContent,
+                    enrollmentId,
+                    stepId,
+                    urgencyPriority: 5,
+                    // Distinct from the SMS dedup key — this is a second,
+                    // separate send from the same healing action.
+                    dedupKey: `${healingDedupKey(ctx)}:requeue`,
+                }, { delay: callDelayMs, priority: 5 });
+                console.log(`[HEALER] Re-queued voice call for enrollment ${enrollmentId} in ${Math.round(callDelayMs / 1000)}s`);
+            }
             break;
         }
 
@@ -361,16 +431,27 @@ export async function executeHealingAction(
             const delaySeconds = action.details.delay_seconds || 300;
             const nextTime = new Date(Date.now() + delaySeconds * 1000);
 
-            await supabase
+            // Guarded CAS: only roll back if current_step_order is still the
+            // value we read — two concurrent failure events for the same step
+            // must not double-decrement the pointer.
+            const { data: updated, error } = await supabase
                 .from('sequence_enrollments')
                 .update({
                     next_step_at: nextTime.toISOString(),
                     current_step_order: enrollment.current_step_order - 1,
                     updated_at: new Date().toISOString(),
                 })
-                .eq('id', enrollmentId);
+                .eq('id', enrollmentId)
+                .eq('current_step_order', enrollment.current_step_order)
+                .select('id');
 
-            console.log(`[HEALER] Rescheduled step for enrollment ${enrollmentId} in ${delaySeconds}s`);
+            if (error) {
+                console.error('[HEALER] extend_delay update failed:', error);
+            } else if (!updated || updated.length === 0) {
+                console.log(`[HEALER] extend_delay skipped for enrollment ${enrollmentId} — step order changed concurrently`);
+            } else {
+                console.log(`[HEALER] Rescheduled step for enrollment ${enrollmentId} in ${delaySeconds}s`);
+            }
             break;
         }
 
@@ -433,6 +514,11 @@ export async function executeHealingAction(
         case 'use_alternative_contact': {
             // Use the alternative phone/email on the contact
             if (action.details.new_phone) {
+                const gate = await getHealingDispatchGate(ctx);
+                if (!gate.allowed) {
+                    console.log(`[HEALER] Skipping alternative-contact SMS for enrollment ${enrollmentId}: ${gate.reason}`);
+                    break;
+                }
                 // Re-dispatch with alternative phone
                 await smsQueue.add('sms:send', {
                     tenantId: clientId,
@@ -440,7 +526,8 @@ export async function executeHealingAction(
                     body: (step.content as SmsContent).body || '',
                     enrollmentId,
                     stepId,
-                });
+                    dedupKey: healingDedupKey(ctx),
+                }, gate.delayMs > 0 ? { delay: gate.delayMs } : {});
             }
             if (action.details.new_email) {
                 // Would dispatch email with alternative address
@@ -477,6 +564,51 @@ export async function executeHealingAction(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Dedup key carried in every healing dispatch payload. Send workers use it
+ * for idempotency claims when stepId-based dedup doesn't apply.
+ */
+function healingDedupKey(ctx: FailureContext): string {
+    return `heal:${ctx.enrollmentId}:${ctx.stepId}:${ctx.failureType}`;
+}
+
+interface HealingDispatchGate {
+    allowed: boolean;
+    delayMs: number;
+    reason?: string;
+}
+
+/**
+ * Gate healing dispatches the same way the scheduler gates normal sends:
+ * never message an opted-out contact, and never fire outside the TCPA
+ * window. Outside the window, the job is queued with a BullMQ delay so it
+ * fires at the next business-hours start instead of e.g. 11pm. Previously
+ * healing pushed directly onto the queues and bypassed every gate.
+ */
+async function getHealingDispatchGate(ctx: FailureContext): Promise<HealingDispatchGate> {
+    if (isContactOptedOut(ctx.contact)) {
+        return { allowed: false, delayMs: 0, reason: 'contact opted out' };
+    }
+
+    const { data: profile, error } = await supabase
+        .from('tenant_profiles')
+        .select('timezone, business_hours')
+        .eq('client_id', ctx.clientId)
+        .maybeSingle();
+
+    if (error) {
+        console.error('[HEALER] Error fetching tenant profile for dispatch gate:', error);
+    }
+
+    const timezone = profile?.timezone || 'America/New_York';
+    if (!isTCPACompliant(timezone)) {
+        const resumeAt = getNextBusinessHoursStart(timezone, profile?.business_hours || null, new Date());
+        return { allowed: true, delayMs: Math.max(0, resumeAt.getTime() - Date.now()) };
+    }
+
+    return { allowed: true, delayMs: 0 };
+}
+
+/**
  * Dispatch a step to an alternate channel.
  * Converts content when switching (e.g., SMS body → email body).
  */
@@ -487,6 +619,14 @@ async function dispatchToAlternateChannel(
     const { enrollmentId, stepId, contact, enrollment, step, clientId } = ctx;
     const tenantId = (enrollment as any).tenant_id || clientId;
 
+    const gate = await getHealingDispatchGate(ctx);
+    if (!gate.allowed) {
+        console.log(`[HEALER] Skipping ${newChannel} dispatch for enrollment ${enrollmentId}: ${gate.reason}`);
+        return;
+    }
+    const jobOpts = gate.delayMs > 0 ? { delay: gate.delayMs } : {};
+    const dedupKey = healingDedupKey(ctx);
+
     switch (newChannel) {
         case 'sms': {
             const body = extractTextContent(step.content, step.channel);
@@ -496,7 +636,8 @@ async function dispatchToAlternateChannel(
                 body: body.substring(0, 1600), // SMS limit
                 enrollmentId,
                 stepId,
-            });
+                dedupKey,
+            }, jobOpts);
             break;
         }
 
@@ -514,7 +655,8 @@ async function dispatchToAlternateChannel(
                 bodyText: textContent,
                 enrollmentId,
                 stepId,
-            });
+                dedupKey,
+            }, jobOpts);
             break;
         }
 
@@ -529,8 +671,10 @@ async function dispatchToAlternateChannel(
                 enrollmentId,
                 stepId,
                 urgencyPriority: 5,
+                dedupKey,
             }, {
                 priority: 5,
+                ...jobOpts,
             });
             break;
         }
@@ -591,20 +735,43 @@ async function advanceEnrollment(
  * Get failure history for an enrollment.
  */
 export async function getFailureHistory(enrollmentId: string): Promise<FailureRecord[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('healing_log')
         .select('failure_type, healing_action, created_at, step_id')
         .eq('enrollment_id', enrollmentId)
         .order('created_at', { ascending: false })
         .limit(20);
 
-    if (!data) return [];
+    if (error) {
+        console.error('[HEALER] Error fetching failure history:', error);
+        return [];
+    }
+    if (!data || data.length === 0) return [];
 
-    // Also pull step info for step_order
+    // Resolve real step_orders from the logged step_ids. step_order was
+    // previously hardcoded to 0, which made failure counts enrollment-global
+    // across unrelated steps.
+    const stepIds = [...new Set(data.map((r: any) => r.step_id).filter(Boolean))];
+    const stepOrderMap = new Map<string, number>();
+    if (stepIds.length > 0) {
+        const { data: steps, error: stepsErr } = await supabase
+            .from('sequence_steps')
+            .select('id, step_order')
+            .in('id', stepIds);
+        if (stepsErr) {
+            console.error('[HEALER] Error fetching step orders for failure history:', stepsErr);
+        }
+        for (const s of steps || []) {
+            stepOrderMap.set(s.id, s.step_order);
+        }
+    }
+
     return data.map((row: any) => ({
         channel: mapFailureToChannel(row.failure_type),
         failure_type: row.failure_type,
-        step_order: 0, // Will be populated if needed
+        // -1 = unknown step (no step_id on the log row); never matches a
+        // real step_order so it won't inflate per-step failure counts.
+        step_order: row.step_id ? (stepOrderMap.get(row.step_id) ?? -1) : -1,
         timestamp: row.created_at,
     }));
 }
@@ -629,18 +796,18 @@ async function recordHealingAction(
     ctx: FailureContext,
     action: HealingAction,
 ): Promise<void> {
-    try {
-        await supabase.from('healing_log').insert({
-            enrollment_id: ctx.enrollmentId,
-            step_id: ctx.stepId,
-            client_id: ctx.clientId,
-            failure_type: ctx.failureType,
-            failure_details: ctx.errorDetails,
-            healing_action: action.type,
-            healing_details: action.details,
-        });
-    } catch (err) {
-        console.error('[HEALER] Error recording healing action:', err);
+    // supabase-js never throws — check the returned error.
+    const { error } = await supabase.from('healing_log').insert({
+        enrollment_id: ctx.enrollmentId,
+        step_id: ctx.stepId,
+        client_id: ctx.clientId,
+        failure_type: ctx.failureType,
+        failure_details: ctx.errorDetails,
+        healing_action: action.type,
+        healing_details: action.details,
+    });
+    if (error) {
+        console.error('[HEALER] Error recording healing action:', error);
     }
 }
 
@@ -678,26 +845,44 @@ async function trackFailedChannel(
 
     if (!persistentFailures.includes(failureType)) return;
 
-    try {
-        const { data } = await supabase
-            .from('sequence_enrollments')
-            .select('failed_channels')
-            .eq('id', enrollmentId)
-            .single();
+    // Guarded conditional write (same read-modify-write class the 20260526
+    // migration closed elsewhere): the UPDATE only applies if failed_channels
+    // is still the value we read, so two concurrent healings can't clobber
+    // each other's append. supabase-js never throws — check { error }.
+    const { data, error: readErr } = await supabase
+        .from('sequence_enrollments')
+        .select('failed_channels')
+        .eq('id', enrollmentId)
+        .single();
 
-        const failedChannels = (data?.failed_channels as string[]) || [];
-        if (!failedChannels.includes(channel)) {
-            failedChannels.push(channel);
-            await supabase
-                .from('sequence_enrollments')
-                .update({
-                    failed_channels: failedChannels,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', enrollmentId);
-        }
-    } catch (err) {
-        console.error('[HEALER] Error tracking failed channel:', err);
+    if (readErr) {
+        console.error('[HEALER] Error reading failed_channels:', readErr);
+        return;
+    }
+
+    const prior = data?.failed_channels as string[] | null;
+    const failedChannels = prior || [];
+    if (failedChannels.includes(channel)) return;
+
+    const updateQuery = supabase
+        .from('sequence_enrollments')
+        .update({
+            failed_channels: [...failedChannels, channel],
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', enrollmentId);
+
+    // CAS on the previous value (jsonb equality is semantic, so the
+    // serialized form is safe to compare against).
+    const { data: updated, error: writeErr } = await (prior == null
+        ? updateQuery.is('failed_channels', null)
+        : updateQuery.eq('failed_channels', JSON.stringify(prior))
+    ).select('id');
+
+    if (writeErr) {
+        console.error('[HEALER] Error tracking failed channel:', writeErr);
+    } else if (!updated || updated.length === 0) {
+        console.warn(`[HEALER] failed_channels changed concurrently for enrollment ${enrollmentId} — '${channel}' not appended this pass`);
     }
 }
 
@@ -715,7 +900,7 @@ export async function handleFailure(
     stepId: string,
     failureType: FailureType,
     errorDetails?: any,
-): Promise<HealingAction | null> {
+): Promise<HealingAction | MaxHealingReachedAction | null> {
     try {
         // Fetch enrollment with contact
         const { data: enrollment, error: enrollErr } = await supabase
@@ -727,6 +912,43 @@ export async function handleFailure(
         if (enrollErr || !enrollment) {
             console.error(`[HEALER] Could not fetch enrollment ${enrollmentId}:`, enrollErr);
             return null;
+        }
+
+        // Global healing cap: an enrollment healed this many times is beyond
+        // automated recovery — escalate to a human instead of looping.
+        const healingActions = (enrollment.healing_actions_taken as any[]) || [];
+        if (healingActions.length >= MAX_HEALING_ACTIONS) {
+            console.log(`[HEALER] Enrollment ${enrollmentId} hit the healing cap (${healingActions.length} actions) — escalating`);
+
+            const { error: escErr } = await supabase
+                .from('sequence_enrollments')
+                .update({
+                    needs_human_intervention: true,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', enrollmentId);
+            if (escErr) {
+                console.error('[HEALER] Failed to flag enrollment for human intervention:', escErr);
+            }
+
+            // Notify at most once per 24h window per enrollment
+            if (await claimOnce(`notif:${enrollmentId}:max_healing_reached`)) {
+                await createNotification({
+                    clientId: enrollment.client_id || enrollment.tenant_id,
+                    enrollmentId,
+                    contactId: enrollment.contact_id,
+                    type: 'escalation',
+                    title: 'Sequence needs attention — automated recovery limit reached',
+                    body: `Enrollment failed with ${failureType} after ${healingActions.length} healing attempts. Automated healing has been stopped.`,
+                    priority: 'high',
+                    metadata: { failure_type: failureType, healing_actions: healingActions.length },
+                });
+            }
+
+            return {
+                type: 'max_healing_reached',
+                details: { reason: `Healing cap (${MAX_HEALING_ACTIONS}) reached — escalated to human` },
+            };
         }
 
         // Fetch the step
@@ -799,9 +1021,12 @@ export function checkContactValidity(
     contact: Contact,
     channel: ChannelType,
 ): { valid: boolean; reason?: string; failureType?: FailureType } {
+    // phone_valid / email_valid are tri-state: NULL/undefined = never
+    // checked (treat as VALID); only an explicit false marks the channel
+    // invalid. NULL was previously misclassified as invalid_number.
     switch (channel) {
         case 'sms': {
-            if (!(contact as any).phone_valid && (contact as any).phone_valid !== undefined) {
+            if ((contact as any).phone_valid === false) {
                 return { valid: false, reason: 'Phone marked invalid', failureType: 'invalid_number' };
             }
             if ((contact as any).phone_type === 'landline') {
@@ -814,7 +1039,7 @@ export function checkContactValidity(
         }
 
         case 'email': {
-            if (!(contact as any).email_valid && (contact as any).email_valid !== undefined) {
+            if ((contact as any).email_valid === false) {
                 return { valid: false, reason: 'Email marked invalid', failureType: 'invalid_email' };
             }
             if (!contact.email) {
@@ -824,7 +1049,7 @@ export function checkContactValidity(
         }
 
         case 'voice': {
-            if (!(contact as any).phone_valid && (contact as any).phone_valid !== undefined) {
+            if ((contact as any).phone_valid === false) {
                 return { valid: false, reason: 'Phone marked invalid', failureType: 'invalid_number' };
             }
             if (!contact.phone) {

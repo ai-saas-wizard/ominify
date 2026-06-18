@@ -15,7 +15,7 @@
 
 import 'dotenv/config';
 import { supabase } from '../lib/db.js';
-import { smsQueue, emailQueue, vapiQueue } from '../lib/redis.js';
+import { smsQueue, emailQueue, vapiQueue, closeConnections } from '../lib/redis.js';
 import {
     getConversationContext,
     getConversationContext as getDynamicConversationContext,
@@ -79,8 +79,13 @@ import type {
     InlineVapiAgent,
     StepBrief,
 } from '../lib/types.js';
-import { format, addSeconds, isWithinInterval, addDays } from 'date-fns';
-import { utcToZonedTime, zonedTimeToUtc, formatInTimeZone } from 'date-fns-tz';
+import { addSeconds } from 'date-fns';
+import {
+    isTCPACompliant,
+    isWithinBusinessHours,
+    getNextBusinessHoursStart,
+    getNextTCPAWindow,
+} from '../lib/compliance.js';
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
@@ -118,64 +123,6 @@ function getCallPriority(urgencyTier: UrgencyTier): number {
         low: 8,
     };
     return priorities[urgencyTier] || 5;
-}
-
-/**
- * Check if current time is within TCPA-compliant window (8am - 9pm)
- */
-function isTCPACompliant(timezone: string): boolean {
-    const now = new Date();
-    const zonedNow = utcToZonedTime(now, timezone);
-    const hour = zonedNow.getHours();
-    return hour >= 8 && hour < 21;
-}
-
-/**
- * Check if current time is within business hours
- */
-function isWithinBusinessHours(
-    timezone: string,
-    businessHours: TenantProfile['business_hours']
-): boolean {
-    if (!businessHours) return true;
-    if (businessHours.emergency_24_7) return true;
-
-    const now = new Date();
-    const zonedNow = utcToZonedTime(now, timezone);
-    const day = zonedNow.getDay();
-    const currentTime = format(zonedNow, 'HH:mm');
-
-    let hours: { start: string; end: string } | undefined;
-
-    if (day === 0) hours = businessHours.sunday;
-    else if (day === 6) hours = businessHours.saturday;
-    else hours = businessHours.weekdays;
-
-    if (!hours) return false;
-
-    return currentTime >= hours.start && currentTime <= hours.end;
-}
-
-/**
- * Get next business hours start time
- */
-function getNextBusinessHoursStart(
-    timezone: string,
-    _businessHours: TenantProfile['business_hours']
-): Date {
-    // Next 08:00 in tenant timezone (DST-safe; ignores host TZ entirely).
-    const now = new Date();
-    const zonedNow = utcToZonedTime(now, timezone);
-    const targetZoned = zonedNow.getHours() < 8 ? zonedNow : addDays(zonedNow, 1);
-    const dateStr = formatInTimeZone(targetZoned, timezone, 'yyyy-MM-dd');
-    return zonedTimeToUtc(`${dateStr}T08:00:00`, timezone);
-}
-
-/**
- * Get next TCPA-compliant window start
- */
-function getNextTCPAWindow(timezone: string): Date {
-    return getNextBusinessHoursStart(timezone, null);
 }
 
 /**
@@ -219,8 +166,10 @@ function renderTemplate(
     // undefined (reading 'replace')" and put the scheduler in a hot loop.
     const render = (text: unknown): string => {
         if (typeof text !== 'string') return '';
-        return text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-            return variables[key] ?? match;
+        return text.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
+            // Missing variables render as '' — never leak a literal
+            // {{placeholder}} into lead-visible text.
+            return String(variables[key] ?? '');
         });
     };
 
@@ -255,21 +204,16 @@ function renderTemplate(
  * second batched query keyed by client_id.
  */
 async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
-    // Atomic claim: bump next_step_at into the future and return only the
-    // rows we actually moved. PostgreSQL serializes concurrent UPDATEs, so
+    // Atomic claim via FOR UPDATE SKIP LOCKED batch RPC: bumps next_step_at
+    // to the lease and returns only the rows we actually claimed, so
     // overlapping ticks (or a second scheduler) won't both claim the same
     // enrollment — duplicate-dispatch is prevented at the DB layer.
-    const nowIso = new Date().toISOString();
     const leaseUntilIso = new Date(Date.now() + CLAIM_LEASE_MS).toISOString();
 
-    const { data: claimedRows, error: claimErr } = await supabase
-        .from('sequence_enrollments')
-        .update({ next_step_at: leaseUntilIso, updated_at: nowIso })
-        .eq('status', 'active')
-        .lte('next_step_at', nowIso)
-        .select('id')
-        .order('next_step_at', { ascending: true })
-        .limit(BATCH_SIZE);
+    const { data: claimedRows, error: claimErr } = await supabase.rpc('claim_due_enrollments', {
+        p_lease_until: leaseUntilIso,
+        p_limit: BATCH_SIZE,
+    });
 
     if (claimErr) {
         console.error('[SCHEDULER] Error claiming due enrollments:', claimErr);
@@ -279,7 +223,11 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
         return [];
     }
 
-    const claimedIds = claimedRows.map((r: any) => r.id);
+    // RPC returns SETOF uuid — rows may arrive as bare strings or { id } objects
+    // depending on PostgREST scalar serialization.
+    const claimedIds = (claimedRows as any[]).map((r: any) =>
+        typeof r === 'string' ? r : r.id ?? r.claim_due_enrollments
+    ).filter(Boolean);
 
     // Re-fetch with full context now that we hold the lease.
     const { data, error } = await supabase
@@ -365,20 +313,39 @@ async function fetchDueEnrollments(): Promise<EnrollmentWithContext[]> {
             continue;
         }
 
-        // Get the next step
-        const { data: stepData, error: stepError } = await supabase
+        // Get the next step. JIT-generated steps are enrollment-scoped
+        // (enrollment_id set); static template steps have enrollment_id NULL.
+        // Order non-null first so this enrollment's personalized step wins
+        // over a shared template step at the same step_order.
+        const { data: stepRows, error: stepError } = await supabase
             .from('sequence_steps')
             .select('*')
             .eq('sequence_id', enrollment.sequence_id)
             .eq('step_order', enrollment.current_step_order + 1)
-            .single();
+            .or(`enrollment_id.eq.${enrollment.id},enrollment_id.is.null`)
+            .order('enrollment_id', { ascending: false, nullsFirst: false })
+            .limit(1);
 
-        if (stepError || !stepData) {
+        if (stepError) {
+            // Real query error — do NOT mark completed. Leave the lease in
+            // place; the enrollment becomes eligible again when it expires.
+            console.error(
+                `[SCHEDULER] Error fetching step ${enrollment.current_step_order + 1} for enrollment ${enrollment.id} — leaving for retry:`,
+                stepError
+            );
+            continue;
+        }
+
+        const stepData = stepRows?.[0];
+        if (!stepData) {
             // No more steps - sequence complete
-            await supabase
+            const { error: completeErr } = await supabase
                 .from('sequence_enrollments')
                 .update({ status: 'completed', completed_at: new Date().toISOString() })
                 .eq('id', enrollment.id);
+            if (completeErr) {
+                console.error(`[SCHEDULER] Failed to mark enrollment ${enrollment.id} completed:`, completeErr);
+            }
             continue;
         }
 
@@ -416,24 +383,38 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     };
 
     if (enrollmentEI.needs_human_intervention) {
-        console.log(`[SCHEDULER] Enrollment ${enrollment.id} needs human intervention — skipping step`);
-        return; // Don't advance, don't reschedule — wait for human to take over
+        // Park for 24h instead of letting the 5-minute claim lease churn —
+        // the claim would otherwise re-surface this row on every expiry.
+        const parkedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        console.log(`[SCHEDULER] Enrollment ${enrollment.id} needs human intervention — parking until ${parkedUntil}`);
+        const { error: parkErr } = await supabase
+            .from('sequence_enrollments')
+            .update({ next_step_at: parkedUntil, updated_at: new Date().toISOString() })
+            .eq('id', enrollment.id);
+        if (parkErr) {
+            console.error(`[SCHEDULER] Failed to park enrollment ${enrollment.id}:`, parkErr);
+        }
+        return; // Don't advance — wait for human to take over
     }
 
-    // 0b. DNC / opt-out gate — applies to outbound channels only.
-    // Set at the CONTACT level so it covers every sequence the contact is in.
-    if (['sms', 'voice'].includes(step.channel) && contact.opted_out_at) {
+    // 0b. DNC / opt-out gate — applies to ALL outbound channels (sms, voice,
+    // email). Set at the CONTACT level so it covers every sequence the
+    // contact is in.
+    if (contact.opted_out_at) {
         console.log(
             `[SCHEDULER] Contact ${contact.id} opted out on ${contact.opted_out_channel || 'unknown'} at ${contact.opted_out_at} — marking enrollment ${enrollment.id} as manual_stop`
         );
-        await supabase
+        const { error: stopErr } = await supabase
             .from('sequence_enrollments')
             .update({
                 status: 'manual_stop',
                 completed_at: new Date().toISOString(),
             })
             .eq('id', enrollment.id);
-        await supabase.from('sequence_execution_log').insert({
+        if (stopErr) {
+            console.error(`[SCHEDULER] Failed to manual_stop opted-out enrollment ${enrollment.id}:`, stopErr);
+        }
+        const { error: logErr } = await supabase.from('sequence_execution_log').insert({
             enrollment_id: enrollment.id,
             step_id: step.id,
             channel: step.channel,
@@ -443,13 +424,16 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             call_status: 'skipped',
             executed_at: new Date().toISOString(),
         });
+        if (logErr) {
+            console.error(`[SCHEDULER] Failed to log opt-out skip for enrollment ${enrollment.id}:`, logErr);
+        }
         return;
     }
 
     // 1. Check skip conditions
     if (shouldSkipStep(enrollment, step.skip_conditions)) {
         console.log(`[SCHEDULER] Skipping step ${step.step_order} - conditions met`);
-        await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
+        await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
         return;
     }
 
@@ -634,11 +618,25 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         console.log(`[SCHEDULER] Contact invalid for ${dispatchChannel}: ${validity.reason}`);
         // Trigger self-healing which will find an alternative
         if (validity.failureType) {
-            await handleFailure(enrollment.id, step.id, validity.failureType, {
+            const healingAction = await handleFailure(enrollment.id, step.id, validity.failureType, {
                 reason: validity.reason,
             });
+            // If the healer dispatched an alternate send for THIS step
+            // (channel switch/override or fallback SMS), the step is done —
+            // advance normally. Returning early here would let the lease
+            // expire and re-process the step → duplicate message.
+            const dispatchedAlternate =
+                healingAction &&
+                (['override_channel', 'switch_channel', 'inject_fallback_sms'].includes(healingAction.type) ||
+                    (healingAction.type === 'mark_invalid' && !!healingAction.details.new_channel));
+            if (dispatchedAlternate) {
+                console.log(`[SCHEDULER] Healing dispatched alternate send (${healingAction!.type}) for enrollment ${enrollment.id} — advancing`);
+                await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
+            }
+            // Other actions (extend_delay, skip_and_advance, end_sequence)
+            // already adjusted enrollment state inside the healer.
         } else {
-            await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
+            await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
         }
         return;
     }
@@ -681,6 +679,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 body: (renderedContent as SmsContent).body,
                 enrollmentId: enrollment.id,
                 stepId: step.id,
+                ...(selectedVariantId ? { variantId: selectedVariantId } : {}),
             });
             console.log(`[SCHEDULER] Dispatched SMS for enrollment ${enrollment.id}`);
             break;
@@ -688,7 +687,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         case 'email':
             if (!contact.email) {
                 console.log(`[SCHEDULER] No email for contact, skipping step`);
-                await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step);
+                await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
                 return;
             }
             const emailContent = renderedContent as EmailContent;
@@ -700,6 +699,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 bodyText: emailContent.body_text,
                 enrollmentId: enrollment.id,
                 stepId: step.id,
+                ...(selectedVariantId ? { variantId: selectedVariantId } : {}),
             });
             console.log(`[SCHEDULER] Dispatched email for enrollment ${enrollment.id}`);
             break;
@@ -906,6 +906,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 urgencyPriority: getCallPriority(sequence.urgency_tier),
                 ...(phoneNumberId ? { phoneNumberId } : {}),
                 ...(inlineAgent ? { inlineAgent } : {}),
+                ...(selectedVariantId ? { variantId: selectedVariantId } : {}),
             }, {
                 priority: getCallPriority(sequence.urgency_tier),
             });
@@ -914,16 +915,9 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         }
     }
 
-    // 9. Track variant_id in execution log if A/B test variant was used
-    if (selectedVariantId) {
-        // Update the latest execution log entry for this step with variant_id
-        await supabase
-            .from('sequence_execution_log')
-            .update({ variant_id: selectedVariantId })
-            .eq('enrollment_id', enrollment.id)
-            .eq('step_id', step.id)
-            .is('variant_id', null);
-    }
+    // 9. variant_id travels in the job payload — the send worker writes it
+    // into the execution log when it inserts the row. (The old post-add
+    // stamping UPDATE here raced the worker and matched zero rows.)
 
     // 10. Advance enrollment state (with emotion-aware delay adjustment)
     await advanceToNextStep(enrollment, sequence.id, {
@@ -935,9 +929,37 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 }
 
 /**
+ * Apply an enrollment update, retrying once on failure. Returns true on
+ * success. On persistent failure the caller must NOT continue silently —
+ * leaving the claim lease in place means the row re-surfaces when it
+ * expires, and worker-side send dedup makes the re-claim safe.
+ */
+async function updateEnrollmentWithRetry(
+    enrollmentId: string,
+    updates: Record<string, any>,
+    label: string
+): Promise<boolean> {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        const { error } = await supabase
+            .from('sequence_enrollments')
+            .update(updates)
+            .eq('id', enrollmentId);
+        if (!error) return true;
+        console.error(`[SCHEDULER] ${label} failed for enrollment ${enrollmentId} (attempt ${attempt}/2):`, error);
+    }
+    console.error(`[SCHEDULER] ${label} FAILED twice for enrollment ${enrollmentId} — leaving claim lease in place for safe re-claim (worker-side send dedup prevents double-send).`);
+    return false;
+}
+
+/**
  * Advance enrollment to next step
  * Now supports emotion-based delay adjustment from EI layer
  * and dynamic (JIT) sequence generation.
+ *
+ * skippedNoSend: the current step was skipped with NOTHING dispatched
+ * (skip conditions / invalid contact / missing email). Dynamic sequences
+ * must then generate the next step immediately instead of sitting in
+ * awaiting_outcome for an outcome that can never arrive.
  */
 async function advanceToNextStep(
     enrollment: SequenceEnrollment,
@@ -949,55 +971,64 @@ async function advanceToNextStep(
         lastEmotion: PrimaryEmotion | null;
     },
     sequence?: Sequence,
-    step?: SequenceStep
+    step?: SequenceStep,
+    skippedNoSend: boolean = false
 ): Promise<void> {
     // ── Dynamic mode: enter awaiting_outcome instead of advancing
     if (sequence?.generation_mode === 'dynamic') {
         const lastChannel = step?.channel || 'sms';
         const isTestEnrollment = enrollment.is_test === true;
-        // Test mode: use 30-second timeout instead of hours-long outcome window
-        const timeoutMs = isTestEnrollment
-            ? TEST_MODE_DELAY_SECONDS * 1000
-            : getOutcomeTimeout(lastChannel as ChannelType) * 60 * 60 * 1000;
+        // Test mode: use 30-second timeout instead of hours-long outcome window.
+        // Skipped steps sent nothing — time out immediately so the JIT poll
+        // generates the next step now instead of idling 24-48h.
+        const timeoutMs = skippedNoSend
+            ? 0
+            : isTestEnrollment
+                ? TEST_MODE_DELAY_SECONDS * 1000
+                : getOutcomeTimeout(lastChannel as ChannelType) * 60 * 60 * 1000;
         const timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
 
-        await supabase
-            .from('sequence_enrollments')
-            .update({
-                status: 'awaiting_outcome',
-                current_step_order: enrollment.current_step_order + 1,
-                total_attempts: enrollment.total_attempts + 1,
-                outcome_timeout_at: timeoutAt,
-                next_step_at: null,
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', enrollment.id);
+        const ok = await updateEnrollmentWithRetry(enrollment.id, {
+            status: 'awaiting_outcome',
+            current_step_order: enrollment.current_step_order + 1,
+            total_attempts: enrollment.total_attempts + 1,
+            outcome_timeout_at: timeoutAt,
+            next_step_at: null,
+            updated_at: new Date().toISOString(),
+        }, 'Dynamic advance (awaiting_outcome)');
+        if (!ok) return;
 
-        const timeoutLabel = isTestEnrollment ? `${TEST_MODE_DELAY_SECONDS}s (test mode)` : `${getOutcomeTimeout(lastChannel as ChannelType)}h`;
+        const timeoutLabel = skippedNoSend
+            ? 'immediate (step skipped, nothing sent)'
+            : isTestEnrollment ? `${TEST_MODE_DELAY_SECONDS}s (test mode)` : `${getOutcomeTimeout(lastChannel as ChannelType)}h`;
         console.log(`[SCHEDULER] Dynamic enrollment ${enrollment.id} now awaiting outcome (timeout: ${timeoutLabel})`);
         return;
     }
 
     // ── Static mode: existing behavior
     // Get next step
-    const { data: nextStep } = await supabase
+    const { data: nextStep, error: nextStepErr } = await supabase
         .from('sequence_steps')
         .select('*')
         .eq('sequence_id', sequenceId)
         .eq('step_order', enrollment.current_step_order + 2)
-        .single();
+        .maybeSingle();
+
+    if (nextStepErr) {
+        // Real query error — don't mark completed, don't advance. Leave the
+        // claim lease in place; the row re-surfaces when it expires.
+        console.error(`[SCHEDULER] Error fetching next step for enrollment ${enrollment.id} — leaving for retry:`, nextStepErr);
+        return;
+    }
 
     if (!nextStep) {
         // Sequence complete
-        await supabase
-            .from('sequence_enrollments')
-            .update({
-                status: 'completed',
-                completed_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', enrollment.id);
-        console.log(`[SCHEDULER] Enrollment ${enrollment.id} completed`);
+        const ok = await updateEnrollmentWithRetry(enrollment.id, {
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        }, 'Completion');
+        if (ok) console.log(`[SCHEDULER] Enrollment ${enrollment.id} completed`);
         return;
     }
 
@@ -1027,15 +1058,13 @@ async function advanceToNextStep(
 
     const nextStepAt = addSeconds(new Date(), adjustedDelaySeconds);
 
-    await supabase
-        .from('sequence_enrollments')
-        .update({
-            current_step_order: enrollment.current_step_order + 1,
-            next_step_at: nextStepAt.toISOString(),
-            total_attempts: enrollment.total_attempts + 1,
-            updated_at: new Date().toISOString(),
-        })
-        .eq('id', enrollment.id);
+    const advanced = await updateEnrollmentWithRetry(enrollment.id, {
+        current_step_order: enrollment.current_step_order + 1,
+        next_step_at: nextStepAt.toISOString(),
+        total_attempts: enrollment.total_attempts + 1,
+        updated_at: new Date().toISOString(),
+    }, 'Advance');
+    if (!advanced) return;
 
     console.log(`[SCHEDULER] Enrollment ${enrollment.id} advanced to step ${enrollment.current_step_order + 2}, next at ${nextStepAt.toISOString()}`);
 }
@@ -1044,13 +1073,16 @@ async function advanceToNextStep(
  * Reschedule step to a later time
  */
 async function rescheduleStep(enrollmentId: string, nextTime: Date): Promise<void> {
-    await supabase
+    const { error } = await supabase
         .from('sequence_enrollments')
         .update({
             next_step_at: nextTime.toISOString(),
             updated_at: new Date().toISOString(),
         })
         .eq('id', enrollmentId);
+    if (error) {
+        console.error(`[SCHEDULER] Failed to reschedule enrollment ${enrollmentId} to ${nextTime.toISOString()}:`, error);
+    }
 }
 
 /**
@@ -1065,6 +1097,22 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
     const contact = enrollment.contacts;
 
     if (!sequence || sequence.generation_mode !== 'dynamic') return;
+
+    // Escalated leads belong to a human — don't auto-generate. Push the
+    // timeout forward 24h so the awaiting_outcome poll doesn't hot-loop on
+    // this row, and leave the status untouched for the human to resolve.
+    if ((enrollment as any).needs_human_intervention) {
+        const deferredUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        console.log(`[SCHEDULER] Dynamic timeout for ${enrollment.id} skipped — needs human intervention; deferring to ${deferredUntil}`);
+        const { error: deferErr } = await supabase
+            .from('sequence_enrollments')
+            .update({ outcome_timeout_at: deferredUntil, updated_at: new Date().toISOString() })
+            .eq('id', enrollment.id);
+        if (deferErr) {
+            console.error(`[SCHEDULER] Failed to defer outcome_timeout_at for ${enrollment.id}:`, deferErr);
+        }
+        return;
+    }
 
     // Atomic claim
     const claimed = await claimEnrollmentForGeneration(enrollment.id);
@@ -1123,7 +1171,7 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
             const newStepOrder = (enrollment.current_step_order || 0) + 1;
             const vapiId = await getSequenceVapiAssistantId(sequence.id);
 
-            await insertGeneratedStep({
+            const insertedStep = await insertGeneratedStep({
                 sequenceId: sequence.id,
                 enrollmentId: enrollment.id,
                 stepOrder: newStepOrder,
@@ -1131,21 +1179,70 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
                 vapiAssistantId: vapiId,
             });
 
+            if (!insertedStep) {
+                // Hard failure inserting the generated step — do NOT activate,
+                // or the scheduler would dispatch whatever row sits at that
+                // step_order (possibly another lead's content). Revert so the
+                // timeout path can retry.
+                console.error(`[SCHEDULER] insertGeneratedStep returned null for enrollment ${enrollment.id} (step ${newStepOrder}) — reverting to awaiting_outcome`);
+                // Push the timeout forward — leaving it in the past would
+                // re-claim this enrollment (and re-pay the LLM call) every
+                // 5s tick while the failure persists.
+                const { error: revertErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        status: 'awaiting_outcome',
+                        outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollment.id);
+                if (revertErr) {
+                    console.error(`[SCHEDULER] Failed to revert enrollment ${enrollment.id} to awaiting_outcome:`, revertErr);
+                }
+                return;
+            }
+
             await activateEnrollmentForNextStep(
                 enrollment.id,
                 result.step.delay_seconds || 0,
                 enrollment.current_step_order // current_step_order stays — scheduler will pick up newStepOrder
             );
         } else {
+            if (result.end_reason === 'generation_failed') {
+                // Transient LLM failure (empty/invalid response) — retry via
+                // the timeout poll instead of permanently ending the sequence.
+                console.error(`[SCHEDULER] Generation failed for enrollment ${enrollment.id} — retrying in 15min`);
+                const { error: retryErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        status: 'awaiting_outcome',
+                        outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollment.id);
+                if (retryErr) {
+                    console.error(`[SCHEDULER] Failed to schedule generation retry for ${enrollment.id}:`, retryErr);
+                }
+                return;
+            }
             await endDynamicSequence(enrollment.id, result.end_reason || 'ai_decided', result.reasoning);
         }
     } catch (error) {
         console.error(`[SCHEDULER] Dynamic timeout handling failed for ${enrollment.id}:`, error);
-        // Revert to awaiting_outcome so it can retry
-        await supabase
+        // Revert to awaiting_outcome so it can retry — with the timeout
+        // pushed forward, or the 5s poll re-claims it (and re-pays the
+        // LLM call) immediately for as long as the failure persists.
+        const { error: revertErr } = await supabase
             .from('sequence_enrollments')
-            .update({ status: 'awaiting_outcome', updated_at: new Date().toISOString() })
+            .update({
+                status: 'awaiting_outcome',
+                outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+            })
             .eq('id', enrollment.id);
+        if (revertErr) {
+            console.error(`[SCHEDULER] Failed to revert enrollment ${enrollment.id} to awaiting_outcome:`, revertErr);
+        }
     }
 }
 
@@ -1208,6 +1305,7 @@ async function tick(): Promise<void> {
  * Start the scheduler
  */
 let shuttingDown = false;
+let inFlightTick: Promise<void> | null = null;
 
 async function start(): Promise<void> {
     console.log('[SCHEDULER] Starting scheduler worker...');
@@ -1217,11 +1315,13 @@ async function start(): Promise<void> {
     // overlap itself — the next tick is only scheduled after this one ends.
     const loop = async () => {
         if (shuttingDown) return;
+        inFlightTick = tick();
         try {
-            await tick();
+            await inFlightTick;
         } catch (err) {
             console.error('[SCHEDULER] Unhandled tick error:', err);
         } finally {
+            inFlightTick = null;
             if (!shuttingDown) setTimeout(loop, POLL_INTERVAL_MS);
         }
     };
@@ -1230,18 +1330,36 @@ async function start(): Promise<void> {
     console.log('[SCHEDULER] Scheduler running');
 }
 
-// Handle graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('[SCHEDULER] Received SIGTERM, shutting down...');
+// Handle graceful shutdown: stop scheduling new ticks, drain the in-flight
+// tick (so a half-dispatched batch finishes its advances), close
+// connections, then exit. Exiting mid-tick on every deploy left enrollments
+// dispatched-but-not-advanced (review C5).
+async function shutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
     shuttingDown = true;
-    process.exit(0);
-});
+    console.log(`[SCHEDULER] Received ${signal}, draining in-flight tick before exit...`);
 
-process.on('SIGINT', () => {
-    console.log('[SCHEDULER] Received SIGINT, shutting down...');
-    shuttingDown = true;
+    if (inFlightTick) {
+        try {
+            await inFlightTick;
+        } catch (err) {
+            console.error('[SCHEDULER] In-flight tick errored during shutdown:', err);
+        }
+    }
+
+    try {
+        await closeConnections();
+    } catch (err) {
+        console.error('[SCHEDULER] Error closing connections during shutdown:', err);
+    }
+
+    console.log('[SCHEDULER] Shutdown complete');
     process.exit(0);
-});
+}
+
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
 
 // Start the scheduler
 start().catch((error) => {

@@ -12,10 +12,14 @@ import { supabase } from '../lib/db.js';
 import { redisConnection } from '../lib/redis.js';
 import { decrypt } from '../lib/encryption.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
+import { claimOnce, releaseClaim } from '../lib/idempotency.js';
+import { isContactOptedOut } from '../lib/opt-out.js';
+import { signUrl } from '../lib/signing.js';
 import type { EmailJobPayload } from '../lib/types.js';
 
 interface TenantEmailConfig {
     provider: 'gmail' | 'smtp';
+    accountId?: string;
     fromEmail: string;
     fromName: string;
     // Gmail
@@ -57,6 +61,7 @@ async function getTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig
             console.log(`[EMAIL] Using tenant-specific email config for ${tenantId} (${emailAccount.from_email})`);
             return {
                 provider: emailAccount.provider || 'smtp',
+                accountId: emailAccount.id,
                 fromEmail: emailAccount.from_email,
                 fromName: emailAccount.from_name || 'Ominify',
                 smtpHost: emailAccount.smtp_host,
@@ -101,9 +106,11 @@ const REPLY_DOMAIN = process.env.REPLY_DOMAIN || 'replies.ominify.io';
 /**
  * Inject tracking pixel into HTML email body.
  * Adds a 1x1 transparent GIF that triggers an open event.
+ * Keyed by execution-log id so opens attribute to THIS send, not to every
+ * enrollment sharing the step (review C8).
  */
-function injectTrackingPixel(html: string, enrollmentId: string, stepId: string): string {
-    const pixelUrl = `${TRACKING_BASE_URL}/webhooks/email/track/open/${stepId}`;
+function injectTrackingPixel(html: string, executionLogId: string): string {
+    const pixelUrl = `${TRACKING_BASE_URL}/webhooks/email/track/open/${executionLogId}`;
     const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
 
     // Insert before </body> if present, otherwise append
@@ -115,18 +122,59 @@ function injectTrackingPixel(html: string, enrollmentId: string, stepId: string)
 
 /**
  * Rewrite URLs in HTML body for click tracking.
- * Wraps each href in a redirect through our click tracker.
+ * Wraps each href in a redirect through our click tracker, keyed by
+ * execution-log id and HMAC-signed so the tracker can't be used as an
+ * open redirector (review C8 + server I5).
  */
-function rewriteLinksForTracking(html: string, stepId: string): string {
+function rewriteLinksForTracking(html: string, executionLogId: string): string {
     // Match href="..." but skip mailto: and tel: links
     return html.replace(/href="(https?:\/\/[^"]+)"/gi, (match, url) => {
         const encodedUrl = encodeURIComponent(url);
-        return `href="${TRACKING_BASE_URL}/webhooks/email/track/click/${stepId}?url=${encodedUrl}"`;
+        return `href="${TRACKING_BASE_URL}/webhooks/email/track/click/${executionLogId}?u=${encodedUrl}&sig=${signUrl(url)}"`;
     });
 }
 
 /**
- * Send email via SMTP with Reply-To routing and tracking
+ * Append a small visible unsubscribe footer link (CAN-SPAM, review C3).
+ */
+function appendUnsubscribeFooter(html: string, unsubscribeUrl: string): string {
+    const footer = `<p style="font-size:12px;color:#888;margin-top:24px">If you no longer wish to receive these emails, <a href="${unsubscribeUrl}">unsubscribe here</a>.</p>`;
+
+    if (html.includes('</body>')) {
+        return html.replace('</body>', `${footer}</body>`);
+    }
+    return html + footer;
+}
+
+// Module-level transporter cache keyed by email-account id — SMTP pools the
+// connection instead of building a fresh transporter per job.
+type Transporter = ReturnType<typeof nodemailer.createTransport>;
+const transporterCache = new Map<string, Transporter>();
+
+function getTransporter(config: TenantEmailConfig): Transporter {
+    const cacheKey = config.accountId || 'env-default';
+    let transporter = transporterCache.get(cacheKey);
+
+    if (!transporter) {
+        transporter = nodemailer.createTransport({
+            host: config.smtpHost,
+            port: config.smtpPort,
+            secure: config.smtpSecure,
+            auth: config.smtpUser ? {
+                user: config.smtpUser,
+                pass: config.smtpPass,
+            } : undefined,
+        });
+        transporterCache.set(cacheKey, transporter);
+    }
+
+    return transporter;
+}
+
+/**
+ * Send email via SMTP with Reply-To routing and List-Unsubscribe headers.
+ * Tracking pixel/link rewriting happens in processEmailJob (needs the
+ * execution-log id), so `html` arrives fully prepared.
  */
 async function sendViaSMTP(
     config: TenantEmailConfig,
@@ -134,38 +182,33 @@ async function sendViaSMTP(
     subject: string,
     html: string,
     text: string,
-    enrollmentId?: string,
-    stepId?: string
+    enrollmentId?: string
 ): Promise<{ messageId: string }> {
-    const transporter = nodemailer.createTransport({
-        host: config.smtpHost,
-        port: config.smtpPort,
-        secure: config.smtpSecure,
-        auth: config.smtpUser ? {
-            user: config.smtpUser,
-            pass: config.smtpPass,
-        } : undefined,
-    });
-
-    // Inject tracking pixel and rewrite links if we have step tracking info
-    let trackedHtml = html;
-    if (stepId) {
-        trackedHtml = injectTrackingPixel(trackedHtml, enrollmentId || '', stepId);
-        trackedHtml = rewriteLinksForTracking(trackedHtml, stepId);
-    }
+    const transporter = getTransporter(config);
 
     // Set Reply-To header for reply routing
     const replyTo = enrollmentId
         ? `reply+${enrollmentId}@${REPLY_DOMAIN}`
         : undefined;
 
+    // One-click unsubscribe headers (CAN-SPAM / Gmail bulk-sender requirements)
+    const unsubscribeUrl = enrollmentId
+        ? `${TRACKING_BASE_URL}/webhooks/email/unsubscribe/${enrollmentId}`
+        : undefined;
+
     const result = await transporter.sendMail({
         from: `"${config.fromName}" <${config.fromEmail}>`,
         to,
         subject,
-        html: trackedHtml,
+        html,
         text,
         ...(replyTo ? { replyTo } : {}),
+        ...(unsubscribeUrl ? {
+            headers: {
+                'List-Unsubscribe': `<${unsubscribeUrl}>`,
+                'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+            },
+        } : {}),
     });
 
     return { messageId: result.messageId };
@@ -182,15 +225,14 @@ async function sendViaGmailAPI(
     subject: string,
     html: string,
     text: string,
-    enrollmentId?: string,
-    stepId?: string
+    enrollmentId?: string
 ): Promise<{ messageId: string }> {
     console.warn('[EMAIL] Gmail API is not yet implemented. Attempting SMTP fallback.');
 
     // Fall back to SMTP if credentials are available
     if (config.smtpHost && config.smtpUser) {
         console.log('[EMAIL] SMTP config available, falling back to SMTP.');
-        return sendViaSMTP(config, to, subject, html, text, enrollmentId, stepId);
+        return sendViaSMTP(config, to, subject, html, text, enrollmentId);
     }
 
     throw new Error(
@@ -200,40 +242,43 @@ async function sendViaGmailAPI(
 }
 
 /**
- * Log execution to database
- */
-async function logExecution(params: {
-    enrollmentId: string;
-    stepId: string;
-    channel: string;
-    action: string;
-    providerId: string;
-    providerResponse: any;
-    emailStatus?: string;
-}): Promise<void> {
-    try {
-        await supabase.from('sequence_execution_log').insert({
-            enrollment_id: params.enrollmentId,
-            step_id: params.stepId,
-            channel: params.channel,
-            action: params.action,
-            provider_id: params.providerId,
-            provider_response: params.providerResponse,
-            email_status: params.emailStatus,
-            executed_at: new Date().toISOString(),
-        });
-    } catch (error) {
-        console.error('[EMAIL] Error logging execution:', error);
-    }
-}
-
-/**
  * Email Worker processor
  */
 async function processEmailJob(job: Job<EmailJobPayload>): Promise<{ messageId: string }> {
     const { tenantId, contactEmail, subject, bodyHtml, bodyText, enrollmentId, stepId } = job.data;
+    // variantId/dedupKey are stamped by the scheduler (see lib/types.ts payload contract)
+    const { variantId, dedupKey } = job.data as EmailJobPayload & { variantId?: string; dedupKey?: string };
 
     console.log(`[EMAIL] Processing job ${job.id} for tenant ${tenantId}, email ${contactEmail}`);
+
+    // Defense-in-depth opt-out gate (review C3): never email an opted-out contact,
+    // regardless of which path dispatched this job.
+    const { data: enrollment, error: enrollmentError } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollmentError) {
+        console.error(`[EMAIL] Error fetching enrollment ${enrollmentId}:`, enrollmentError);
+    }
+
+    if (enrollment?.contact_id) {
+        const { data: contact, error: contactError } = await supabase
+            .from('contacts')
+            .select('opted_out_at')
+            .eq('id', enrollment.contact_id)
+            .single();
+
+        if (contactError) {
+            console.error(`[EMAIL] Error fetching contact ${enrollment.contact_id}:`, contactError);
+        }
+
+        if (isContactOptedOut(contact)) {
+            console.log(`[EMAIL] Contact ${enrollment.contact_id} is opted out — skipping send for enrollment ${enrollmentId}`);
+            return { messageId: '' };
+        }
+    }
 
     // Get tenant's email configuration
     const config = await getTenantEmailConfig(tenantId);
@@ -242,34 +287,113 @@ async function processEmailJob(job: Job<EmailJobPayload>): Promise<{ messageId: 
         throw new Error(`No email configuration for tenant ${tenantId}`);
     }
 
-    let result: { messageId: string };
+    // Send idempotency (review C5): claim before the provider call so a
+    // duplicate dispatch cannot re-email the lead. dedupKey wins when
+    // present — healing/chatbot dispatches reuse the original stepId, and
+    // keying them by stepId would collide with the already-claimed
+    // original send and silently skip the healing send.
+    const claimKey = dedupKey || (stepId ? `send:${enrollmentId}:${stepId}` : null);
+    if (claimKey && !(await claimOnce(claimKey))) {
+        console.log(`[EMAIL] duplicate dispatch, skipping (${claimKey})`);
+        return { messageId: '' };
+    }
 
-    if (config.provider === 'gmail' && config.gmailAccessToken) {
-        result = await sendViaGmailAPI(config, contactEmail, subject, bodyHtml, bodyText, enrollmentId, stepId);
+    // Insert the execution-log row BEFORE sending so its id can key the
+    // tracking URLs — opens/clicks then attribute to this exact send
+    // instead of smearing across every enrollment on the step (review C8).
+    const { data: logRow, error: logInsertError } = await supabase
+        .from('sequence_execution_log')
+        .insert({
+            enrollment_id: enrollmentId,
+            // Chatbot/healing ad-hoc sends arrive with an empty stepId — the column is a nullable UUID
+            step_id: stepId || null,
+            variant_id: variantId ?? null,
+            channel: 'email',
+            action: 'sending',
+            status: 'executing',
+            executed_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+
+    if (logInsertError) {
+        console.error('[EMAIL] Error inserting execution log:', logInsertError);
+    }
+    const executionLogId: string | undefined = logRow?.id;
+
+    // Prepare the HTML body: click tracking first, then the pixel, then the
+    // unsubscribe footer (after rewriting, so the unsubscribe link itself is
+    // never wrapped in the click tracker).
+    let preparedHtml = bodyHtml;
+    if (executionLogId) {
+        preparedHtml = rewriteLinksForTracking(preparedHtml, executionLogId);
+        preparedHtml = injectTrackingPixel(preparedHtml, executionLogId);
     } else {
-        result = await sendViaSMTP(config, contactEmail, subject, bodyHtml, bodyText, enrollmentId, stepId);
+        console.warn('[EMAIL] No execution log id — sending without open/click tracking');
+    }
+    preparedHtml = appendUnsubscribeFooter(
+        preparedHtml,
+        `${TRACKING_BASE_URL}/webhooks/email/unsubscribe/${enrollmentId}`
+    );
+
+    let result: { messageId: string };
+    try {
+        if (config.provider === 'gmail' && config.gmailAccessToken) {
+            result = await sendViaGmailAPI(config, contactEmail, subject, preparedHtml, bodyText, enrollmentId);
+        } else {
+            result = await sendViaSMTP(config, contactEmail, subject, preparedHtml, bodyText, enrollmentId);
+        }
+    } catch (error: any) {
+        // Mark the pre-inserted log row failed, release the send claim so a
+        // legitimate BullMQ retry can resend, then rethrow.
+        if (executionLogId) {
+            const { error: failUpdateError } = await supabase
+                .from('sequence_execution_log')
+                .update({
+                    action: 'failed',
+                    status: 'failed',
+                    error_message: error?.message || String(error),
+                })
+                .eq('id', executionLogId);
+
+            if (failUpdateError) {
+                console.error('[EMAIL] Error marking execution log failed:', failUpdateError);
+            }
+        }
+        if (claimKey) {
+            await releaseClaim(claimKey);
+        }
+        throw error;
     }
 
     console.log(`[EMAIL] Sent to ${contactEmail}, MessageId: ${result.messageId}`);
 
-    // Log execution
-    await logExecution({
-        enrollmentId,
-        stepId,
-        channel: 'email',
-        action: 'sent',
-        providerId: result.messageId,
-        providerResponse: result,
-        emailStatus: 'sent',
-    });
+    // Update the execution-log row with the provider result
+    if (executionLogId) {
+        const { error: logUpdateError } = await supabase
+            .from('sequence_execution_log')
+            .update({
+                action: 'sent',
+                status: 'completed',
+                provider_id: result.messageId,
+                provider_response: result,
+                email_status: 'sent',
+                completed_at: new Date().toISOString(),
+            })
+            .eq('id', executionLogId);
+
+        if (logUpdateError) {
+            console.error('[EMAIL] Error updating execution log:', logUpdateError);
+        }
+    }
+
+    // Increment the enrollment's emails_sent counter (review: was never incremented)
+    const { error: rpcError } = await supabase.rpc('increment_enrollment_emails', { enrollment_id: enrollmentId });
+    if (rpcError) {
+        console.error(`[EMAIL] Failed to increment emails_sent for enrollment ${enrollmentId}:`, rpcError);
+    }
 
     // Record interaction for conversation memory
-    const { data: enrollment } = await supabase
-        .from('sequence_enrollments')
-        .select('contact_id, tenant_id')
-        .eq('id', enrollmentId)
-        .single();
-
     if (enrollment) {
         await recordInteraction({
             clientId: enrollment.tenant_id,

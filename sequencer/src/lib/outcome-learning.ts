@@ -77,25 +77,41 @@ export async function computeStepAttribution(
     const enrolledAt = new Date(enrollment.enrolled_at).getTime();
     const timeToConversion = Math.round((conversionTime - enrolledAt) / 1000);
 
-    // Compute multi-touch attribution weights
+    // Compute multi-touch attribution weights: last touch 40%, first touch
+    // 20%, middle touches SHARE the remaining 40% time-decayed
+    // (0.4 * recency_i / Σ recency).
+    const n = touchPoints.length;
+    const span = touchPoints[n - 1].executedAt - touchPoints[0].executedAt;
+
+    // Pre-compute middle-touch recencies. Zero time-span (all touches at the
+    // same timestamp) would divide by zero → equal recencies instead.
+    const middleRecencies: number[] = [];
+    for (let i = 1; i < n - 1; i++) {
+        middleRecencies.push(span > 0 ? (touchPoints[i].executedAt - touchPoints[0].executedAt) / span : 1);
+    }
+    const recencySum = middleRecencies.reduce((s, r) => s + r, 0);
+
     const attributions = touchPoints.map((tp, index) => {
         let weight: number;
         let touchType: 'first' | 'middle' | 'last' | 'only';
 
-        if (touchPoints.length === 1) {
+        if (n === 1) {
             weight = 1.0;
             touchType = 'only';
-        } else if (index === touchPoints.length - 1) {
+        } else if (index === n - 1) {
             weight = 0.4; // Last touch
             touchType = 'last';
         } else if (index === 0) {
             weight = 0.2; // First touch
             touchType = 'first';
         } else {
-            // Middle touches: time-decay within the remaining 0.4
-            const recency = (tp.executedAt - touchPoints[0].executedAt) /
-                (touchPoints[touchPoints.length - 1].executedAt - touchPoints[0].executedAt);
-            weight = 0.4 * recency; // More recent middle touches get more credit
+            // Middle touches split 0.4 proportionally to recency; if every
+            // middle recency is 0 (all at the first touch's timestamp),
+            // fall back to equal shares.
+            const recency = middleRecencies[index - 1];
+            weight = recencySum > 0
+                ? 0.4 * (recency / recencySum)
+                : 0.4 / middleRecencies.length;
             touchType = 'middle';
         }
 
@@ -108,10 +124,15 @@ export async function computeStepAttribution(
         };
     });
 
-    // Normalize weights to sum to 1.0
+    // Normalize weights to sum to 1.0. No NaN may survive normalization —
+    // if anything went sideways, fall back to equal weights rather than
+    // poisoning the analytics counters.
     const totalWeight = attributions.reduce((sum, a) => sum + a.weight, 0);
-    if (totalWeight > 0) {
+    if (totalWeight > 0 && Number.isFinite(totalWeight)) {
         attributions.forEach(a => { a.weight = a.weight / totalWeight; });
+    }
+    if (attributions.some(a => !Number.isFinite(a.weight))) {
+        attributions.forEach(a => { a.weight = 1 / attributions.length; });
     }
 
     // Identify converting step (last touch)
@@ -135,15 +156,15 @@ export async function computeStepAttribution(
         })
         .eq('id', enrollmentId);
 
-    // Update step_analytics attributed_conversions
+    // Update step_analytics attributed_conversions (RPC defined in
+    // supabase/migrations/20260611-sequencer-review-fixes.sql).
     for (const attr of attributions) {
-        try {
-            await supabase.rpc('increment_step_attributed_conversions', {
-                p_step_id: attr.stepId,
-                p_amount: attr.weight,
-            });
-        } catch {
-            // Fallback: RPC may not exist yet — analytics worker will batch-compute
+        const { error: attrErr } = await supabase.rpc('increment_step_attributed_conversions', {
+            p_step_id: attr.stepId,
+            p_amount: attr.weight,
+        });
+        if (attrErr) {
+            console.error(`[LEARNING] increment_step_attributed_conversions failed for step ${attr.stepId}:`, attrErr);
         }
     }
 
@@ -209,7 +230,10 @@ export async function computeStepAnalytics(
     // Count outcomes
     const totalDelivered = logs.filter(l => {
         if (l.channel === 'sms') return l.sms_status === 'delivered';
-        if (l.channel === 'email') return l.email_status !== 'bounced' && l.email_status !== 'failed';
+        // Email: a null email_status means no provider callback was received,
+        // which we optimistically treat as delivered — but a row whose send
+        // action itself failed never left the building and must not count.
+        if (l.channel === 'email') return l.action !== 'failed' && l.email_status !== 'bounced' && l.email_status !== 'failed';
         if (l.channel === 'voice') return l.call_status === 'answered' || l.call_status === 'completed' || l.call_status === 'voicemail';
         return true;
     }).length;
@@ -317,14 +341,17 @@ export async function computeStepAnalytics(
         }
     }
 
-    // Upsert step_analytics
-    const { data: existing } = await supabase
+    // Upsert step_analytics keyed on (step_id, period_start) — with stable
+    // daily buckets from runAnalyticsJob, re-runs UPDATE the same row
+    // instead of inserting a new one every hour.
+    const { data: existingRows } = await supabase
         .from('step_analytics')
         .select('id')
         .eq('step_id', stepId)
         .eq('period_start', periodStart.toISOString())
-        .eq('period_end', periodEnd.toISOString())
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1);
+    const existing = existingRows?.[0] || null;
 
     const analyticsRow = {
         step_id: stepId,
@@ -360,6 +387,46 @@ export async function computeStepAnalytics(
             .from('step_analytics')
             .insert(analyticsRow);
     }
+}
+
+/**
+ * Fetch ALL rows for a (possibly large) set of enrollment ids, chunking the
+ * IN-list and paginating with .range() so no rows are silently dropped
+ * (previously capped at the first 500 enrollment ids, skewing every
+ * sequence-level metric for big sequences).
+ */
+async function fetchAllRowsForEnrollments(
+    table: string,
+    columns: string,
+    enrollmentIds: string[],
+    applyFilters?: (query: any) => any,
+): Promise<any[]> {
+    const ID_CHUNK = 200;
+    const PAGE = 1000;
+    const rows: any[] = [];
+
+    for (let i = 0; i < enrollmentIds.length; i += ID_CHUNK) {
+        const chunk = enrollmentIds.slice(i, i + ID_CHUNK);
+        let from = 0;
+        for (;;) {
+            let query = supabase
+                .from(table)
+                .select(columns)
+                .in('enrollment_id', chunk);
+            if (applyFilters) query = applyFilters(query);
+
+            const { data, error } = await query.range(from, from + PAGE - 1);
+            if (error) {
+                console.error(`[LEARNING] Error fetching ${table} rows:`, error);
+                break;
+            }
+            rows.push(...(data || []));
+            if (!data || data.length < PAGE) break;
+            from += PAGE;
+        }
+    }
+
+    return rows;
 }
 
 /**
@@ -406,8 +473,8 @@ export async function computeSequenceAnalytics(
 
     const totalReplied = enrolled.filter(e => e.contact_replied).length;
 
-    // Timing metrics
-    const convertedEnrollments = enrolled.filter(e => e.time_to_conversion_seconds);
+    // Timing metrics (!= null so legitimate 0-second conversions count)
+    const convertedEnrollments = enrolled.filter(e => e.time_to_conversion_seconds != null);
     const avgTimeToConversion = convertedEnrollments.length > 0
         ? convertedEnrollments.reduce((sum, e) => sum + (e.time_to_conversion_seconds || 0), 0) / convertedEnrollments.length / 3600
         : 0;
@@ -416,15 +483,18 @@ export async function computeSequenceAnalytics(
         ? convertedEnrollments.reduce((sum, e) => sum + (e.current_step_order || 0), 0) / convertedEnrollments.length
         : 0;
 
-    // Channel effectiveness
+    // Channel effectiveness — fetch ALL exec logs (paginated, no 500-id cap);
+    // execution_cost is included so cost doesn't need a second pass.
     const enrollmentIds = enrolled.map(e => e.id);
-    const { data: execLogs } = await supabase
-        .from('sequence_execution_log')
-        .select('channel, enrollment_id, sms_status, call_status, email_status')
-        .in('enrollment_id', enrollmentIds.slice(0, 500)); // Limit for performance
+    const execLogs = await fetchAllRowsForEnrollments(
+        'sequence_execution_log',
+        'channel, enrollment_id, sms_status, call_status, email_status, execution_cost',
+        enrollmentIds,
+    );
+    console.log(`[LEARNING] Sequence ${sequenceId}: fetched ${execLogs.length} execution-log rows for ${enrollmentIds.length} enrollments`);
 
     const channelEffectiveness: Record<string, { sent: number; replied: number; rate: number }> = {};
-    for (const log of (execLogs || [])) {
+    for (const log of execLogs) {
         const ch = log.channel || 'unknown';
         if (!channelEffectiveness[ch]) {
             channelEffectiveness[ch] = { sent: 0, replied: 0, rate: 0 };
@@ -432,37 +502,59 @@ export async function computeSequenceAnalytics(
         channelEffectiveness[ch].sent++;
     }
 
-    // Count replies per channel
+    // Count replies per channel from inbound contact_interactions. The
+    // execution log never records replies, so `.replied` was never written
+    // and every rate was 0. An enrollment counts as "replied" on each
+    // channel it sent an inbound message on (distinct per channel) — the
+    // cheapest correct attribution without per-message reply linking.
+    const inboundInteractions = await fetchAllRowsForEnrollments(
+        'contact_interactions',
+        'enrollment_id, channel',
+        enrollmentIds,
+        q => q.eq('direction', 'inbound'),
+    );
+
+    const repliedByChannel: Record<string, Set<string>> = {};
+    for (const row of inboundInteractions) {
+        const ch = row.channel || 'unknown';
+        if (!repliedByChannel[ch]) repliedByChannel[ch] = new Set();
+        repliedByChannel[ch].add(row.enrollment_id);
+    }
+
     for (const ch of Object.keys(channelEffectiveness)) {
-        const replied = enrolled.filter(e => e.contact_replied).length;
-        // Rough approximation — proper per-channel reply tracking would require more granular data
+        channelEffectiveness[ch].replied = repliedByChannel[ch]?.size || 0;
         channelEffectiveness[ch].rate = channelEffectiveness[ch].sent > 0
             ? channelEffectiveness[ch].replied / channelEffectiveness[ch].sent
             : 0;
     }
 
-    // Healing effectiveness
-    const { count: healedCount } = await supabase
-        .from('healing_log')
-        .select('id', { count: 'exact', head: true })
-        .in('enrollment_id', enrollmentIds.slice(0, 500));
+    // Healing effectiveness — chunked head-counts (no 500-id cap)
+    let totalHealed = 0;
+    let healedSuccess = 0;
+    const COUNT_CHUNK = 200;
+    for (let i = 0; i < enrollmentIds.length; i += COUNT_CHUNK) {
+        const chunk = enrollmentIds.slice(i, i + COUNT_CHUNK);
 
-    const { count: healedSuccessCount } = await supabase
-        .from('healing_log')
-        .select('id', { count: 'exact', head: true })
-        .in('enrollment_id', enrollmentIds.slice(0, 500))
-        .eq('healing_succeeded', true);
+        const { count: healedCount, error: healedErr } = await supabase
+            .from('healing_log')
+            .select('id', { count: 'exact', head: true })
+            .in('enrollment_id', chunk);
+        if (healedErr) console.error('[LEARNING] Error counting healing_log rows:', healedErr);
+        totalHealed += healedCount || 0;
 
-    const totalHealed = healedCount || 0;
-    const healingSuccessRate = totalHealed > 0 ? (healedSuccessCount || 0) / totalHealed : 0;
+        const { count: healedSuccessCount, error: successErr } = await supabase
+            .from('healing_log')
+            .select('id', { count: 'exact', head: true })
+            .in('enrollment_id', chunk)
+            .eq('healing_succeeded', true);
+        if (successErr) console.error('[LEARNING] Error counting healing successes:', successErr);
+        healedSuccess += healedSuccessCount || 0;
+    }
 
-    // Cost
-    const { data: costData } = await supabase
-        .from('sequence_execution_log')
-        .select('execution_cost')
-        .in('enrollment_id', enrollmentIds.slice(0, 500));
+    const healingSuccessRate = totalHealed > 0 ? healedSuccess / totalHealed : 0;
 
-    const totalCost = (costData || []).reduce((sum, l) => sum + (parseFloat(l.execution_cost) || 0), 0);
+    // Cost — from the exec logs already fetched above
+    const totalCost = execLogs.reduce((sum, l) => sum + (parseFloat(l.execution_cost) || 0), 0);
 
     // Rates
     const completionRate = totalEnrollments > 0 ? totalCompletions / totalEnrollments : 0;
@@ -472,14 +564,16 @@ export async function computeSequenceAnalytics(
     const costPerConversion = totalConversions > 0 ? totalCost / totalConversions : 0;
     const costPerEnrollment = totalEnrollments > 0 ? totalCost / totalEnrollments : 0;
 
-    // Upsert
-    const { data: existing } = await supabase
+    // Upsert keyed on (sequence_id, period_start) — stable daily buckets
+    // make re-runs UPDATE instead of growing the table every hour.
+    const { data: existingRows } = await supabase
         .from('sequence_analytics')
         .select('id')
         .eq('sequence_id', sequenceId)
         .eq('period_start', periodStart.toISOString())
-        .eq('period_end', periodEnd.toISOString())
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1);
+    const existing = existingRows?.[0] || null;
 
     const analyticsRow = {
         sequence_id: sequenceId,
@@ -769,11 +863,17 @@ export async function selectVariant(
 
     if (!variants || variants.length === 0) return null;
 
+    // Zero/negative-weight variants (e.g. demoted losers) must never be
+    // picked — they previously won the fallback path and could sneak into
+    // the weighted loop on floating-point edges.
+    const eligible = variants.filter(v => parseFloat(v.traffic_weight) > 0);
+    if (eligible.length === 0) return null;
+
     // Weighted random selection
-    const totalWeight = variants.reduce((sum, v) => sum + parseFloat(v.traffic_weight), 0);
+    const totalWeight = eligible.reduce((sum, v) => sum + parseFloat(v.traffic_weight), 0);
     let random = Math.random() * totalWeight;
 
-    for (const variant of variants) {
+    for (const variant of eligible) {
         random -= parseFloat(variant.traffic_weight);
         if (random <= 0) {
             return {
@@ -783,10 +883,10 @@ export async function selectVariant(
         }
     }
 
-    // Fallback to first variant
+    // Fallback to first eligible variant
     return {
-        variantId: variants[0].id,
-        content: variants[0].content as SmsContent | EmailContent | VoiceContent,
+        variantId: eligible[0].id,
+        content: eligible[0].content as SmsContent | EmailContent | VoiceContent,
     };
 }
 
@@ -844,8 +944,22 @@ export async function evaluateTest(stepId: string): Promise<boolean> {
         loserPValues.set(loser.id, 2 * (1 - normalCDF(z)));
     }
 
-    // Only declare a winner if the leader beats at least one loser at p<0.05
-    const leaderIsSignificant = [...loserPValues.values()].some(pv => pv < 0.05);
+    // Only declare a winner if:
+    // - the leader strictly out-performs the runner-up (no promotion on a
+    //   tie — that would just pick insertion order), and
+    // - the leader has the minimum sample size, and
+    // - the leader significantly beats EVERY loser at p<0.05 (.some
+    //   previously promoted a leader that beat only the worst variant).
+    //   Losers with no computable p-value (se=0) block promotion.
+    const runnerUpRate = losers.length > 0 ? Math.max(...losers.map(v => v.conv_rate)) : 0;
+    const leaderIsSignificant =
+        losers.length > 0 &&
+        leader.conv_rate > runnerUpRate &&
+        leader.total_sent >= MIN_SAMPLE &&
+        losers.every(l => {
+            const pv = loserPValues.get(l.id);
+            return pv !== undefined && pv < 0.05;
+        });
 
     // Persist: leader gets its own row (p_value=null since no self-compare),
     // each loser gets its p_value vs leader. Exactly one is_winner.
@@ -1061,9 +1175,13 @@ export async function compareToIndustry(
  * Called hourly by the analytics worker.
  */
 export async function runAnalyticsJob(): Promise<void> {
-    const now = new Date();
-    const periodEnd = now;
-    const periodStart = new Date(now.getTime() - 24 * 60 * 60 * 1000); // Last 24h rolling
+    // Stable daily buckets: [start of current UTC day, +1 day). A rolling
+    // 24h window meant every hourly run produced a brand-new period_start
+    // and inserted a fresh analytics row — unbounded growth. With a stable
+    // bucket, re-runs find and UPDATE the same (step_id, period_start) row.
+    const periodStart = new Date();
+    periodStart.setUTCHours(0, 0, 0, 0);
+    const periodEnd = new Date(periodStart.getTime() + 24 * 60 * 60 * 1000);
 
     console.log(`[LEARNING] Starting analytics job: ${periodStart.toISOString()} → ${periodEnd.toISOString()}`);
 

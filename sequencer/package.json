@@ -17,6 +17,7 @@
     },
     "dependencies": {
         "@fastify/cors": "^8.5.0",
+        "@fastify/formbody": "^7.4.0",
         "@supabase/supabase-js": "^2.39.0",
         "bullmq": "^5.1.0",
         "date-fns": "^2.30.0",

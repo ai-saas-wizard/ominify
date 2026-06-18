@@ -10,17 +10,28 @@
  */
 
 import 'dotenv/config';
+import { redis } from '../lib/redis.js';
 import { runAnalyticsJob, runBenchmarkJob } from '../lib/outcome-learning.js';
 
 const ANALYTICS_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const BENCHMARK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
-let lastBenchmarkRun = 0;
+// Persisted in Redis so a restart doesn't reset the weekly benchmark clock
+const LAST_BENCHMARK_RUN_KEY = 'analytics:last-benchmark-run';
+
+let tickInFlight = false;
 
 /**
  * Main analytics tick
  */
 async function tick(): Promise<void> {
+    // Overlap guard: a slow run must not stack a second one on top
+    if (tickInFlight) {
+        console.log('[ANALYTICS] Previous tick still in flight, skipping this run');
+        return;
+    }
+    tickInFlight = true;
+
     const startTime = Date.now();
 
     try {
@@ -31,16 +42,20 @@ async function tick(): Promise<void> {
 
         // Run weekly benchmarks
         const now = Date.now();
+        const lastRunRaw = await redis.get(LAST_BENCHMARK_RUN_KEY);
+        const lastBenchmarkRun = lastRunRaw ? parseInt(lastRunRaw, 10) : 0;
         if (now - lastBenchmarkRun > BENCHMARK_INTERVAL_MS) {
             console.log('[ANALYTICS] Running weekly benchmark computation...');
             await runBenchmarkJob();
-            lastBenchmarkRun = now;
+            await redis.set(LAST_BENCHMARK_RUN_KEY, now.toString());
         }
 
         const duration = Date.now() - startTime;
         console.log(`[ANALYTICS] Analytics tick completed in ${duration}ms`);
     } catch (error) {
         console.error('[ANALYTICS] Analytics tick error:', error);
+    } finally {
+        tickInFlight = false;
     }
 }
 

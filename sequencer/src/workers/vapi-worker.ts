@@ -20,9 +20,10 @@ import { concurrencyManager } from '../lib/concurrency-manager.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
 import { canPlaceCall } from '../lib/access.js';
 import { getCallTimeVariables } from '../lib/call-variables.js';
+import { handleFailure } from '../lib/self-healer.js';
+import { claimOnce, releaseClaim } from '../lib/idempotency.js';
 import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
 
-const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 30000; // 30 seconds
 
@@ -38,20 +39,23 @@ async function logExecution(params: {
     providerResponse: any;
     callDuration?: number;
     callStatus?: string;
+    variantId?: string | null;
 }): Promise<void> {
-    try {
-        await supabase.from('sequence_execution_log').insert({
-            enrollment_id: params.enrollmentId,
-            step_id: params.stepId,
-            channel: params.channel,
-            action: params.action,
-            provider_id: params.providerId,
-            provider_response: params.providerResponse,
-            call_duration_seconds: params.callDuration,
-            call_status: params.callStatus,
-            executed_at: new Date().toISOString(),
-        });
-    } catch (error) {
+    const { error } = await supabase.from('sequence_execution_log').insert({
+        enrollment_id: params.enrollmentId,
+        // Ad-hoc dispatches can arrive with an empty stepId — the column is a nullable UUID
+        step_id: params.stepId || null,
+        variant_id: params.variantId ?? null,
+        channel: params.channel,
+        action: params.action,
+        provider_id: params.providerId,
+        provider_response: params.providerResponse,
+        call_duration_seconds: params.callDuration,
+        call_status: params.callStatus,
+        executed_at: new Date().toISOString(),
+    });
+
+    if (error) {
         console.error('[VAPI] Error logging execution:', error);
     }
 }
@@ -339,6 +343,8 @@ async function makeVapiCall(
  */
 async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: string; status: string }> {
     const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId, inlineAgent } = job.data;
+    // variantId/dedupKey are stamped by the scheduler (see lib/types.ts payload contract)
+    const { variantId, dedupKey } = job.data as VapiJobPayload & { variantId?: string; dedupKey?: string };
 
     console.log(`[VAPI] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}, priority ${urgencyPriority}`);
 
@@ -356,6 +362,7 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             providerId: '',
             providerResponse: { reason: access.reason },
             callStatus: 'access_denied',
+            variantId: variantId ?? null,
         });
         return { callId: '', status: 'skipped_no_access' };
     }
@@ -363,12 +370,14 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
     // 1. Resolve umbrella for this tenant
     const umbrella = await umbrellaResolver.getUmbrellaForTenant(tenantId);
 
-    // 2. Try to acquire a concurrency slot
+    // 2. Try to acquire a concurrency slot (token = enrollmentId, so a lost
+    //    call-outcome webhook can be reconciled instead of leaking the slot)
     const { acquired, reason } = await concurrencyManager.tryAcquire(
         umbrella.umbrellaId,
         tenantId,
         umbrella.concurrencyLimit,
-        umbrella.tenantCap
+        umbrella.tenantCap,
+        enrollmentId
     );
 
     if (!acquired) {
@@ -385,7 +394,8 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             });
             console.log(`[VAPI] Re-queued for retry ${retryCount + 1}`);
         } else {
-            // Max retries reached, log and skip
+            // Max retries reached, log and hand off to the self-healer so the
+            // touch is rescheduled/switched instead of silently dropped
             await logExecution({
                 enrollmentId,
                 stepId,
@@ -394,15 +404,39 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
                 providerId: '',
                 providerResponse: { reason, retryCount },
                 callStatus: 'capacity_exhausted',
+                variantId: variantId ?? null,
             });
+
+            if (stepId) {
+                const healingAction = await handleFailure(enrollmentId, stepId, 'capacity_exhausted', { reason, retryCount });
+                console.log(`[VAPI] Healing action for capacity_exhausted on ${enrollmentId}: ${healingAction?.type || 'none'}`);
+            } else {
+                console.log(`[VAPI] No stepId for capacity-exhausted enrollment ${enrollmentId} — cannot invoke self-healer`);
+            }
         }
 
         return { callId: '', status: 'requeued' };
     }
 
+    // Send idempotency (review C5): claim before the VAPI create-call request
+    // so a duplicate dispatch cannot double-call the lead. dedupKey wins when
+    // present — healing re-queues reuse the original stepId, and keying them
+    // by stepId would collide with the already-claimed original send.
+    const claimKey = dedupKey || (stepId ? `send:${enrollmentId}:${stepId}` : null);
+    if (claimKey && !(await claimOnce(claimKey))) {
+        console.log(`[VAPI] duplicate dispatch, skipping (${claimKey})`);
+        // Give back the slot we just acquired — no call will be placed
+        await concurrencyManager.release(umbrella.umbrellaId, tenantId, enrollmentId);
+        return { callId: '', status: 'duplicate_skipped' };
+    }
+
+    // 3. Make the call. The try only wraps the VAPI API request so the slot
+    //    is released exactly once: here on API failure (no call exists, so no
+    //    webhook will ever release it), or by the call-outcome webhook after
+    //    a successful create.
+    let result: { callId: string };
     try {
-        // 3. Make the call
-        const result = await makeVapiCall(
+        result = await makeVapiCall(
             umbrella.vapiApiKey,
             contactPhone,
             assistantConfig,
@@ -412,85 +446,99 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             phoneNumberId,
             inlineAgent
         );
+    } catch (error) {
+        // Release slot on API error (exactly once — see comment above)
+        await concurrencyManager.release(umbrella.umbrellaId, tenantId, enrollmentId);
 
-        console.log(`[VAPI] Call initiated: ${result.callId}`);
+        // Release the send claim so a legitimate BullMQ retry can re-place the call
+        if (claimKey) {
+            await releaseClaim(claimKey);
+        }
 
-        // Log execution (initial state)
-        await logExecution({
+        if (stepId) {
+            const healingAction = await handleFailure(enrollmentId, stepId, 'call_failed', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            console.log(`[VAPI] Healing action for call_failed on ${enrollmentId}: ${healingAction?.type || 'none'}`);
+        }
+
+        throw error;
+    }
+
+    console.log(`[VAPI] Call initiated: ${result.callId}`);
+
+    // Log execution (initial state)
+    await logExecution({
+        enrollmentId,
+        stepId,
+        channel: 'voice',
+        action: 'call_initiated',
+        providerId: result.callId,
+        providerResponse: result,
+        callStatus: 'initiated',
+        variantId: variantId ?? null,
+    });
+
+    // Record interaction for conversation memory (initial - updated on call end by event processor)
+    const { data: enrollment } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollment) {
+        await recordInteraction({
+            clientId: enrollment.tenant_id,
+            contactId: enrollment.contact_id,
             enrollmentId,
             stepId,
             channel: 'voice',
-            action: 'call_initiated',
+            direction: 'outbound',
+            outcome: 'delivered',
             providerId: result.callId,
-            providerResponse: result,
-            callStatus: 'initiated',
         });
 
-        // Record interaction for conversation memory (initial - updated on call end by event processor)
-        const { data: enrollment } = await supabase
-            .from('sequence_enrollments')
-            .select('contact_id, tenant_id')
-            .eq('id', enrollmentId)
-            .single();
+        // Persist the reason for this outbound call onto the contact so
+        // that if they call back, the inbound agent can reference it.
+        // Priority: step.voice_context > agent.config.outbound_scenario.
+        // If both are empty, leave existing values untouched.
+        try {
+            const { data: stepRow } = await supabase
+                .from('sequence_steps')
+                .select('voice_context, voice_agent_id')
+                .eq('id', stepId)
+                .single();
 
-        if (enrollment) {
-            await recordInteraction({
-                clientId: enrollment.tenant_id,
-                contactId: enrollment.contact_id,
-                enrollmentId,
-                stepId,
-                channel: 'voice',
-                direction: 'outbound',
-                outcome: 'delivered',
-                providerId: result.callId,
-            });
-
-            // Persist the reason for this outbound call onto the contact so
-            // that if they call back, the inbound agent can reference it.
-            // Priority: step.voice_context > agent.config.outbound_scenario.
-            // If both are empty, leave existing values untouched.
-            try {
-                const { data: stepRow } = await supabase
-                    .from('sequence_steps')
-                    .select('voice_context, voice_agent_id')
-                    .eq('id', stepId)
+            let reason = (stepRow?.voice_context as string | null)?.trim() || '';
+            if (!reason && stepRow?.voice_agent_id) {
+                const { data: agentRow } = await supabase
+                    .from('agents')
+                    .select('config')
+                    .eq('id', stepRow.voice_agent_id)
                     .single();
-
-                let reason = (stepRow?.voice_context as string | null)?.trim() || '';
-                if (!reason && stepRow?.voice_agent_id) {
-                    const { data: agentRow } = await supabase
-                        .from('agents')
-                        .select('config')
-                        .eq('id', stepRow.voice_agent_id)
-                        .single();
-                    const scenario = (agentRow?.config as any)?.outbound_scenario;
-                    if (typeof scenario === 'string') reason = scenario.trim();
-                }
-
-                if (reason) {
-                    await supabase
-                        .from('contacts')
-                        .update({
-                            last_outbound_reason: reason,
-                            last_outbound_at: new Date().toISOString(),
-                            last_outbound_call_id: result.callId,
-                        })
-                        .eq('id', enrollment.contact_id);
-                }
-            } catch (err) {
-                console.warn('[VAPI] Failed to persist last_outbound_reason on contact:', err);
+                const scenario = (agentRow?.config as any)?.outbound_scenario;
+                if (typeof scenario === 'string') reason = scenario.trim();
             }
+
+            if (reason) {
+                await supabase
+                    .from('contacts')
+                    .update({
+                        last_outbound_reason: reason,
+                        last_outbound_at: new Date().toISOString(),
+                        last_outbound_call_id: result.callId,
+                    })
+                    .eq('id', enrollment.contact_id);
+            }
+        } catch (err) {
+            console.warn('[VAPI] Failed to persist last_outbound_reason on contact:', err);
         }
-
-        // Note: Concurrency slot will be released by the webhook when call ends
-        // DO NOT release here - call is still in progress
-
-        return { callId: result.callId, status: 'initiated' };
-    } catch (error) {
-        // Release slot on API error
-        await concurrencyManager.release(umbrella.umbrellaId, tenantId);
-        throw error;
     }
+
+    // Note: Concurrency slot will be released by the webhook when call ends
+    // DO NOT release here - call is still in progress
+
+    return { callId: result.callId, status: 'initiated' };
 }
 
 // Create the worker with priority support
@@ -512,6 +560,30 @@ vapiWorker.on('failed', (job, error) => {
 vapiWorker.on('error', (error) => {
     console.error('[VAPI] Worker error:', error);
 });
+
+// Periodically reclaim concurrency slots whose call-outcome webhook was lost
+// (review workers I5) — otherwise a single dropped webhook leaks a slot forever.
+const RECONCILE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const STALE_SLOT_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours — far beyond any real call
+
+let reconcileInFlight = false;
+const reconcileTimer = setInterval(async () => {
+    if (reconcileInFlight) {
+        return; // previous sweep still running
+    }
+    reconcileInFlight = true;
+    try {
+        const reclaimed = await concurrencyManager.reconcileStaleSlots(STALE_SLOT_MAX_AGE_MS);
+        if (reclaimed > 0) {
+            console.log(`[VAPI] Slot reconciliation reclaimed ${reclaimed} stale slot(s)`);
+        }
+    } catch (err) {
+        console.error('[VAPI] Slot reconciliation error:', err);
+    } finally {
+        reconcileInFlight = false;
+    }
+}, RECONCILE_INTERVAL_MS);
+reconcileTimer.unref();
 
 console.log('[VAPI] VAPI worker started');
 

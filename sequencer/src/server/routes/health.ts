@@ -44,46 +44,17 @@ export async function healthRoutes(fastify: FastifyInstance) {
     /**
      * Health check
      * GET /health
+     *
+     * Unauthenticated — returns liveness only. Queue depths, umbrella
+     * states and scheduler detail are operational intel and live behind
+     * the admin bearer on GET /admin/stats.
      */
     fastify.get('/health', async (request, reply) => {
-        try {
-            // Get queue stats
-            const queues = await getQueueStats();
-
-            // Get umbrella states
-            const { data: umbrellas } = await supabase
-                .from('vapi_umbrellas')
-                .select('id, name, umbrella_type')
-                .eq('is_active', true);
-
-            const umbrellaStates: Record<string, any> = {};
-
-            for (const u of umbrellas || []) {
-                umbrellaStates[u.name] = await concurrencyManager.getUmbrellaState(u.id);
-            }
-
-            // Get scheduler status
-            const dueEnrollments = await countDueEnrollments();
-            const schedulerAge = Date.now() - schedulerLastTick;
-
-            return {
-                status: 'ok',
-                timestamp: new Date().toISOString(),
-                queues,
-                vapiUmbrellas: umbrellaStates,
-                scheduler: {
-                    lastTick: new Date(schedulerLastTick).toISOString(),
-                    ageMs: schedulerAge,
-                    healthy: schedulerAge < 30000, // Warn if no tick in 30s
-                    dueEnrollments,
-                },
-            };
-        } catch (error: any) {
-            return {
-                status: 'error',
-                error: error.message,
-            };
-        }
+        return {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+        };
     });
 
     /**
@@ -104,7 +75,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
             .select(`
                 id, name, umbrella_type, concurrency_limit, current_concurrency, max_tenants, is_active,
                 tenant_vapi_assignments (
-                    tenant_id, tenant_concurrency_cap, priority_weight, is_active
+                    client_id, tenant_concurrency_cap, priority_weight, is_active
                 )
             `)
             .eq('is_active', true);
@@ -136,45 +107,54 @@ export async function healthRoutes(fastify: FastifyInstance) {
         async (request, reply) => {
             const { tenantId, targetUmbrellaId, reason } = request.body;
 
-            // Get current assignment
-            const { data: current } = await supabase
+            // Get current assignment. tenant_vapi_assignments has
+            // UNIQUE(client_id), so at most one row exists per tenant —
+            // possibly deactivated from an earlier migration.
+            const { data: current, error: currentError } = await supabase
                 .from('tenant_vapi_assignments')
-                .select('umbrella_id')
-                .eq('tenant_id', tenantId)
-                .eq('is_active', true)
-                .single();
+                .select('umbrella_id, is_active')
+                .eq('client_id', tenantId)
+                .maybeSingle();
 
+            if (currentError) {
+                reply.status(500).send({ error: currentError.message });
+                return;
+            }
             if (!current) {
                 reply.status(404).send({ error: 'Tenant not found or not assigned to umbrella' });
                 return;
             }
 
-            // Deactivate old assignment
-            await supabase
+            // Replace the assignment in place — UNIQUE(client_id) forbids a
+            // second row (even a deactivated one), so upsert on client_id
+            // instead of deactivate-then-insert.
+            const { error: upsertError } = await supabase
                 .from('tenant_vapi_assignments')
-                .update({ is_active: false })
-                .eq('tenant_id', tenantId);
-
-            // Create new assignment
-            await supabase
-                .from('tenant_vapi_assignments')
-                .insert({
-                    tenant_id: tenantId,
+                .upsert({
+                    client_id: tenantId,
                     umbrella_id: targetUmbrellaId,
                     assigned_by: 'admin_api',
                     is_active: true,
-                });
+                }, { onConflict: 'client_id' });
+
+            if (upsertError) {
+                reply.status(500).send({ error: upsertError.message });
+                return;
+            }
 
             // Log migration
-            await supabase
+            const { error: logError } = await supabase
                 .from('vapi_umbrella_migrations')
                 .insert({
-                    tenant_id: tenantId,
+                    client_id: tenantId,
                     from_umbrella_id: current.umbrella_id,
                     to_umbrella_id: targetUmbrellaId,
                     reason: reason || 'Admin migration',
                     migrated_by: 'admin_api',
                 });
+            if (logError) {
+                console.error(`[ADMIN] Failed to log umbrella migration for ${tenantId}:`, logError.message);
+            }
 
             // Clean up old umbrella usage in Redis
             await concurrencyManager.cleanupTenantUsage(current.umbrella_id, tenantId);
@@ -197,7 +177,8 @@ export async function healthRoutes(fastify: FastifyInstance) {
         // enrollment row into memory (the prior implementation OOMs at scale).
         const ENROLLMENT_STATUSES = [
             'active', 'paused', 'completed', 'replied', 'booked',
-            'failed', 'manual_stop', 'awaiting_outcome', 'generating_next_step',
+            'failed', 'manual_stop', 'unenrolled', 'converted',
+            'awaiting_outcome', 'generating_next_step',
         ] as const;
 
         const counts = await Promise.all(
@@ -222,11 +203,36 @@ export async function healthRoutes(fastify: FastifyInstance) {
             .select('*', { count: 'exact', head: true })
             .gte('executed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
+        // Operational detail formerly exposed on the public /health endpoint:
+        // queue depths, umbrella concurrency state, scheduler heartbeat.
+        const queues = await getQueueStats();
+
+        const { data: umbrellas } = await supabase
+            .from('vapi_umbrellas')
+            .select('id, name, umbrella_type')
+            .eq('is_active', true);
+
+        const umbrellaStates: Record<string, any> = {};
+        for (const u of umbrellas || []) {
+            umbrellaStates[u.name] = await concurrencyManager.getUmbrellaState(u.id);
+        }
+
+        const dueEnrollments = await countDueEnrollments();
+        const schedulerAge = Date.now() - schedulerLastTick;
+
         return {
             enrollments: enrollmentCounts,
             executions: {
                 total: totalExecutions || 0,
                 last_24h: recentExecutions || 0,
+            },
+            queues,
+            vapiUmbrellas: umbrellaStates,
+            scheduler: {
+                lastTick: new Date(schedulerLastTick).toISOString(),
+                ageMs: schedulerAge,
+                healthy: schedulerAge < 30000, // Warn if no tick in 30s
+                dueEnrollments,
             },
         };
     });

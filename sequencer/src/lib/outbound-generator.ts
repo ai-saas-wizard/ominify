@@ -29,7 +29,7 @@ import type {
     RecommendedTone,
 } from './types.js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000, maxRetries: 1 });
 
 // ═══════════════════════════════════════════════════════════════════
 // Types
@@ -121,13 +121,29 @@ export async function generateOutboundContent(input: GenerationInput): Promise<G
         return {
             content: {
                 subject: parsed.subject,
-                body_html: parsed.body_text, // Plain text for now
+                // The model produces plain text — escape HTML entities and
+                // convert newlines so it renders correctly in HTML clients
+                // and stray </&  characters can't break the markup.
+                body_html: plainTextToHtml(parsed.body_text),
                 body_text: parsed.body_text,
             } as EmailContent,
             reasoning: parsed.reasoning || 'Generated from step brief',
             model: 'gpt-4o-mini',
         };
     }
+}
+
+/**
+ * Convert plain text to safe HTML: escape entities, then newlines → <br>.
+ */
+function plainTextToHtml(text: string): string {
+    const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    return `<p>${escaped.replace(/\r\n/g, '\n').replace(/\n/g, '<br>')}</p>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════

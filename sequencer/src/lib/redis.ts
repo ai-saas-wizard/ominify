@@ -1,17 +1,23 @@
 import 'dotenv/config';
 import Redis from 'ioredis';
-import { Queue, Worker, Job, QueueEvents } from 'bullmq';
+import { Queue, Worker, Job } from 'bullmq';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// Parse Redis URL for BullMQ connection options
+// Parse Redis URL for BullMQ connection options.
+// Supports rediss:// (TLS) and an optional /N database-index path so the
+// BullMQ connection stays consistent with the ioredis client (which parses
+// the same URL natively).
 function parseRedisUrl(url: string) {
     const parsed = new URL(url);
+    const dbMatch = parsed.pathname.match(/^\/(\d+)$/);
     return {
         host: parsed.hostname,
         port: parseInt(parsed.port) || 6379,
         password: parsed.password || undefined,
         username: parsed.username || undefined,
+        ...(dbMatch ? { db: parseInt(dbMatch[1]) } : {}),
+        ...(parsed.protocol === 'rediss:' ? { tls: {} } : {}),
     };
 }
 
@@ -35,22 +41,25 @@ redis.on('connect', () => {
 // Queue Definitions
 // ═══════════════════════════════════════════════════════════════════
 
-export const smsQueue = new Queue('sms-send', { connection: redisConnection });
-export const emailQueue = new Queue('email-send', { connection: redisConnection });
-export const vapiQueue = new Queue('vapi-calls', { connection: redisConnection });
-export const eventQueue = new Queue('events-process', { connection: redisConnection });
-// Reserved for future async healing — currently healing actions are executed synchronously by event-processor
-export const healingQueue = new Queue('healing-actions', { connection: redisConnection });
-// Phase 5: Analytics queue for scheduled analytics jobs
-export const analyticsQueue = new Queue('analytics-compute', { connection: redisConnection });
+// Default job options for every queue (review workers I4): transient
+// provider errors get retried with exponential backoff instead of being
+// dropped after a single attempt, and completed/failed jobs are pruned so
+// Redis doesn't grow unbounded.
+const defaultJobOptions = {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 30000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+};
 
-// Queue event listeners for monitoring
-export const smsQueueEvents = new QueueEvents('sms-send', { connection: redisConnection });
-export const emailQueueEvents = new QueueEvents('email-send', { connection: redisConnection });
-export const vapiQueueEvents = new QueueEvents('vapi-calls', { connection: redisConnection });
-export const eventQueueEvents = new QueueEvents('events-process', { connection: redisConnection });
-export const healingQueueEvents = new QueueEvents('healing-actions', { connection: redisConnection });
-export const analyticsQueueEvents = new QueueEvents('analytics-compute', { connection: redisConnection });
+export const smsQueue = new Queue('sms-send', { connection: redisConnection, defaultJobOptions });
+export const emailQueue = new Queue('email-send', { connection: redisConnection, defaultJobOptions });
+export const vapiQueue = new Queue('vapi-calls', { connection: redisConnection, defaultJobOptions });
+export const eventQueue = new Queue('events-process', { connection: redisConnection, defaultJobOptions });
+// Reserved for future async healing — currently healing actions are executed synchronously by event-processor
+export const healingQueue = new Queue('healing-actions', { connection: redisConnection, defaultJobOptions });
+// Phase 5: Analytics queue for scheduled analytics jobs
+export const analyticsQueue = new Queue('analytics-compute', { connection: redisConnection, defaultJobOptions });
 
 /**
  * Get job counts for all queues (for health check)

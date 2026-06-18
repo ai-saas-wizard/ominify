@@ -13,6 +13,8 @@ import { redisConnection } from '../lib/redis.js';
 import { decrypt } from '../lib/encryption.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
 import { handleFailure } from '../lib/self-healer.js';
+import { claimOnce, releaseClaim } from '../lib/idempotency.js';
+import { isContactOptedOut } from '../lib/opt-out.js';
 import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
@@ -28,15 +30,16 @@ interface TenantTwilioConfig {
  * Get tenant's Twilio configuration
  */
 async function getTenantTwilioConfig(tenantId: string): Promise<TenantTwilioConfig | null> {
+    // Schema keys these tables by client_id with a status column (review C1)
     const { data, error } = await supabase
         .from('tenant_twilio_accounts')
         .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
+        .eq('client_id', tenantId)
+        .eq('status', 'active')
         .single();
 
     if (error || !data) {
-        console.error(`[SMS] No Twilio config for tenant ${tenantId}`);
+        console.error(`[SMS] No Twilio config for tenant ${tenantId}:`, error);
         return null;
     }
 
@@ -48,14 +51,18 @@ async function getTenantTwilioConfig(tenantId: string): Promise<TenantTwilioConf
     }
 
     // Get primary phone number
-    const { data: phoneData } = await supabase
+    const { data: phoneData, error: phoneError } = await supabase
         .from('tenant_phone_numbers')
         .select('phone_number')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
+        .eq('client_id', tenantId)
+        .eq('status', 'active')
         .eq('purpose', 'sequencer')
         .limit(1)
-        .single();
+        .maybeSingle();
+
+    if (phoneError) {
+        console.error(`[SMS] Error fetching phone number for tenant ${tenantId}:`, phoneError);
+    }
 
     return {
         subaccountSid: account.subaccount_sid,
@@ -69,11 +76,16 @@ async function getTenantTwilioConfig(tenantId: string): Promise<TenantTwilioConf
  * Check A2P registration status for tenant
  */
 async function getA2PStatus(tenantId: string): Promise<{ campaignStatus: string }> {
-    const { data } = await supabase
+    // tenant_a2p_registrations is keyed by client_id (review C1)
+    const { data, error } = await supabase
         .from('tenant_a2p_registrations')
         .select('campaign_status')
-        .eq('tenant_id', tenantId)
-        .single();
+        .eq('client_id', tenantId)
+        .maybeSingle();
+
+    if (error) {
+        console.error(`[SMS] Error fetching A2P status for tenant ${tenantId}:`, error);
+    }
 
     return {
         campaignStatus: data?.campaign_status || 'unknown',
@@ -91,19 +103,22 @@ async function logExecution(params: {
     providerId: string;
     providerResponse: any;
     smsStatus?: string;
+    variantId?: string | null;
 }): Promise<void> {
-    try {
-        await supabase.from('sequence_execution_log').insert({
-            enrollment_id: params.enrollmentId,
-            step_id: params.stepId,
-            channel: params.channel,
-            action: params.action,
-            provider_id: params.providerId,
-            provider_response: params.providerResponse,
-            sms_status: params.smsStatus,
-            executed_at: new Date().toISOString(),
-        });
-    } catch (error) {
+    const { error } = await supabase.from('sequence_execution_log').insert({
+        enrollment_id: params.enrollmentId,
+        // Chatbot/healing ad-hoc sends arrive with an empty stepId — the column is a nullable UUID
+        step_id: params.stepId || null,
+        variant_id: params.variantId ?? null,
+        channel: params.channel,
+        action: params.action,
+        provider_id: params.providerId,
+        provider_response: params.providerResponse,
+        sms_status: params.smsStatus,
+        executed_at: new Date().toISOString(),
+    });
+
+    if (error) {
         console.error('[SMS] Error logging execution:', error);
     }
 }
@@ -112,20 +127,9 @@ async function logExecution(params: {
  * Update enrollment SMS count
  */
 async function updateEnrollmentSmsCount(enrollmentId: string): Promise<void> {
-    try {
-        await supabase.rpc('increment_enrollment_sms', { enrollment_id: enrollmentId });
-    } catch {
-        // Fallback: manual increment if RPC doesn't exist
-        const { data: enrollment } = await supabase
-            .from('sequence_enrollments')
-            .select('sms_sent')
-            .eq('id', enrollmentId)
-            .single();
-
-        await supabase
-            .from('sequence_enrollments')
-            .update({ sms_sent: (enrollment?.sms_sent || 0) + 1 })
-            .eq('id', enrollmentId);
+    const { error } = await supabase.rpc('increment_enrollment_sms', { enrollment_id: enrollmentId });
+    if (error) {
+        console.error(`[SMS] Failed to increment sms_sent for enrollment ${enrollmentId}:`, error);
     }
 }
 
@@ -252,8 +256,40 @@ async function detectAndCachePhoneType(
  */
 async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; status: string }> {
     const { tenantId, contactPhone, body, enrollmentId, stepId } = job.data;
+    // variantId/dedupKey are stamped by the scheduler (see lib/types.ts payload contract)
+    const { variantId, dedupKey } = job.data as SmsJobPayload & { variantId?: string; dedupKey?: string };
 
     console.log(`[SMS] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}`);
+
+    // Defense-in-depth opt-out gate (review C3): the scheduler checks too,
+    // but ad-hoc dispatches (chatbot, healing) and races must never reach
+    // an opted-out contact.
+    const { data: enrollment, error: enrollmentError } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollmentError) {
+        console.error(`[SMS] Error fetching enrollment ${enrollmentId}:`, enrollmentError);
+    }
+
+    if (enrollment?.contact_id) {
+        const { data: contact, error: contactError } = await supabase
+            .from('contacts')
+            .select('opted_out_at')
+            .eq('id', enrollment.contact_id)
+            .single();
+
+        if (contactError) {
+            console.error(`[SMS] Error fetching contact ${enrollment.contact_id}:`, contactError);
+        }
+
+        if (isContactOptedOut(contact)) {
+            console.log(`[SMS] Contact ${enrollment.contact_id} is opted out — skipping send for enrollment ${enrollmentId}`);
+            return { sid: '', status: 'skipped_opted_out' };
+        }
+    }
 
     // Get tenant's Twilio subaccount credentials
     const config = await getTenantTwilioConfig(tenantId);
@@ -290,8 +326,28 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         throw new Error(`No phone number or messaging service for tenant ${tenantId}`);
     }
 
+    // Send idempotency (review C5): claim before the provider call so a
+    // duplicate dispatch (lease expiry, stalled-job retry) cannot re-text
+    // the lead. dedupKey wins when present — healing/chatbot dispatches
+    // reuse the original stepId, and keying them by stepId would collide
+    // with the already-claimed original send and silently skip them.
+    const claimKey = dedupKey || (stepId ? `send:${enrollmentId}:${stepId}` : null);
+    if (claimKey && !(await claimOnce(claimKey))) {
+        console.log(`[SMS] duplicate dispatch, skipping (${claimKey})`);
+        return { sid: '', status: 'duplicate_skipped' };
+    }
+
     // Send the message
-    const message = await client.messages.create(messageOptions);
+    let message;
+    try {
+        message = await client.messages.create(messageOptions);
+    } catch (error) {
+        // Release the claim so a legitimate BullMQ retry can resend
+        if (claimKey) {
+            await releaseClaim(claimKey);
+        }
+        throw error;
+    }
 
     console.log(`[SMS] Sent to ${contactPhone}, SID: ${message.sid}, Status: ${message.status}`);
 
@@ -309,15 +365,13 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
             dateCreated: message.dateCreated,
         },
         smsStatus: message.status,
+        variantId: variantId ?? null,
     });
 
-    // Record interaction for conversation memory
-    const { data: enrollment } = await supabase
-        .from('sequence_enrollments')
-        .select('contact_id, tenant_id')
-        .eq('id', enrollmentId)
-        .single();
+    // Increment the enrollment's sms_sent counter (review C7: was never called)
+    await updateEnrollmentSmsCount(enrollmentId);
 
+    // Record interaction for conversation memory
     if (enrollment) {
         await recordInteraction({
             clientId: enrollment.tenant_id,

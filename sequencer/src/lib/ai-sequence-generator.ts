@@ -11,6 +11,8 @@ import type { TenantProfile, Sequence, SequenceStep, UrgencyTier, ChannelType } 
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
+    timeout: 60_000,
+    maxRetries: 1,
 });
 
 interface GeneratedSequence {
@@ -31,6 +33,59 @@ interface GeneratedSequence {
         on_success?: { action: string; target_step?: number };
         on_failure?: { action: string; retry_delay?: number };
     }>;
+}
+
+const VALID_CHANNELS: ChannelType[] = ['sms', 'email', 'voice'];
+
+/**
+ * Validate model-generated steps before persisting (the model output was
+ * previously trusted blindly). Rejects and logs steps with an unknown
+ * channel, non-positive or duplicate step_order, negative delay, or empty
+ * content for the channel.
+ */
+function validateGeneratedSteps(seq: GeneratedSequence): GeneratedSequence['steps'] {
+    const seenOrders = new Set<number>();
+    const valid: GeneratedSequence['steps'] = [];
+
+    for (const step of seq.steps || []) {
+        const reject = (reason: string) => {
+            console.error(`[AI] Rejecting invalid step in "${seq.name}" (order=${step?.step_order}, channel=${step?.channel}): ${reason}`);
+        };
+
+        if (!step || typeof step !== 'object') { reject('not an object'); continue; }
+        if (!VALID_CHANNELS.includes(step.channel)) { reject(`unknown channel "${step.channel}"`); continue; }
+        if (typeof step.step_order !== 'number' || !Number.isInteger(step.step_order) || step.step_order <= 0) {
+            reject('step_order must be a positive integer'); continue;
+        }
+        if (seenOrders.has(step.step_order)) { reject('duplicate step_order'); continue; }
+        if (typeof step.delay_seconds !== 'number' || !Number.isFinite(step.delay_seconds) || step.delay_seconds < 0) {
+            reject('delay_seconds must be a number >= 0'); continue;
+        }
+
+        const content = step.content;
+        if (!content || typeof content !== 'object') { reject('missing content'); continue; }
+        if (step.channel === 'sms' && !(typeof content.body === 'string' && content.body.trim().length > 0)) {
+            reject('SMS content missing body'); continue;
+        }
+        if (step.channel === 'email' && !(
+            typeof content.subject === 'string' && content.subject.trim().length > 0 &&
+            ((typeof content.body_html === 'string' && content.body_html.trim().length > 0) ||
+             (typeof content.body_text === 'string' && content.body_text.trim().length > 0))
+        )) {
+            reject('email content missing subject or body'); continue;
+        }
+        if (step.channel === 'voice' && !(
+            (typeof content.first_message === 'string' && content.first_message.trim().length > 0) ||
+            (typeof content.system_prompt === 'string' && content.system_prompt.trim().length > 0)
+        )) {
+            reject('voice content missing first_message/system_prompt'); continue;
+        }
+
+        seenOrders.add(step.step_order);
+        valid.push(step);
+    }
+
+    return valid;
 }
 
 /**
@@ -138,6 +193,13 @@ Return a JSON object with a "sequences" array. Each sequence must have:
 
         // Persist generated sequences to DB
         for (const seq of generated.sequences) {
+            // Validate the model output before persisting anything
+            const validSteps = validateGeneratedSteps(seq);
+            if (validSteps.length === 0) {
+                console.error(`[AI] Sequence "${seq.name}" has no valid steps after validation — skipping`);
+                continue;
+            }
+
             // Create sequence
             const { data: sequenceData, error: seqError } = await supabase
                 .from('sequences')
@@ -163,7 +225,7 @@ Return a JSON object with a "sequences" array. Each sequence must have:
             console.log(`[AI] Created sequence: ${seq.name} (${sequenceId})`);
 
             // Create steps
-            for (const step of seq.steps) {
+            for (const step of validSteps) {
                 const mutationInstructions = step.channel === 'sms'
                     ? 'Keep under 160 chars. Reference prior conversation naturally. Match brand voice.'
                     : step.channel === 'email'
@@ -205,13 +267,37 @@ Return a JSON object with a "sequences" array. Each sequence must have:
  * Regenerate sequences for a tenant
  */
 export async function regenerateSequences(tenantId: string): Promise<void> {
-    // Deactivate existing AI-generated sequences
-    await supabase
+    // Snapshot the currently-active AI-generated sequences FIRST, then
+    // generate the new ones, and only deactivate the old set once the new
+    // generation persisted. Deactivating up front meant a generation
+    // failure left the tenant with zero active sequences.
+    const { data: oldSequences, error: snapshotErr } = await supabase
         .from('sequences')
-        .update({ is_active: false })
+        .select('id')
         .eq('client_id', tenantId)
-        .eq('generated_by_ai', true);
+        .eq('generated_by_ai', true)
+        .eq('is_active', true);
 
-    // Generate new ones
+    if (snapshotErr) {
+        console.error(`[AI] Failed to snapshot existing sequences for ${tenantId}: ${snapshotErr.message}`);
+        throw new Error(`Failed to snapshot existing sequences: ${snapshotErr.message}`);
+    }
+
+    // Generate new ones (throws on failure — old sequences stay active)
     await generateSequencesFromOnboarding(tenantId);
+
+    // New sequences are live — retire the old set
+    const oldIds = (oldSequences || []).map(s => s.id);
+    if (oldIds.length > 0) {
+        const { error: deactivateErr } = await supabase
+            .from('sequences')
+            .update({ is_active: false })
+            .in('id', oldIds);
+
+        if (deactivateErr) {
+            console.error(`[AI] Failed to deactivate ${oldIds.length} old sequences for ${tenantId}: ${deactivateErr.message}`);
+        } else {
+            console.log(`[AI] Deactivated ${oldIds.length} old AI-generated sequences for ${tenantId}`);
+        }
+    }
 }

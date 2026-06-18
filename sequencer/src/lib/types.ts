@@ -108,7 +108,7 @@ export interface TenantTwilioAccount {
 
 export type UrgencyTier = 'critical' | 'high' | 'medium' | 'low';
 export type ChannelType = 'sms' | 'email' | 'voice';
-export type EnrollmentStatus = 'active' | 'paused' | 'completed' | 'replied' | 'booked' | 'failed' | 'manual_stop' | 'awaiting_outcome' | 'generating_next_step';
+export type EnrollmentStatus = 'active' | 'paused' | 'completed' | 'replied' | 'booked' | 'failed' | 'manual_stop' | 'unenrolled' | 'converted' | 'awaiting_outcome' | 'generating_next_step';
 
 export type MutationAggressiveness = 'conservative' | 'moderate' | 'aggressive';
 
@@ -337,7 +337,11 @@ export interface SmsJobPayload {
     contactPhone: string;
     body: string;
     enrollmentId: string;
-    stepId: string;
+    stepId: string | null;
+    // A/B variant the scheduler selected — the worker writes it into the execution log
+    variantId?: string;
+    // Idempotency key for ad-hoc sends (chatbot/healing) where stepId-based dedup doesn't apply
+    dedupKey?: string;
 }
 
 export interface EmailJobPayload {
@@ -347,7 +351,9 @@ export interface EmailJobPayload {
     bodyHtml: string;
     bodyText: string;
     enrollmentId: string;
-    stepId: string;
+    stepId: string | null;
+    variantId?: string;
+    dedupKey?: string;
 }
 
 export interface VapiJobPayload {
@@ -363,6 +369,8 @@ export interface VapiJobPayload {
     // Blueprint-based inline agent: when present, vapi-worker uses this directly
     // instead of assistantConfig.vapi_assistant_id or hardcoded inline defaults
     inlineAgent?: InlineVapiAgent;
+    variantId?: string;
+    dedupKey?: string;
 }
 
 export type EmailReplyMode = 'auto' | 'draft' | 'notify_only';
@@ -388,6 +396,11 @@ export interface EventJobPayload {
     emailBodyText?: string;
     emailBodyHtml?: string;
     fromEmail?: string;
+    // Provider correlation ids (execution-log updates key off these, never bare step_id)
+    providerId?: string;
+    messageSid?: string;
+    executionLogId?: string;
+    bounceType?: string;
 }
 
 export interface TriggeringStepContext {

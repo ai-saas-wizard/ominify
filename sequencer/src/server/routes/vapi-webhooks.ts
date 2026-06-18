@@ -68,6 +68,14 @@ interface VapiWebhookPayload {
                 provider?: string;
                 callSid?: string;
             };
+            // Some VAPI event shapes nest the outbound-call metadata here
+            // instead of on the top-level call object.
+            metadata?: {
+                tenantId?: string;
+                umbrellaId?: string;
+                enrollmentId?: string;
+                [key: string]: any;
+            };
         };
         transcript?: string;
         status?: string;
@@ -146,12 +154,16 @@ async function tryClaimCall(callId: string): Promise<boolean> {
     }
 }
 
-async function isCallProcessed(callId: string): Promise<boolean> {
+/**
+ * Release a dedup claim. Used when event enqueue fails AFTER a successful
+ * claim — otherwise the claim would strand and the call outcome would be
+ * lost forever (no later webhook could ever process it).
+ */
+async function releaseCallClaim(callId: string): Promise<void> {
     try {
-        const v = await redis.get(`vapi:dedup:${callId}`);
-        return v !== null;
-    } catch {
-        return false;
+        await redis.del(`vapi:dedup:${callId}`);
+    } catch (err) {
+        console.error(`[VAPI] Failed to release dedup claim for ${callId}:`, err);
     }
 }
 
@@ -409,8 +421,9 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
 
             // Extract metadata — check both top-level call and message.call
             // Outbound sequencer calls: metadata is in payload.call.metadata
+            // (or nested in message.call.metadata on some event shapes)
             // Inbound/VAPI-dashboard calls: no metadata, need to resolve from orgId/phoneNumber
-            const metadata = payload.call?.metadata || {};
+            const metadata = payload.call?.metadata || payload.message?.call?.metadata || {};
             const callId = payload.call?.id || payload.message?.call?.id;
             const orgId = payload.call?.orgId || payload.message?.call?.orgId;
             const customerPhone = extractCustomerPhone(payload);
@@ -457,7 +470,12 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                             appointmentBooked,
                         };
 
-                        await eventQueue.add('event:call-outcome', event);
+                        try {
+                            await eventQueue.add('event:call-outcome', event);
+                        } catch (err) {
+                            if (callId) await releaseCallClaim(callId);
+                            throw err;
+                        }
                         console.log(`[VAPI] Queued call-outcome: disposition=${event.disposition}, duration=${duration}s, transcript=${transcript ? transcript.length + ' chars' : 'none'}`);
                     }
                     break;
@@ -470,8 +488,11 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
 
                     const reportCallId = call.id || callId;
 
-                    // Dedup: if already processed via status-update, update with richer data instead of double-processing
-                    if (reportCallId && (await isCallProcessed(reportCallId))) {
+                    // Dedup: atomically claim the callId. If the claim fails,
+                    // a concurrent/earlier webhook (status-update:ended) already
+                    // processed this call — enrich with richer report data
+                    // instead of double-queuing the outcome.
+                    if (reportCallId && !(await tryClaimCall(reportCallId))) {
                         console.log(`[VAPI] Call ${reportCallId} already processed via status-update, enriching with end-of-call-report data`);
 
                         // Enrich the execution log with any additional data from the report
@@ -480,20 +501,20 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                         const duration = estimateDuration(payload);
 
                         if (transcript || duration) {
-                            await supabase
+                            const { error: enrichError } = await supabase
                                 .from('sequence_execution_log')
                                 .update({
                                     ...(transcript ? { call_transcript: transcript } : {}),
                                     ...(duration ? { call_duration_seconds: duration } : {}),
                                 })
                                 .eq('provider_id', reportCallId);
-                            console.log(`[VAPI] Enriched execution log for call ${reportCallId}`);
+                            if (enrichError) {
+                                console.error(`[VAPI] Failed to enrich execution log for call ${reportCallId}:`, enrichError.message);
+                            } else {
+                                console.log(`[VAPI] Enriched execution log for call ${reportCallId}`);
+                            }
                         }
                         break;
-                    }
-
-                    if (reportCallId) {
-                        await tryClaimCall(reportCallId);
                     }
 
                     const transcript = extractTranscript(payload);
@@ -519,7 +540,12 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                         appointmentBooked,
                     };
 
-                    await eventQueue.add('event:call-outcome', event);
+                    try {
+                        await eventQueue.add('event:call-outcome', event);
+                    } catch (err) {
+                        if (reportCallId) await releaseCallClaim(reportCallId);
+                        throw err;
+                    }
                     console.log(`[VAPI] Queued call-outcome from report: disposition=${event.disposition}, duration=${event.duration}s`);
                     break;
                 }
@@ -530,8 +556,27 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
 
                     // Handle specific function calls (e.g., booking confirmation)
                     if (funcCall?.name === 'book_appointment' && metadata.enrollmentId) {
+                        // Verify the enrollment actually belongs to the tenant
+                        // claimed in the call metadata before mutating it —
+                        // mismatched/forged metadata must not flip another
+                        // tenant's enrollment to booked.
+                        const { data: enrollment, error: enrollmentError } = await supabase
+                            .from('sequence_enrollments')
+                            .select('id, tenant_id')
+                            .eq('id', metadata.enrollmentId)
+                            .maybeSingle();
+
+                        if (enrollmentError || !enrollment) {
+                            console.warn(`[VAPI] book_appointment for unknown enrollment ${metadata.enrollmentId}; ignoring`);
+                            break;
+                        }
+                        if (!metadata.tenantId || enrollment.tenant_id !== metadata.tenantId) {
+                            console.warn(`[VAPI] book_appointment tenant mismatch for enrollment ${metadata.enrollmentId} (enrollment tenant ${enrollment.tenant_id}, metadata tenant ${metadata.tenantId}); ignoring`);
+                            break;
+                        }
+
                         // Update enrollment immediately
-                        await supabase
+                        const { error: bookError } = await supabase
                             .from('sequence_enrollments')
                             .update({
                                 appointment_booked: true,
@@ -540,7 +585,11 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                                 updated_at: new Date().toISOString(),
                             })
                             .eq('id', metadata.enrollmentId);
-                        console.log(`[VAPI] Enrollment ${metadata.enrollmentId} marked as booked`);
+                        if (bookError) {
+                            console.error(`[VAPI] Failed to mark enrollment ${metadata.enrollmentId} as booked:`, bookError.message);
+                        } else {
+                            console.log(`[VAPI] Enrollment ${metadata.enrollmentId} marked as booked`);
+                        }
                     }
                     break;
                 }
@@ -570,7 +619,28 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
         '/concurrency-sync',
         { preHandler: requireVapiSecret },
         async (request, reply) => {
-            const { orgId, current, limit, timestamp } = request.body;
+            const { orgId, current, limit, timestamp } = (request.body || {}) as VapiConcurrencySyncPayload;
+
+            // Validate before touching Redis/DB — a malformed payload must
+            // get a 400, not crash the handler (NaN counters, Invalid Date
+            // .toISOString() throws RangeError).
+            if (typeof orgId !== 'string' || orgId.length === 0) {
+                reply.status(400).send({ error: 'Missing or invalid orgId' });
+                return;
+            }
+            if (!Number.isFinite(current) || !Number.isFinite(limit) || current < 0 || limit < 0) {
+                reply.status(400).send({ error: 'current and limit must be finite non-negative numbers' });
+                return;
+            }
+            let lastWebhookAt = new Date();
+            if (timestamp !== undefined && timestamp !== null) {
+                const parsed = new Date(timestamp);
+                if (isNaN(parsed.getTime())) {
+                    reply.status(400).send({ error: 'Invalid timestamp' });
+                    return;
+                }
+                lastWebhookAt = parsed;
+            }
 
             console.log(`[VAPI] Concurrency sync: orgId=${orgId}, current=${current}, limit=${limit}`);
 
@@ -579,7 +649,7 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                 .from('vapi_umbrellas')
                 .select('id')
                 .eq('vapi_org_id', orgId)
-                .single();
+                .maybeSingle();
 
             if (!umbrella) {
                 console.log(`[VAPI] Unknown orgId in concurrency sync: ${orgId}`);
@@ -591,13 +661,16 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
             await concurrencyManager.syncFromWebhook(umbrella.id, current, limit);
 
             // Update umbrella record
-            await supabase
+            const { error: updateError } = await supabase
                 .from('vapi_umbrellas')
                 .update({
                     current_concurrency: current,
-                    last_webhook_at: new Date(timestamp).toISOString(),
+                    last_webhook_at: lastWebhookAt.toISOString(),
                 })
                 .eq('id', umbrella.id);
+            if (updateError) {
+                console.error(`[VAPI] Failed to update umbrella ${umbrella.id} after concurrency sync:`, updateError.message);
+            }
 
             reply.status(200).send({ ok: true });
         }

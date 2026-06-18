@@ -96,7 +96,12 @@ export function applyToolOverrides(
         for (const name of overrides.add) {
             if (existingNames.has(name)) continue;
             if (name === 'endCall') tools.push({ type: 'endCall' });
-            else if (name === 'transferCall') tools.push({ type: 'transferCall', destinations: [] });
+            else if (name === 'transferCall') {
+                // A transferCall tool needs destinations to do anything —
+                // adding it with an empty list just confuses the assistant
+                // (it offers a transfer that can never complete). Skip it.
+                console.warn('[BLUEPRINT] Skipping transferCall tool override — no destinations available');
+            }
         }
     }
 

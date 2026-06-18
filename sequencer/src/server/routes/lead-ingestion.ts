@@ -9,8 +9,12 @@
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { createHash } from 'crypto';
 import { supabase } from '../../lib/db.js';
-import { requireBearer } from '../middleware/webhook-auth.js';
+import { isWebhookAuthDisabled } from '../middleware/webhook-auth.js';
+import { normalizePhone, phoneLookupCandidates } from '../../lib/phone.js';
+import { isContactOptedOut } from '../../lib/opt-out.js';
+import { timingSafeEqualStr } from '../../lib/signing.js';
 import type { Sequence, Contact } from '../../lib/types.js';
 import { addSeconds } from 'date-fns';
 
@@ -41,6 +45,9 @@ interface GenericLead {
     keywords?: string;
     urgency?: string;
     customVariables?: Record<string, any>;
+    // Explicit opt-out of auto-enrollment: create the contact only.
+    // Auto-enroll stays the default (undefined/true → enroll).
+    enroll_in_sequence?: boolean;
 }
 
 interface TenantParams {
@@ -98,13 +105,25 @@ function parseFacebookLead(payload: FacebookLead): GenericLead {
  * Upsert contact in database
  */
 async function upsertContact(tenantId: string, leadData: GenericLead): Promise<Contact> {
-    // Check if contact exists
-    const { data: existing } = await supabase
+    // Store E.164 when the phone parses; fall back to the trimmed raw value
+    // so we never drop a lead over an unparseable number.
+    const storedPhone = normalizePhone(leadData.phone) ?? leadData.phone.trim();
+
+    // Dedup lookup matches both the E.164 form and the raw form so legacy
+    // un-normalized rows are found.
+    const candidates = phoneLookupCandidates(leadData.phone);
+
+    const { data: existing, error: lookupError } = await supabase
         .from('contacts')
         .select('*')
         .eq('client_id', tenantId)
-        .eq('phone', leadData.phone)
-        .single();
+        .in('phone', candidates)
+        .limit(1)
+        .maybeSingle();
+
+    if (lookupError) {
+        throw new Error(`Contact lookup failed: ${lookupError.message}`);
+    }
 
     if (existing) {
         // Merge custom variables into existing custom_fields (existing values preserved, new ones added)
@@ -114,7 +133,7 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
         };
 
         // Update last touch and merge custom fields
-        await supabase
+        const { error: updateError } = await supabase
             .from('contacts')
             .update({
                 updated_at: new Date().toISOString(),
@@ -126,6 +145,9 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
                 custom_fields: mergedCustomFields,
             })
             .eq('id', existing.id);
+        if (updateError) {
+            console.error(`[LEAD] Failed to update contact ${existing.id}:`, updateError.message);
+        }
         return { ...existing, custom_fields: mergedCustomFields } as Contact;
     }
 
@@ -134,7 +156,7 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
         .from('contacts')
         .insert({
             client_id: tenantId,
-            phone: leadData.phone,
+            phone: storedPhone,
             email: leadData.email,
             name: leadData.name,
             first_name: leadData.first_name,
@@ -144,6 +166,19 @@ async function upsertContact(tenantId: string, leadData: GenericLead): Promise<C
         })
         .select()
         .single();
+
+    // Concurrent ingestion of the same lead can race past the lookup and
+    // trip UNIQUE(client_id, phone) — re-fetch the winner instead of 500ing.
+    if (error?.code === '23505') {
+        const { data: raced } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('client_id', tenantId)
+            .in('phone', candidates)
+            .limit(1)
+            .maybeSingle();
+        if (raced) return raced as Contact;
+    }
 
     if (error || !newContact) {
         throw new Error(`Failed to create contact: ${error?.message}`);
@@ -266,12 +301,13 @@ async function enrollInSequence(
 async function ingestLead(
     tenantId: string,
     leadData: GenericLead,
-    source: string
-): Promise<{ contactId: string; enrollmentId: string | null }> {
+    source: string,
+    autoEnroll = true
+): Promise<{ contactId: string; enrollmentId: string | null; skippedOptedOut?: boolean }> {
     console.log(`[LEAD] Ingesting lead: ${leadData.phone} from ${source} for tenant ${tenantId}`);
 
     // Validate phone
-    if (!leadData.phone) {
+    if (!leadData.phone || typeof leadData.phone !== 'string' || !leadData.phone.trim()) {
         throw new Error('Phone number is required');
     }
 
@@ -279,7 +315,20 @@ async function ingestLead(
     const contact = await upsertContact(tenantId, leadData);
     console.log(`[LEAD] Contact: ${contact.id}`);
 
-    // 2. Find matching sequence
+    // 2. Honor contact-level opt-out — re-ingestion must NEVER re-enroll a
+    // contact who said STOP / unsubscribed.
+    if (isContactOptedOut(contact)) {
+        console.log(`[LEAD] Contact ${contact.id} is opted out; skipping enrollment`);
+        return { contactId: contact.id, enrollmentId: null, skippedOptedOut: true };
+    }
+
+    // 3. Explicit enroll_in_sequence: false → contact-only ingestion
+    if (!autoEnroll) {
+        console.log(`[LEAD] enroll_in_sequence=false; created/updated contact ${contact.id} without enrolling`);
+        return { contactId: contact.id, enrollmentId: null };
+    }
+
+    // 4. Find matching sequence
     const sequence = await findMatchingSequence(tenantId, leadData, source);
 
     if (!sequence) {
@@ -289,7 +338,7 @@ async function ingestLead(
 
     console.log(`[LEAD] Matched sequence: ${sequence.name} (${sequence.urgency_tier})`);
 
-    // 3. Enroll in sequence
+    // 5. Enroll in sequence
     const enrollmentId = await enrollInSequence(
         tenantId,
         contact.id,
@@ -305,11 +354,68 @@ async function ingestLead(
     return { contactId: contact.id, enrollmentId };
 }
 
+/**
+ * Lead-ingestion auth. Accepts EITHER:
+ *  - the global LEAD_INGESTION_API_TOKEN bearer (NOTE: tenant-global — any
+ *    holder can ingest leads for every tenant), or
+ *  - a per-client API key scoped to the URL's tenantId, validated against
+ *    the same client_api_keys table (sha256 hash, is_active) the Next.js
+ *    lead endpoint uses. The key may arrive as `x-api-key` or as the bearer.
+ */
+async function requireLeadAuth(request: FastifyRequest, reply: FastifyReply) {
+    if (isWebhookAuthDisabled()) return;
+
+    const header = request.headers['authorization'];
+    const bearer = (typeof header === 'string' && header.startsWith('Bearer '))
+        ? header.slice(7).trim()
+        : undefined;
+    const apiKeyHeader = request.headers['x-api-key'];
+    const apiKey = typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : undefined;
+
+    if (!bearer && !apiKey) {
+        reply.status(401).send({ error: 'Missing bearer token or x-api-key' });
+        return reply;
+    }
+
+    // 1. Global ingestion token (tenant-global)
+    const globalToken = process.env.LEAD_INGESTION_API_TOKEN;
+    if (globalToken && bearer && timingSafeEqualStr(bearer, globalToken)) {
+        return;
+    }
+
+    // 2. Per-client API key scoped to the tenant in the URL
+    const tenantId = (request.params as { tenantId?: string } | undefined)?.tenantId;
+    const candidateKey = apiKey || bearer;
+    if (tenantId && candidateKey) {
+        const keyHash = createHash('sha256').update(candidateKey).digest('hex');
+        const { data: keyRow, error } = await supabase
+            .from('client_api_keys')
+            .select('id')
+            .eq('client_id', tenantId)
+            .eq('key_hash', keyHash)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (!error && keyRow) {
+            const { error: touchError } = await supabase
+                .from('client_api_keys')
+                .update({ last_used_at: new Date().toISOString() })
+                .eq('id', keyRow.id);
+            if (touchError) {
+                console.warn(`[LEAD] Failed to update last_used_at for API key ${keyRow.id}:`, touchError.message);
+            }
+            return;
+        }
+    }
+
+    reply.status(403).send({ error: 'Invalid token' });
+    return reply;
+}
+
 export async function leadIngestion(fastify: FastifyInstance) {
-    // Every lead-ingestion route requires Authorization: Bearer <LEAD_INGESTION_API_TOKEN>.
-    // Lead sources can't sign their payloads, so a shared bearer is the
-    // practical floor of protection here.
-    const leadAuth = requireBearer('LEAD_INGESTION_API_TOKEN');
+    // Every lead-ingestion route requires either the global bearer token or
+    // a per-client API key scoped to the URL's tenantId (see requireLeadAuth).
+    const leadAuth = requireLeadAuth;
 
     /**
      * Google Ads Lead webhook
@@ -320,7 +426,15 @@ export async function leadIngestion(fastify: FastifyInstance) {
         { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
-            const leadData = parseGoogleAdsLead(request.body);
+
+            let leadData: GenericLead;
+            try {
+                leadData = parseGoogleAdsLead(request.body);
+            } catch (error: any) {
+                console.error('[LEAD] Malformed Google Ads payload:', error.message);
+                reply.status(400).send({ error: 'Malformed Google Ads payload' });
+                return;
+            }
 
             try {
                 const result = await ingestLead(tenantId, leadData, 'google_ads');
@@ -341,7 +455,15 @@ export async function leadIngestion(fastify: FastifyInstance) {
         { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
-            const leadData = parseFacebookLead(request.body);
+
+            let leadData: GenericLead;
+            try {
+                leadData = parseFacebookLead(request.body);
+            } catch (error: any) {
+                console.error('[LEAD] Malformed Facebook payload:', error.message);
+                reply.status(400).send({ error: 'Malformed Facebook payload' });
+                return;
+            }
 
             try {
                 const result = await ingestLead(tenantId, leadData, 'facebook');
@@ -363,10 +485,17 @@ export async function leadIngestion(fastify: FastifyInstance) {
         async (request, reply) => {
             const { tenantId } = request.params;
             const leadData = request.body;
+
+            if (!leadData || typeof leadData !== 'object') {
+                reply.status(400).send({ error: 'Malformed lead payload' });
+                return;
+            }
+
             const source = leadData.source || 'webhook';
+            const autoEnroll = leadData.enroll_in_sequence !== false;
 
             try {
-                const result = await ingestLead(tenantId, leadData, source);
+                const result = await ingestLead(tenantId, leadData, source, autoEnroll);
                 reply.status(200).send(result);
             } catch (error: any) {
                 console.error('[LEAD] Error:', error.message);
@@ -379,26 +508,36 @@ export async function leadIngestion(fastify: FastifyInstance) {
      * CSV bulk import
      * POST /webhooks/leads/csv/:tenantId
      */
-    fastify.post<{ Params: TenantParams; Body: { leads: GenericLead[] } }>(
+    fastify.post<{ Params: TenantParams; Body: { leads: GenericLead[]; enroll_in_sequence?: boolean } }>(
         '/csv/:tenantId',
         { preHandler: leadAuth },
         async (request, reply) => {
             const { tenantId } = request.params;
-            const { leads } = request.body;
+            const { leads, enroll_in_sequence } = (request.body || {}) as { leads?: GenericLead[]; enroll_in_sequence?: boolean };
+
+            if (!Array.isArray(leads)) {
+                reply.status(400).send({ error: 'Body must contain a leads array' });
+                return;
+            }
 
             const results = {
                 imported: 0,
                 enrolled: 0,
+                skipped_opted_out: 0,
                 errors: [] as string[],
             };
 
             for (const leadData of leads) {
                 try {
-                    const result = await ingestLead(tenantId, leadData, 'csv_upload');
+                    // Top-level enroll_in_sequence: false applies to the whole
+                    // batch; a per-lead flag can also opt a single row out.
+                    const autoEnroll = enroll_in_sequence !== false && leadData?.enroll_in_sequence !== false;
+                    const result = await ingestLead(tenantId, leadData, 'csv_upload', autoEnroll);
                     results.imported++;
+                    if (result.skippedOptedOut) results.skipped_opted_out++;
                     if (result.enrollmentId) results.enrolled++;
                 } catch (error: any) {
-                    results.errors.push(`${leadData.phone}: ${error.message}`);
+                    results.errors.push(`${leadData?.phone}: ${error.message}`);
                 }
             }
 

@@ -31,12 +31,16 @@ export async function canPlaceCall(clientId: string): Promise<AccessResult> {
             .select('balance_minutes, subscription_minutes')
             .eq('client_id', clientId)
             .maybeSingle(),
+        // .maybeSingle() errored when a client had 2+ matching subscription
+        // rows (e.g. an old past_due next to a new active one) and the error
+        // silently blocked every call. Take the newest matching row instead.
         supabase
             .from('subscriptions')
             .select('status')
             .eq('client_id', clientId)
             .in('status', ['active', 'trialing', 'past_due', 'admin_granted'])
-            .maybeSingle(),
+            .order('created_at', { ascending: false })
+            .limit(1),
     ]);
 
     const client = clientRes.data as
@@ -46,7 +50,7 @@ export async function canPlaceCall(clientId: string): Promise<AccessResult> {
 
     // Subscription gate — skippable for grandfathered + CUSTOM.
     if (!client.subscription_grandfathered && client.account_type !== 'CUSTOM') {
-        const sub = subRes.data as { status: string } | null;
+        const sub = ((subRes.data as Array<{ status: string }> | null)?.[0]) ?? null;
         if (!sub) return { allowed: false, reason: 'no_subscription' };
         if (sub.status === 'past_due') return { allowed: false, reason: 'past_due' };
         if (!ACTIVE_LIKE.includes(sub.status)) return { allowed: false, reason: 'canceled' };
