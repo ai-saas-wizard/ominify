@@ -13,6 +13,7 @@
 import OpenAI from 'openai';
 import { supabase } from './db.js';
 import { optOutContact } from './opt-out.js';
+import { getAgentMessaging } from './agent-messaging.js';
 import type {
     SequenceEnrollment,
     Sequence,
@@ -198,13 +199,24 @@ export async function generateNextStep(params: {
         `Step ${s.step_order} [${s.channel.toUpperCase()}]: "${s.content_summary}" → outcome: ${s.outcome || 'pending'}`
     ).join('\n');
 
+    // Resolve the bound agent's offer context + SMS persona so generated steps
+    // stay consistent with what the voice agent pitches. Falls back to the
+    // strategy's agent_context when no agent is bound.
+    const messaging = await getAgentMessaging(sequence.agent_id);
+    const agentContextLine = messaging?.sharedContextText
+        ? `\n${messaging.sharedContextText}`
+        : `- Agent context: ${strategy.agent_context}`;
+    const smsStyleGuide = messaging?.smsPrompt
+        ? `\n\nWHEN THE NEXT STEP IS SMS, write it in this texting persona/style (adapt, don't copy verbatim):\n${messaging.smsPrompt}`
+        : '';
+
     const systemPrompt = `You are an expert outbound sales sequencer AI. Your job is to decide the NEXT step in a multi-channel outreach sequence based on what just happened.
 
 SEQUENCE STRATEGY:
 - Goal: ${strategy.goal}
 - Max touchpoints: ${strategy.max_steps}
 - Available channels: ${availableChannels.join(', ')}
-- Agent context: ${strategy.agent_context}
+${agentContextLine}
 ${strategy.escalation_rules ? `- Escalation rules: ${strategy.escalation_rules}` : ''}
 
 BUSINESS PROFILE:
@@ -256,7 +268,7 @@ CONTENT RULES:
 - SMS: Under 160 chars, natural, reference the specific outcome. Use {{first_name}} and {{business_name}} placeholders.
 - Email: Include subject, body_html, body_text. Reference prior interactions naturally.
 - Voice: Provide first_message (greeting) and system_prompt (agent instructions). The system will inject the vapi_assistant_id automatically.
-- NEVER be generic. Always reference what just happened.
+- NEVER be generic. Always reference what just happened.${smsStyleGuide}
 
 OUTPUT FORMAT (JSON only):
 {

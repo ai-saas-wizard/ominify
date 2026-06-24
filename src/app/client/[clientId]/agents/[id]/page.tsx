@@ -27,7 +27,7 @@ export default async function AgentEditorPage(props: {
 
     const { data: agentRecord } = await supabase
         .from("agents")
-        .select("id, agent_config")
+        .select("id, agent_type, agent_config")
         .eq("vapi_id", params.id)
         .eq("client_id", params.clientId)
         .single();
@@ -125,7 +125,15 @@ export default async function AgentEditorPage(props: {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Editor (main) */}
                         <div className="lg:col-span-2">
-                            <AgentEditor agent={agent} clientId={params.clientId} />
+                            <AgentEditor
+                                agent={agent}
+                                clientId={params.clientId}
+                                showSms={agentRecord?.agent_type === "outbound"}
+                                smsPrompt={agentRecord?.agent_config?.sms_prompt || ""}
+                                smsFirstMessage={
+                                    agentRecord?.agent_config?.sms_first_message || ""
+                                }
+                            />
                         </div>
 
                         {/* Sidebar */}

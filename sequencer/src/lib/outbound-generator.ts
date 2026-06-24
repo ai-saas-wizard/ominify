@@ -28,6 +28,7 @@ import type {
     PrimaryEmotion,
     RecommendedTone,
 } from './types.js';
+import { getAgentMessaging } from './agent-messaging.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000, maxRetries: 1 });
 
@@ -75,7 +76,15 @@ export async function generateOutboundContent(input: GenerationInput): Promise<G
     const industry = tenantProfile.industry || 'general services';
     const contactName = contact.name || contact.first_name || '';
 
-    const systemPrompt = buildGenerationPrompt(channel, brandVoice, industry, businessName);
+    const messaging = await getAgentMessaging(sequence.agent_id);
+    const systemPrompt = buildGenerationPrompt(
+        channel,
+        brandVoice,
+        industry,
+        businessName,
+        messaging?.smsPrompt,
+        messaging?.sharedContextText
+    );
     const userMessage = buildGenerationRequest({
         channel,
         brief,
@@ -154,7 +163,9 @@ function buildGenerationPrompt(
     channel: 'sms' | 'email',
     brandVoice: string,
     industry: string,
-    businessName: string
+    businessName: string,
+    smsPersona?: string | null,
+    sharedContextText?: string
 ): string {
     const channelRules = channel === 'sms'
         ? `SMS RULES:
@@ -169,7 +180,15 @@ function buildGenerationPrompt(
 - Include a greeting and sign-off with "${businessName}"
 - Professional email etiquette appropriate for ${brandVoice} tone`;
 
-    return `You are a sales copywriter for "${businessName}", a ${brandVoice} ${industry} business.
+    // For SMS, lead with the bound agent's texting persona so copy is
+    // consistent with what the voice agent pitches on calls.
+    const personaIntro =
+        channel === 'sms' && smsPersona
+            ? `${smsPersona}\n\nYou write outbound texts in that exact voice.`
+            : `You are a sales copywriter for "${businessName}", a ${brandVoice} ${industry} business.`;
+    const sharedContextBlock = sharedContextText ? `\n\n${sharedContextText}` : '';
+
+    return `${personaIntro}${sharedContextBlock}
 
 Your job: generate a ${channel.toUpperCase()} message from a strategic brief, personalized using real conversation history.
 

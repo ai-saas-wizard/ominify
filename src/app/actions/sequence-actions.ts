@@ -11,6 +11,13 @@ import {
     type ColumnRole as ImportColumnRole,
     type UpsertedRow,
 } from "@/app/actions/_helpers/contact-import";
+import {
+    createSequenceCore,
+    updateSequenceCore,
+    addSequenceStepCore,
+    updateSequenceStepCore,
+    setSequenceActiveCore,
+} from "@/lib/sequences/sequence-core";
 
 // Normalize any phone input to E.164 (+12223334444). Defaults to US.
 // Returns null for unparseable or invalid numbers.
@@ -121,169 +128,96 @@ export async function getSequenceDetail(sequenceId: string) {
 // ─── Create a new sequence ─────────────────────────────────────────────────────
 
 export async function createSequence(clientId: string, formData: FormData, agentId?: string | null) {
-    try {
-        const name = formData.get("name") as string;
-        const description = formData.get("description") as string;
-        const trigger_type = formData.get("trigger_type") as string;
-        const urgency_tier = formData.get("urgency_tier") as string;
-        const trigger_conditions = formData.get("trigger_conditions") as string;
-
-        if (!name) {
-            return { success: false, error: "Sequence name is required" };
+    // Thin adapter: parse FormData → delegate to the shared core (also used by
+    // the internal MCP/admin routes). See src/lib/sequences/sequence-core.ts.
+    const trigger_conditions_raw = formData.get("trigger_conditions") as string | null;
+    let trigger_conditions: any = null;
+    if (trigger_conditions_raw) {
+        try {
+            trigger_conditions = JSON.parse(trigger_conditions_raw);
+        } catch {
+            return { success: false, error: "Invalid JSON in trigger conditions" };
         }
-
-        // Gate: if an agent is bound, it must be outbound-capable.
-        if (agentId) {
-            const { data: agent } = await supabase
-                .from("agents")
-                .select("agent_type")
-                .eq("id", agentId)
-                .eq("client_id", clientId)
-                .single();
-            if (!agent) {
-                return { success: false, error: "Selected agent not found" };
-            }
-            if (agent.agent_type !== "outbound") {
-                return {
-                    success: false,
-                    error: "Selected agent is inbound-only. Outbound sequences require an outbound agent.",
-                };
-            }
-        }
-
-        let parsedConditions = null;
-        if (trigger_conditions) {
-            try {
-                parsedConditions = JSON.parse(trigger_conditions);
-            } catch {
-                return { success: false, error: "Invalid JSON in trigger conditions" };
-            }
-        }
-
-        const generation_mode = (formData.get("generation_mode") as string) || "static";
-        const max_touchpoints = parseInt(formData.get("max_touchpoints") as string) || 8;
-
-        // Build sequence_strategy if dynamic mode
-        const sequence_strategy = generation_mode === "dynamic" ? {
-            goal: description || "Follow up with lead",
-            max_steps: max_touchpoints,
-            available_channels: ["sms", "email", "voice"],
-            agent_context: name,
-        } : null;
-
-        const { data, error } = await supabase
-            .from("sequences")
-            .insert({
-                client_id: clientId,
-                name,
-                description: description || null,
-                trigger_type: trigger_type || "manual",
-                urgency_tier: urgency_tier || "medium",
-                trigger_conditions: parsedConditions,
-                is_active: false,
-                agent_id: agentId || null,
-                generation_mode,
-                sequence_strategy,
-            })
-            .select("id")
-            .single();
-
-        if (error) {
-            console.error("createSequence error:", error);
-            return { success: false, error: error.message };
-        }
-
-        revalidatePath(`/client/${clientId}/sequences`);
-        return { success: true, sequenceId: data?.id };
-    } catch (error) {
-        console.error("createSequence error:", error);
-        return { success: false, error: "Internal error" };
     }
+
+    return createSequenceCore(
+        clientId,
+        {
+            name: formData.get("name") as string,
+            description: formData.get("description") as string | null,
+            trigger_type: (formData.get("trigger_type") as string) || undefined,
+            urgency_tier: (formData.get("urgency_tier") as string) || undefined,
+            trigger_conditions,
+            generation_mode: (formData.get("generation_mode") as string) || undefined,
+            max_touchpoints:
+                parseInt(formData.get("max_touchpoints") as string) || undefined,
+            // Prefer the explicit param; otherwise read the picker's selection.
+            agentId: agentId ?? ((formData.get("agent_id") as string) || null),
+        },
+        { revalidate: revalidatePath }
+    );
+}
+
+/**
+ * List a client's deployed OUTBOUND agents for the sequence agent-picker.
+ * Returns id + name so a sequence can be bound to the agent whose voice prompt
+ * drives its calls and whose SMS persona drives its texts.
+ */
+export async function listOutboundAgents(
+    clientId: string
+): Promise<{ id: string; name: string }[]> {
+    const { data, error } = await supabase
+        .from("agents")
+        .select("id, name")
+        .eq("client_id", clientId)
+        .eq("agent_type", "outbound")
+        .order("created_at", { ascending: false });
+    if (error) {
+        console.error("listOutboundAgents error:", error);
+        return [];
+    }
+    return (data as { id: string; name: string }[]) || [];
 }
 
 // ─── Update a sequence ─────────────────────────────────────────────────────────
 
 export async function updateSequence(sequenceId: string, formData: FormData) {
-    try {
-        const name = formData.get("name") as string;
-        const description = formData.get("description") as string;
-        const trigger_type = formData.get("trigger_type") as string;
-        const urgency_tier = formData.get("urgency_tier") as string;
-        const trigger_conditions = formData.get("trigger_conditions") as string;
-
-        const updates: Record<string, any> = {};
-        if (name) updates.name = name;
-        if (description !== null) updates.description = description || null;
-        if (trigger_type) updates.trigger_type = trigger_type;
-        if (urgency_tier) updates.urgency_tier = urgency_tier;
-
-        if (trigger_conditions) {
-            try {
-                updates.trigger_conditions = JSON.parse(trigger_conditions);
-            } catch {
-                return { success: false, error: "Invalid JSON in trigger conditions" };
-            }
+    const trigger_conditions_raw = formData.get("trigger_conditions") as string | null;
+    let trigger_conditions: any = undefined;
+    if (trigger_conditions_raw) {
+        try {
+            trigger_conditions = JSON.parse(trigger_conditions_raw);
+        } catch {
+            return { success: false, error: "Invalid JSON in trigger conditions" };
         }
-
-        const { error } = await supabase
-            .from("sequences")
-            .update(updates)
-            .eq("id", sequenceId);
-
-        if (error) {
-            console.error("updateSequence error:", error);
-            return { success: false, error: error.message };
-        }
-
-        // Get client_id for revalidation
-        const { data: seq } = await supabase
-            .from("sequences")
-            .select("client_id")
-            .eq("id", sequenceId)
-            .single();
-
-        if (seq) {
-            revalidatePath(`/client/${seq.client_id}/sequences`);
-            revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("updateSequence error:", error);
-        return { success: false, error: "Internal error" };
     }
+
+    // Only re-bind the agent when the field is actually present in the form
+    // (undefined = leave untouched; "" = explicitly unbind).
+    const agentIdRaw = formData.get("agent_id");
+
+    return updateSequenceCore(
+        sequenceId,
+        {
+            name: (formData.get("name") as string) || undefined,
+            description: formData.get("description") as string | null,
+            trigger_type: (formData.get("trigger_type") as string) || undefined,
+            urgency_tier: (formData.get("urgency_tier") as string) || undefined,
+            trigger_conditions,
+            ...(agentIdRaw !== null
+                ? { agentId: (agentIdRaw as string) || null }
+                : {}),
+        },
+        { revalidate: revalidatePath }
+    );
 }
 
 // ─── Toggle sequence active/inactive ───────────────────────────────────────────
 
 export async function toggleSequenceActive(sequenceId: string, isActive: boolean) {
-    try {
-        const { error } = await supabase
-            .from("sequences")
-            .update({ is_active: isActive })
-            .eq("id", sequenceId);
-
-        if (error) {
-            console.error("toggleSequenceActive error:", error);
-            return { success: false, error: error.message };
-        }
-
-        const { data: seq } = await supabase
-            .from("sequences")
-            .select("client_id")
-            .eq("id", sequenceId)
-            .single();
-
-        if (seq) {
-            revalidatePath(`/client/${seq.client_id}/sequences`);
-            revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("toggleSequenceActive error:", error);
-        return { success: false, error: "Internal error" };
-    }
+    // Delegates to the shared core, which now ALSO pauses in-flight enrollments
+    // on deactivate (previously is_active=false left them dispatching).
+    return setSequenceActiveCore(sequenceId, isActive, { revalidate: revalidatePath });
 }
 
 // ─── Delete a sequence ─────────────────────────────────────────────────────────
@@ -340,198 +274,121 @@ export async function deleteSequence(sequenceId: string) {
 // ─── Add a step to a sequence ──────────────────────────────────────────────────
 
 export async function addSequenceStep(sequenceId: string, formData: FormData) {
-    try {
-        const channel = formData.get("channel") as string;
-        const delay_minutes = parseInt(formData.get("delay_minutes") as string) || 0;
-        const delay_type = formData.get("delay_type") as string;
-        const content_template = formData.get("content_template") as string;
-        const skip_conditions = formData.get("skip_conditions") as string;
-        const on_success = formData.get("on_success") as string;
-        const on_failure = formData.get("on_failure") as string;
+    const channel = formData.get("channel") as string;
 
-        if (!channel) {
-            return { success: false, error: "Channel is required" };
+    const content_template = formData.get("content_template") as string | null;
+    let content: any = null;
+    if (content_template) {
+        try {
+            content = JSON.parse(content_template);
+        } catch {
+            return { success: false, error: "Invalid JSON in content template" };
         }
-
-        let parsedTemplate = null;
-        if (content_template) {
-            try {
-                parsedTemplate = JSON.parse(content_template);
-            } catch {
-                return { success: false, error: "Invalid JSON in content template" };
-            }
-        }
-
-        let parsedSkip = null;
-        if (skip_conditions) {
-            try {
-                parsedSkip = JSON.parse(skip_conditions);
-            } catch {
-                return { success: false, error: "Invalid JSON in skip conditions" };
-            }
-        }
-
-        let parsedOnSuccess = null;
-        if (on_success) {
-            try {
-                parsedOnSuccess = JSON.parse(on_success);
-            } catch {
-                parsedOnSuccess = { action: on_success };
-            }
-        }
-
-        let parsedOnFailure = null;
-        if (on_failure) {
-            try {
-                parsedOnFailure = JSON.parse(on_failure);
-            } catch {
-                parsedOnFailure = { action: on_failure };
-            }
-        }
-
-        // Get current max step_order
-        const { data: existingSteps } = await supabase
-            .from("sequence_steps")
-            .select("step_order")
-            .eq("sequence_id", sequenceId)
-            .order("step_order", { ascending: false })
-            .limit(1);
-
-        const nextOrder = existingSteps && existingSteps.length > 0
-            ? existingSteps[0].step_order + 1
-            : 1;
-
-        const enable_ai_mutation_raw = formData.get("enable_ai_mutation") as string;
-        const mutation_instructions = formData.get("mutation_instructions") as string;
-        const enableMutation = enable_ai_mutation_raw !== null
-            ? enable_ai_mutation_raw === "true"
-            : true;
-
-        const { data, error } = await supabase
-            .from("sequence_steps")
-            .insert({
-                sequence_id: sequenceId,
-                step_order: nextOrder,
-                channel,
-                delay_minutes,
-                delay_type: delay_type || "after_previous",
-                content: parsedTemplate,
-                skip_conditions: parsedSkip,
-                on_success: parsedOnSuccess,
-                on_failure: parsedOnFailure,
-                enable_ai_mutation: enableMutation,
-                mutation_instructions: mutation_instructions || (
-                    channel === "sms"
-                        ? "Keep under 160 chars. Reference prior conversation naturally. Match brand voice."
-                        : channel === "email"
-                        ? "Reference prior interactions in the opening. Address known objections. Keep professional tone."
-                        : channel === "voice"
-                        ? "Adjust opening based on prior calls. Reference any objections or topics discussed."
-                        : null
-                ),
-            })
-            .select("id")
-            .single();
-
-        if (error) {
-            console.error("addSequenceStep error:", error);
-            return { success: false, error: error.message };
-        }
-
-        // Revalidate
-        const { data: seq } = await supabase
-            .from("sequences")
-            .select("client_id")
-            .eq("id", sequenceId)
-            .single();
-
-        if (seq) {
-            revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
-        }
-
-        return { success: true, stepId: data?.id };
-    } catch (error) {
-        console.error("addSequenceStep error:", error);
-        return { success: false, error: "Internal error" };
     }
+
+    const skip_conditions_raw = formData.get("skip_conditions") as string | null;
+    let skip_conditions: any = null;
+    if (skip_conditions_raw) {
+        try {
+            skip_conditions = JSON.parse(skip_conditions_raw);
+        } catch {
+            return { success: false, error: "Invalid JSON in skip conditions" };
+        }
+    }
+
+    const on_success_raw = formData.get("on_success") as string | null;
+    let on_success: any = null;
+    if (on_success_raw) {
+        try {
+            on_success = JSON.parse(on_success_raw);
+        } catch {
+            on_success = { action: on_success_raw };
+        }
+    }
+
+    const on_failure_raw = formData.get("on_failure") as string | null;
+    let on_failure: any = null;
+    if (on_failure_raw) {
+        try {
+            on_failure = JSON.parse(on_failure_raw);
+        } catch {
+            on_failure = { action: on_failure_raw };
+        }
+    }
+
+    const enable_ai_mutation_raw = formData.get("enable_ai_mutation") as string | null;
+    const enable_ai_mutation =
+        enable_ai_mutation_raw !== null ? enable_ai_mutation_raw === "true" : undefined;
+
+    return addSequenceStepCore(
+        sequenceId,
+        {
+            channel,
+            delay_minutes: parseInt(formData.get("delay_minutes") as string) || 0,
+            delay_type: (formData.get("delay_type") as string) || undefined,
+            content,
+            skip_conditions,
+            on_success,
+            on_failure,
+            enable_ai_mutation,
+            mutation_instructions:
+                (formData.get("mutation_instructions") as string | null) || undefined,
+        },
+        { revalidate: revalidatePath }
+    );
 }
 
 // ─── Update a sequence step ────────────────────────────────────────────────────
 
 export async function updateSequenceStep(stepId: string, formData: FormData) {
-    try {
-        const channel = formData.get("channel") as string;
-        const delay_minutes_raw = formData.get("delay_minutes") as string;
-        const delay_type = formData.get("delay_type") as string;
-        const content_template = formData.get("content_template") as string;
-        const skip_conditions = formData.get("skip_conditions") as string;
-        const on_success = formData.get("on_success") as string;
-        const on_failure = formData.get("on_failure") as string;
+    const input: Record<string, any> = {};
 
-        const updates: Record<string, any> = {};
-        if (channel) updates.channel = channel;
-        if (delay_minutes_raw !== null) updates.delay_minutes = parseInt(delay_minutes_raw) || 0;
-        if (delay_type) updates.delay_type = delay_type;
+    const channel = formData.get("channel") as string | null;
+    if (channel) input.channel = channel;
 
-        if (content_template) {
-            try {
-                updates.content = JSON.parse(content_template);
-            } catch {
-                return { success: false, error: "Invalid JSON in content template" };
-            }
+    const delay_minutes_raw = formData.get("delay_minutes") as string | null;
+    if (delay_minutes_raw !== null) input.delay_minutes = parseInt(delay_minutes_raw) || 0;
+
+    const delay_type = formData.get("delay_type") as string | null;
+    if (delay_type) input.delay_type = delay_type;
+
+    const content_template = formData.get("content_template") as string | null;
+    if (content_template) {
+        try {
+            input.content = JSON.parse(content_template);
+        } catch {
+            return { success: false, error: "Invalid JSON in content template" };
         }
-
-        if (skip_conditions) {
-            try {
-                updates.skip_conditions = JSON.parse(skip_conditions);
-            } catch {
-                return { success: false, error: "Invalid JSON in skip conditions" };
-            }
-        }
-
-        if (on_success) {
-            try {
-                updates.on_success = JSON.parse(on_success);
-            } catch {
-                updates.on_success = { action: on_success };
-            }
-        }
-
-        if (on_failure) {
-            try {
-                updates.on_failure = JSON.parse(on_failure);
-            } catch {
-                updates.on_failure = { action: on_failure };
-            }
-        }
-
-        const { error } = await supabase
-            .from("sequence_steps")
-            .update(updates)
-            .eq("id", stepId);
-
-        if (error) {
-            console.error("updateSequenceStep error:", error);
-            return { success: false, error: error.message };
-        }
-
-        // Revalidate
-        const { data: step } = await supabase
-            .from("sequence_steps")
-            .select("sequence_id, sequences(client_id)")
-            .eq("id", stepId)
-            .single();
-
-        if (step?.sequences) {
-            const clientId = (step.sequences as any).client_id;
-            revalidatePath(`/client/${clientId}/sequences/${step.sequence_id}`);
-        }
-
-        return { success: true };
-    } catch (error) {
-        console.error("updateSequenceStep error:", error);
-        return { success: false, error: "Internal error" };
     }
+
+    const skip_conditions_raw = formData.get("skip_conditions") as string | null;
+    if (skip_conditions_raw) {
+        try {
+            input.skip_conditions = JSON.parse(skip_conditions_raw);
+        } catch {
+            return { success: false, error: "Invalid JSON in skip conditions" };
+        }
+    }
+
+    const on_success_raw = formData.get("on_success") as string | null;
+    if (on_success_raw) {
+        try {
+            input.on_success = JSON.parse(on_success_raw);
+        } catch {
+            input.on_success = { action: on_success_raw };
+        }
+    }
+
+    const on_failure_raw = formData.get("on_failure") as string | null;
+    if (on_failure_raw) {
+        try {
+            input.on_failure = JSON.parse(on_failure_raw);
+        } catch {
+            input.on_failure = { action: on_failure_raw };
+        }
+    }
+
+    return updateSequenceStepCore(stepId, input, { revalidate: revalidatePath });
 }
 
 // ─── Delete a sequence step ────────────────────────────────────────────────────

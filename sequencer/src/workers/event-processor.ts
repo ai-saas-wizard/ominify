@@ -22,6 +22,7 @@ import {
     updateInteraction,
     findInteractionByProviderId,
     updateContactConversationSummary,
+    summarizeInteraction,
     getConversationContext as getConvCtx,
 } from '../lib/conversation-memory.js';
 import {
@@ -415,12 +416,40 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
     if (callId) {
         const existingInteraction = await findInteractionByProviderId(callId);
         if (existingInteraction) {
+            // Derive clean, structured call context so downstream messaging
+            // (SMS generation + inbound replies) sees a real summary + the
+            // objections/topics raised on the call — not a raw transcript
+            // truncation. Without this, getConversationContext().last_call has
+            // an empty objections list and the timeline shows raw transcript.
+            const callObjections = (eiAnalysis?.objections || [])
+                .map((o) => (o.detail ? `${o.type}: ${o.detail}` : o.type))
+                .filter(Boolean);
+            const callKeyTopics = (eiAnalysis?.buying_signals || [])
+                .map((s) => s.signal)
+                .filter(Boolean);
+            let callSummary: string | null = null;
+            if (event.transcript && event.transcript.length > 30) {
+                try {
+                    callSummary = await summarizeInteraction(
+                        'voice',
+                        existingInteraction.direction,
+                        event.transcript,
+                        disposition || undefined
+                    );
+                } catch (err) {
+                    console.error('[EVENT] Failed to summarize call transcript:', err);
+                }
+            }
+
             await updateInteraction(existingInteraction.id, {
                 content_body: event.transcript || null,
+                content_summary: callSummary || undefined,
                 outcome: wasAnswered ? 'answered' : (disposition as any) || 'failed',
                 call_duration_seconds: duration || null,
                 call_disposition: disposition || null,
                 appointment_booked: appointmentBooked || false,
+                objections_raised: callObjections.length ? callObjections : undefined,
+                key_topics: callKeyTopics.length ? callKeyTopics : undefined,
             });
 
             // Store EI analysis on the interaction

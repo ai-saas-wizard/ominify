@@ -269,6 +269,8 @@ export function VerticalForm({
             outboundScenario: initialData?.outboundScenario ?? "",
             outboundPrompt: initialData?.outboundPrompt ?? "",
             outboundFirstMessage: initialData?.outboundFirstMessage ?? "",
+            smsPrompt: initialData?.smsPrompt ?? "",
+            smsFirstMessage: initialData?.smsFirstMessage ?? "",
         };
 
         onContinue(formData);

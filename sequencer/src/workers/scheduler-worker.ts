@@ -59,6 +59,7 @@ import {
 import {
     generateOutboundContent,
 } from '../lib/outbound-generator.js';
+import { getAgentMessaging } from '../lib/agent-messaging.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -479,6 +480,10 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         console.log(`[SCHEDULER] Could not load conversation context, proceeding without it`);
     }
 
+    // 4b. Resolve the bound agent's messaging assets (SMS persona, shared offer
+    // context, voice assistant id) so this dispatch can adapt per channel.
+    const agentMessaging = await getAgentMessaging(sequence.agent_id);
+
     // 5. Build template variables (contact core + custom_fields + enrollment vars + conversation memory + tone)
     const conversationVars = conversationCtx ? buildTemplateVariables(conversationCtx) : {};
 
@@ -575,7 +580,11 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 step,
                 conversationCtx!,
                 tenantProfile,
-                sequence.mutation_aggressiveness || 'moderate'
+                sequence.mutation_aggressiveness || 'moderate',
+                {
+                    smsPrompt: agentMessaging?.smsPrompt,
+                    sharedContextText: agentMessaging?.sharedContextText,
+                }
             );
 
             if (mutation.confidence >= MIN_CONFIDENCE) {
@@ -706,6 +715,15 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 
         case 'voice': {
             const voiceContent = renderedContent as VoiceContent;
+
+            // If this step didn't bake in a specific assistant, dial the agent
+            // the sequence is bound to (sequences.agent_id → agents.vapi_id)
+            // instead of falling through to the worker's hardcoded generic
+            // transient. This makes "which agent the calls go from" explicit.
+            if (!voiceContent.vapi_assistant_id && agentMessaging?.vapiId) {
+                voiceContent.vapi_assistant_id = agentMessaging.vapiId;
+                console.log(`[SCHEDULER] Voice step missing assistant id — using bound agent ${agentMessaging.agentId} (vapi ${agentMessaging.vapiId}) for enrollment ${enrollment.id}`);
+            }
 
             // Build conversation history injection
             let conversationHistoryInjection = '';

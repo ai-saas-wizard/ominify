@@ -6,6 +6,7 @@ import {
     ArrowLeft,
     ArrowRight,
     PhoneOutgoing,
+    MessageSquare,
     Sparkles,
     Wand2,
     Loader2,
@@ -28,6 +29,7 @@ import {
     RE_OUTBOUND_GOALS,
     buildREOutboundStarter,
 } from "@/lib/verticals/real-estate-investor/outbound-prompt-templates";
+import { buildRESmsStarter } from "@/lib/verticals/real-estate-investor/sms-prompt-templates";
 import { generateOutboundPromptFromScenario } from "@/app/actions/generate-outbound-prompt";
 import type {
     REInvestorFormData,
@@ -89,6 +91,23 @@ export function VerticalOutboundConfig({
         initialStarter.firstMessage
     );
 
+    // SMS channel prompt — same offer context, texting personality. Seeded from
+    // the builder unless the user already edited it.
+    const initialSms = useMemo(() => {
+        if (formData.smsPrompt && formData.smsFirstMessage) {
+            return {
+                smsPrompt: formData.smsPrompt,
+                smsFirstMessage: formData.smsFirstMessage,
+            };
+        }
+        return buildRESmsStarter(formData.outboundGoal, formData);
+    }, [formData]);
+
+    const [smsPrompt, setSmsPrompt] = useState<string>(initialSms.smsPrompt);
+    const [smsFirstMessage, setSmsFirstMessage] = useState<string>(
+        initialSms.smsFirstMessage
+    );
+
     // Build a snapshot of formData with the current outbound transfer config
     // so any starter/AI generation reads the right transfer-specialist values.
     const buildSnapshot = useCallback(
@@ -137,6 +156,9 @@ export function VerticalOutboundConfig({
             const starter = buildREOutboundStarter(next, snapshot);
             setSystemPrompt(starter.systemPrompt);
             setFirstMessage(starter.firstMessage);
+            const sms = buildRESmsStarter(next, snapshot);
+            setSmsPrompt(sms.smsPrompt);
+            setSmsFirstMessage(sms.smsFirstMessage);
         },
         [
             formData,
@@ -153,6 +175,13 @@ export function VerticalOutboundConfig({
         const starter = buildREOutboundStarter(goal, snapshot);
         setSystemPrompt(starter.systemPrompt);
         setFirstMessage(starter.firstMessage);
+    }, [goal, buildSnapshot]);
+
+    const handleResetSmsToStarter = useCallback(() => {
+        const snapshot = buildSnapshot();
+        const sms = buildRESmsStarter(goal, snapshot);
+        setSmsPrompt(sms.smsPrompt);
+        setSmsFirstMessage(sms.smsFirstMessage);
     }, [goal, buildSnapshot]);
 
     const handleGenerateFromScenario = useCallback(async () => {
@@ -214,6 +243,8 @@ export function VerticalOutboundConfig({
             outboundScenario: scenario,
             outboundPrompt: systemPrompt,
             outboundFirstMessage: firstMessage,
+            smsPrompt,
+            smsFirstMessage,
         });
     }, [
         formData,
@@ -225,6 +256,8 @@ export function VerticalOutboundConfig({
         scenario,
         systemPrompt,
         firstMessage,
+        smsPrompt,
+        smsFirstMessage,
         onContinue,
     ]);
 
@@ -236,7 +269,9 @@ export function VerticalOutboundConfig({
     const canContinue =
         transferComplete &&
         systemPrompt.trim().length > 0 &&
-        firstMessage.trim().length > 0;
+        firstMessage.trim().length > 0 &&
+        smsPrompt.trim().length > 0 &&
+        smsFirstMessage.trim().length > 0;
 
     const transferToolPreview = transferFirstName.trim()
         ? `${transferFirstName
@@ -552,6 +587,73 @@ export function VerticalOutboundConfig({
                     />
                     <p className="mt-2 text-[11px] text-gray-400">
                         {systemPrompt.length.toLocaleString()} characters
+                    </p>
+                </div>
+
+                {/* SMS channel header */}
+                <div className="mb-4 mt-8 flex items-center gap-3 border-t border-gray-200 pt-6">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50">
+                        <MessageSquare className="h-5 w-5 text-sky-600" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-900">
+                            How this agent texts (SMS)
+                        </h2>
+                        <p className="text-xs text-gray-500">
+                            Same offer, texting personality. Drives outbound SMS and
+                            auto-replies when a sequence uses this agent.
+                        </p>
+                    </div>
+                </div>
+
+                {/* SMS first message */}
+                <div className="mb-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                        <label
+                            htmlFor="re-sms-first-message"
+                            className="text-sm font-semibold text-gray-900"
+                        >
+                            First text
+                        </label>
+                        <span className="text-[10px] text-gray-400">
+                            The opening SMS. Use {`{{first_name}}`} for the name.
+                        </span>
+                    </div>
+                    <Textarea
+                        id="re-sms-first-message"
+                        value={smsFirstMessage}
+                        onChange={(e) => setSmsFirstMessage(e.target.value)}
+                        rows={2}
+                        className="font-mono text-sm"
+                    />
+                </div>
+
+                {/* SMS prompt */}
+                <div className="mb-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                        <label
+                            htmlFor="re-sms-prompt"
+                            className="text-sm font-semibold text-gray-900"
+                        >
+                            SMS prompt (texting persona &amp; rules)
+                        </label>
+                        <button
+                            type="button"
+                            onClick={handleResetSmsToStarter}
+                            className="text-xs text-emerald-600 hover:text-emerald-700"
+                        >
+                            Reset to {goal === "custom" ? "scaffold" : "goal starter"}
+                        </button>
+                    </div>
+                    <Textarea
+                        id="re-sms-prompt"
+                        value={smsPrompt}
+                        onChange={(e) => setSmsPrompt(e.target.value)}
+                        rows={20}
+                        className="font-mono text-xs leading-relaxed"
+                    />
+                    <p className="mt-2 text-[11px] text-gray-400">
+                        {smsPrompt.length.toLocaleString()} characters
                     </p>
                 </div>
 

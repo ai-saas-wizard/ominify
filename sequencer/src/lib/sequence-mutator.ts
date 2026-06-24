@@ -82,12 +82,13 @@ export async function mutateStepContent(
     step: SequenceStep,
     conversationContext: ConversationContext,
     tenantProfile: TenantProfile,
-    aggressiveness: MutationAggressiveness
+    aggressiveness: MutationAggressiveness,
+    agentContext?: { smsPrompt?: string | null; sharedContextText?: string }
 ): Promise<MutationResult> {
     const channel = step.channel;
     const originalContent = step.content;
 
-    const systemPrompt = buildMutationPrompt(channel, aggressiveness, tenantProfile);
+    const systemPrompt = buildMutationPrompt(channel, aggressiveness, tenantProfile, agentContext);
 
     const userMessage = buildMutationRequest(
         channel,
@@ -182,7 +183,8 @@ export async function recordMutation(
 function buildMutationPrompt(
     channel: ChannelType,
     aggressiveness: MutationAggressiveness,
-    tenantProfile: TenantProfile
+    tenantProfile: TenantProfile,
+    agentContext?: { smsPrompt?: string | null; sharedContextText?: string }
 ): string {
     const brandVoice = tenantProfile.brand_voice || 'professional';
     const industry = tenantProfile.industry || 'general services';
@@ -215,8 +217,18 @@ function buildMutationPrompt(
             break;
     }
 
+    // For SMS, fold in the bound agent's texting persona + shared offer context
+    // so the rewrite stays consistent with what the voice agent pitches.
+    const personaBlock =
+        channel === 'sms' && agentContext?.smsPrompt
+            ? `\n\nTEXTING PERSONA TO STAY CONSISTENT WITH (adapt, don't copy verbatim):\n${agentContext.smsPrompt}`
+            : '';
+    const sharedContextBlock = agentContext?.sharedContextText
+        ? `\n\n${agentContext.sharedContextText}`
+        : '';
+
     return `You are a sales copywriter for a ${brandVoice} brand in the ${industry} industry.
-Your job is to adapt outreach messages based on real conversation history with the customer.
+Your job is to adapt outreach messages based on real conversation history with the customer.${personaBlock}${sharedContextBlock}
 
 ${aggressivenessGuide}
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Loader2, Zap } from "lucide-react";
-import { createSequence } from "@/app/actions/sequence-actions";
+import { createSequence, listOutboundAgents } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 
 const TRIGGER_OPTIONS = [
@@ -25,7 +25,22 @@ const URGENCY_OPTIONS = [
 export function CreateSequenceDialog({ clientId, variant }: { clientId: string; variant?: "default" | "secondary" | "link" }) {
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
     const router = useRouter();
+
+    // Load the client's outbound agents when the dialog opens so the user can
+    // bind one — it drives the voice assistant for calls and the SMS persona
+    // for texts.
+    useEffect(() => {
+        if (!isOpen) return;
+        let active = true;
+        listOutboundAgents(clientId).then((list) => {
+            if (active) setAgents(list);
+        });
+        return () => {
+            active = false;
+        };
+    }, [isOpen, clientId]);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -113,6 +128,30 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
                             placeholder="Describe what this sequence does..."
                             className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
                         />
+                    </div>
+
+                    {/* Outbound Agent */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700">
+                            Outbound Agent
+                        </label>
+                        <select
+                            name="agent_id"
+                            defaultValue=""
+                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                            <option value="">No agent (generic)</option>
+                            {agents.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                    {a.name}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-500">
+                            The agent drives the voice prompt for calls and the SMS
+                            persona for texts. Binding one also turns on call-aware
+                            SMS auto-replies.
+                        </p>
                     </div>
 
                     {/* Trigger Type */}

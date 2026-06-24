@@ -6,6 +6,7 @@ import {
     ArrowLeft,
     ArrowRight,
     PhoneOutgoing,
+    MessageSquare,
     Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
     SAAS_OUTBOUND_GOALS,
     buildSaaSOutboundStarter,
 } from "@/lib/verticals/saas/outbound-prompt-templates";
+import { buildSaaSSmsStarter } from "@/lib/verticals/saas/sms-prompt-templates";
 import type {
     SaaSFormData,
     SaaSOutboundGoal,
@@ -76,6 +78,23 @@ export function SaaSOutboundConfig({
         initialStarter.firstMessage
     );
 
+    // SMS channel prompt — same offer context, texting personality. Seeded from
+    // the builder unless the user already edited it.
+    const initialSms = useMemo(() => {
+        if (formData.smsPrompt && formData.smsFirstMessage) {
+            return {
+                smsPrompt: formData.smsPrompt,
+                smsFirstMessage: formData.smsFirstMessage,
+            };
+        }
+        return buildSaaSSmsStarter(formData.outboundGoal, formData);
+    }, [formData]);
+
+    const [smsPrompt, setSmsPrompt] = useState(initialSms.smsPrompt);
+    const [smsFirstMessage, setSmsFirstMessage] = useState(
+        initialSms.smsFirstMessage
+    );
+
     const snapshotWith = useCallback(
         (nextGoal: SaaSOutboundGoal): SaaSFormData => ({
             ...formData,
@@ -96,6 +115,9 @@ export function SaaSOutboundConfig({
             const starter = buildSaaSOutboundStarter(next, snapshotWith(next));
             setSystemPrompt(starter.systemPrompt);
             setFirstMessage(starter.firstMessage);
+            const sms = buildSaaSSmsStarter(next, snapshotWith(next));
+            setSmsPrompt(sms.smsPrompt);
+            setSmsFirstMessage(sms.smsFirstMessage);
         },
         [snapshotWith]
     );
@@ -104,6 +126,12 @@ export function SaaSOutboundConfig({
         const starter = buildSaaSOutboundStarter(goal, snapshotWith(goal));
         setSystemPrompt(starter.systemPrompt);
         setFirstMessage(starter.firstMessage);
+    }, [goal, snapshotWith]);
+
+    const handleResetSmsToStarter = useCallback(() => {
+        const sms = buildSaaSSmsStarter(goal, snapshotWith(goal));
+        setSmsPrompt(sms.smsPrompt);
+        setSmsFirstMessage(sms.smsFirstMessage);
     }, [goal, snapshotWith]);
 
     const phoneE164 = normalizeToE164(transferPhone);
@@ -117,7 +145,9 @@ export function SaaSOutboundConfig({
     const canContinue =
         transferComplete &&
         systemPrompt.trim().length > 0 &&
-        firstMessage.trim().length > 0;
+        firstMessage.trim().length > 0 &&
+        smsPrompt.trim().length > 0 &&
+        smsFirstMessage.trim().length > 0;
 
     const transferToolPreview = transferFirstName.trim()
         ? `${transferFirstName.trim().toLowerCase().replace(/[^a-z0-9]/g, "")}_transfer`
@@ -138,6 +168,8 @@ export function SaaSOutboundConfig({
             outboundScenario: "",
             outboundPrompt: systemPrompt,
             outboundFirstMessage: firstMessage,
+            smsPrompt,
+            smsFirstMessage,
         });
     }, [
         phoneE164,
@@ -148,6 +180,8 @@ export function SaaSOutboundConfig({
         goal,
         systemPrompt,
         firstMessage,
+        smsPrompt,
+        smsFirstMessage,
         onContinue,
     ]);
 
@@ -400,6 +434,73 @@ export function SaaSOutboundConfig({
                     />
                     <p className="mt-2 text-[11px] text-gray-400">
                         {systemPrompt.length.toLocaleString()} characters
+                    </p>
+                </div>
+
+                {/* SMS channel header */}
+                <div className="mb-4 mt-8 flex items-center gap-3 border-t border-gray-200 pt-6">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50">
+                        <MessageSquare className="h-5 w-5 text-sky-600" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-900">
+                            How this agent texts (SMS)
+                        </h2>
+                        <p className="text-xs text-gray-500">
+                            Same offer, texting personality. Drives outbound SMS and
+                            auto-replies when a sequence uses this agent.
+                        </p>
+                    </div>
+                </div>
+
+                {/* SMS first message */}
+                <div className="mb-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                        <label
+                            htmlFor="saas-sms-first-message"
+                            className="text-sm font-semibold text-gray-900"
+                        >
+                            First text
+                        </label>
+                        <span className="text-[10px] text-gray-400">
+                            The opening SMS. Use {`{{first_name}}`} for the name.
+                        </span>
+                    </div>
+                    <Textarea
+                        id="saas-sms-first-message"
+                        value={smsFirstMessage}
+                        onChange={(e) => setSmsFirstMessage(e.target.value)}
+                        rows={2}
+                        className="font-mono text-sm"
+                    />
+                </div>
+
+                {/* SMS prompt */}
+                <div className="mb-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                        <label
+                            htmlFor="saas-sms-prompt"
+                            className="text-sm font-semibold text-gray-900"
+                        >
+                            SMS prompt (texting persona &amp; rules)
+                        </label>
+                        <button
+                            type="button"
+                            onClick={handleResetSmsToStarter}
+                            className="text-xs text-emerald-600 hover:text-emerald-700"
+                        >
+                            Reset to {goal === "custom" ? "scaffold" : "goal starter"}
+                        </button>
+                    </div>
+                    <Textarea
+                        id="saas-sms-prompt"
+                        value={smsPrompt}
+                        onChange={(e) => setSmsPrompt(e.target.value)}
+                        rows={20}
+                        className="font-mono text-xs leading-relaxed"
+                    />
+                    <p className="mt-2 text-[11px] text-gray-400">
+                        {smsPrompt.length.toLocaleString()} characters
                     </p>
                 </div>
 

@@ -73,6 +73,8 @@ const EMPTY_RE_FORM_DATA: REInvestorFormData = {
     outboundScenario: "",
     outboundPrompt: "",
     outboundFirstMessage: "",
+    smsPrompt: "",
+    smsFirstMessage: "",
 };
 
 export function NewAgentWizard({

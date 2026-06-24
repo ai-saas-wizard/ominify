@@ -14,6 +14,7 @@ import {
   Sparkles,
   User,
   MessageSquare,
+  Smartphone,
   Globe,
   Mic,
   Image as ImageIcon,
@@ -56,6 +57,10 @@ interface AgentEditorProps {
   agent: VapiAgent;
   voices?: unknown[];
   clientId: string;
+  /** Show the SMS tab (outbound agents only — SMS persona drives sequence texts). */
+  showSms?: boolean;
+  smsPrompt?: string;
+  smsFirstMessage?: string;
 }
 
 const LANGUAGES = [
@@ -83,7 +88,7 @@ const LANGUAGES = [
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 
-const TABS = [
+const BASE_TABS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "role", label: "Role & Prompt", icon: MessageSquare },
 ] as const;
@@ -102,7 +107,13 @@ const tabVariants = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const AgentEditor = ({ agent, clientId }: AgentEditorProps) => {
+export const AgentEditor = ({
+  agent,
+  clientId,
+  showSms = false,
+  smsPrompt = "",
+  smsFirstMessage = "",
+}: AgentEditorProps) => {
   const [activeTab, setActiveTab] = useState<string>("profile");
   const [showCopilot, setShowCopilot] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -110,6 +121,10 @@ export const AgentEditor = ({ agent, clientId }: AgentEditorProps) => {
   const [selectedVoiceId, setSelectedVoiceId] = useState(
     agent.voice?.voiceId || DEFAULT_VOICE.voiceId
   );
+
+  const TABS = showSms
+    ? ([...BASE_TABS, { id: "sms", label: "SMS", icon: Smartphone }] as const)
+    : BASE_TABS;
 
   const initialSystemPrompt =
     agent.model?.systemPrompt ||
@@ -391,6 +406,64 @@ export const AgentEditor = ({ agent, clientId }: AgentEditorProps) => {
                           </div>
                         </div>
                       </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* ── SMS Tab ──────────────────────────────────────────── */}
+                {activeTab === "sms" && (
+                  <motion.div
+                    key="sms"
+                    variants={tabVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className="space-y-8"
+                  >
+                    <div className="rounded-xl bg-sky-50/60 border border-sky-100 p-4 text-sm text-sky-900">
+                      How this agent texts. The same offer context drives both
+                      channels; this is the texting personality used for outbound
+                      SMS and auto-replies when a sequence is bound to this agent.
+                    </div>
+
+                    {/* SMS first message */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-sky-50 flex items-center justify-center">
+                          <MessageSquare className="w-3.5 h-3.5 text-sky-600" />
+                        </div>
+                        <h3 className="text-sm font-bold text-gray-900">
+                          First text
+                        </h3>
+                        <span className="text-[11px] text-gray-400">
+                          Opening SMS. Use {`{{first_name}}`} for the name.
+                        </span>
+                      </div>
+                      <textarea
+                        name="smsFirstMessage"
+                        defaultValue={smsFirstMessage}
+                        rows={2}
+                        className="w-full p-4 border border-gray-200 rounded-xl text-sm font-mono leading-relaxed text-gray-800 bg-gray-50/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-400 resize-y transition-all"
+                        placeholder="Hey {{first_name}}, it's ..."
+                      />
+                    </div>
+
+                    {/* SMS prompt */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-sky-50 flex items-center justify-center">
+                          <Smartphone className="w-3.5 h-3.5 text-sky-600" />
+                        </div>
+                        <h3 className="text-sm font-bold text-gray-900">
+                          SMS prompt (texting persona &amp; rules)
+                        </h3>
+                      </div>
+                      <textarea
+                        name="smsPrompt"
+                        defaultValue={smsPrompt}
+                        className="w-full min-h-[460px] p-4 border border-gray-200 rounded-xl text-sm font-mono leading-relaxed text-gray-800 bg-gray-50/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-400 resize-y transition-all"
+                        placeholder="The texting personality + rules for this agent..."
+                      />
                     </div>
                   </motion.div>
                 )}

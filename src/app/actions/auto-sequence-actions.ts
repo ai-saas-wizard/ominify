@@ -15,12 +15,26 @@ async function generateStepContent(
     businessName: string,
     profile: TenantProfileData,
     stepTemplate: SequenceStepTemplate,
-    vapiAssistantId?: string
+    vapiAssistantId?: string,
+    agentConfig?: Record<string, any>
 ): Promise<Record<string, unknown>> {
     const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY,
         timeout: 15000,
     });
+
+    // The bound agent's shared offer context (product, value props, ICP…) so
+    // the very first message is consistent with what the voice agent pitches.
+    const sc = (agentConfig?.shared_context as Record<string, any>) || {};
+    const offerContext = [
+        sc.product_one_liner && `Product: ${sc.product_one_liner}`,
+        sc.value_props && `Value props: ${sc.value_props}`,
+        sc.icp && `Who we're reaching: ${sc.icp}`,
+        sc.common_objections && `Common objections: ${sc.common_objections}`,
+    ]
+        .filter(Boolean)
+        .join("\n");
+    const offerBlock = offerContext ? `\n\nWHAT WE SELL (stay consistent with this):\n${offerContext}` : "";
 
     if (stepTemplate.channel === "voice" && vapiAssistantId) {
         const response = await openai.chat.completions.create({
@@ -53,6 +67,14 @@ Rules: Under 20 words, natural, reference the purpose, use {{customer_name}} if 
     }
 
     if (stepTemplate.channel === "sms") {
+        // First touch: prefer the agent's edited SMS opener verbatim so step 1
+        // matches exactly what the operator approved on the SMS-config phase.
+        if (agentConfig?.sms_first_message) {
+            return { body: String(agentConfig.sms_first_message) };
+        }
+        const smsPersona = agentConfig?.sms_prompt
+            ? `Follow this texting persona/style (adapt, don't copy verbatim):\n${agentConfig.sms_prompt}\n\n`
+            : "";
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             max_tokens: 300,
@@ -63,10 +85,10 @@ Rules: Under 20 words, natural, reference the purpose, use {{customer_name}} if 
                     role: "system",
                     content: `Generate an SMS message for a business outreach step. Output JSON: {"body": "..."}
 
-Business: ${businessName}
+${smsPersona}Business: ${businessName}
 Industry: ${profile.industry}
 Brand Voice: ${profile.brand_voice}
-Step Purpose: ${stepTemplate.content_purpose}
+Step Purpose: ${stepTemplate.content_purpose}${offerBlock}
 
 Rules: Under 160 characters, use {{customer_name}} for personalization, clear CTA, match brand voice, sound human.
 For follow-up steps, you may reference: {{last_call_summary}}, {{last_sms_reply}}, {{objections_raised}}, {{overall_sentiment}}.`,
@@ -93,7 +115,7 @@ For follow-up steps, you may reference: {{last_call_summary}}, {{last_sms_reply}
 Business: ${businessName}
 Industry: ${profile.industry}
 Brand Voice: ${profile.brand_voice}
-Step Purpose: ${stepTemplate.content_purpose}
+Step Purpose: ${stepTemplate.content_purpose}${offerBlock}
 
 Rules: Subject under 60 chars, simple HTML with <p> tags, use {{customer_name}}, include business name, 3-4 short paragraphs max.
 For follow-up emails, you may reference: {{last_call_summary}}, {{objections_raised}}, {{overall_sentiment}}, {{key_topics}}.`,
@@ -160,9 +182,18 @@ export async function createAgentSequence(
     const template = agentDef.sequence_template;
     const sequenceName = template.name_template.replace("{{business_name}}", businessName);
 
+    // Load the bound agent's config so step-1 content (and, at runtime, the
+    // SMS chatbot + JIT generator) use its SMS persona + shared offer context.
+    const { data: agentRow } = await supabase
+        .from("agents")
+        .select("agent_config")
+        .eq("id", agentId)
+        .single();
+    const agentConfig = (agentRow?.agent_config as Record<string, any>) || undefined;
+
     // 1. Create the sequence (dynamic mode by default for auto-created)
     const sequenceStrategy = {
-        goal: template.description_template || "Follow up with lead",
+        goal: agentConfig?.shared_context?.goal || template.description_template || "Follow up with lead",
         max_steps: template.steps.length,
         available_channels: [...new Set(template.steps.map(s => s.channel))] as ("sms" | "email" | "voice")[],
         agent_context: `${agentTypeId} agent for ${businessName}`,
@@ -184,6 +215,9 @@ export async function createAgentSequence(
             enable_adaptive_mutation: true,
             mutation_aggressiveness: "moderate",
             generation_mode: "dynamic",
+            // Inbound replies are auto-handled by the call-aware SMS chatbot
+            // (it uses the bound agent's SMS persona + shared context).
+            enable_chatbot_mode: true,
             sequence_strategy: sequenceStrategy,
         })
         .select("id")
@@ -202,7 +236,8 @@ export async function createAgentSequence(
                 businessName,
                 profile,
                 stepTemplate,
-                stepTemplate.channel === "voice" ? vapiAssistantId : undefined
+                stepTemplate.channel === "voice" ? vapiAssistantId : undefined,
+                agentConfig
             );
 
             return supabase.from("sequence_steps").insert({
@@ -265,9 +300,17 @@ export async function createAgentSequenceFromDynamic(
         return { success: true };
     }
 
+    // Load the bound agent's config for step-1 content + runtime SMS adaptation.
+    const { data: agentRow } = await supabase
+        .from("agents")
+        .select("agent_config")
+        .eq("id", agentId)
+        .single();
+    const agentConfig = (agentRow?.agent_config as Record<string, any>) || undefined;
+
     // 1. Create the sequence (dynamic mode by default)
     const v2Strategy = {
-        goal: "Follow up with lead and book appointment",
+        goal: agentConfig?.shared_context?.goal || "Follow up with lead and book appointment",
         max_steps: sequenceStructure.steps.length,
         available_channels: [...new Set(sequenceStructure.steps.map(s => s.channel))] as ("sms" | "email" | "voice")[],
         agent_context: `Outbound agent for ${businessName}`,
@@ -289,6 +332,7 @@ export async function createAgentSequenceFromDynamic(
             enable_adaptive_mutation: true,
             mutation_aggressiveness: "moderate",
             generation_mode: "dynamic",
+            enable_chatbot_mode: true,
             sequence_strategy: v2Strategy,
         })
         .select("id")
@@ -319,7 +363,8 @@ export async function createAgentSequenceFromDynamic(
                 businessName,
                 profile,
                 stepTemplate,
-                step.channel === "voice" ? vapiAssistantId : undefined
+                step.channel === "voice" ? vapiAssistantId : undefined,
+                agentConfig
             );
 
             return supabase.from("sequence_steps").insert({

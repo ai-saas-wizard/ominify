@@ -145,6 +145,11 @@ export interface REInvestorFormData {
     outboundScenario: string;   // optional free-text scenario description for AI generation
     outboundPrompt: string;
     outboundFirstMessage: string;
+    // SMS channel prompt (collected on the SMS-config phase). Built from the
+    // shared context via buildRESmsStarter; drives the sequencer's outbound SMS
+    // generation and inbound auto-replies for sequences bound to this agent.
+    smsPrompt: string;
+    smsFirstMessage: string;
 }
 
 // ─── SAAS COMPANIES VERTICAL (outbound-only) ───
@@ -186,6 +191,11 @@ export interface SaaSFormData {
     outboundScenario: string; // optional free-text scenario
     outboundPrompt: string;
     outboundFirstMessage: string;
+    // SMS channel prompt (collected on the SMS-config phase). Built from the
+    // shared context via buildSaaSSmsStarter; drives the sequencer's outbound
+    // SMS generation and inbound auto-replies for sequences bound to this agent.
+    smsPrompt: string;
+    smsFirstMessage: string;
 }
 
 // ─── VALIDATION ───

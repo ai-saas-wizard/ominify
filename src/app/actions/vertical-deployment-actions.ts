@@ -21,6 +21,8 @@ import {
     SAAS_STRUCTURED_OUTPUT_SCHEMA,
     SAAS_STRUCTURED_OUTPUT_PROMPT,
 } from "@/lib/verticals/saas/structured-output";
+import { buildSaaSSmsStarter } from "@/lib/verticals/saas/sms-prompt-templates";
+import { buildRESmsStarter } from "@/lib/verticals/real-estate-investor/sms-prompt-templates";
 import { getCalendarToolIdsForClient } from "./umbrella-tools-actions";
 import { getREStructuredOutputIdForClient } from "./umbrella-structured-outputs-actions";
 import type { REInvestorFormData, SaaSFormData } from "@/lib/verticals/types";
@@ -289,6 +291,29 @@ export async function deployVerticalAgents(
             if (isOutbound) {
                 agentConfig.outbound_goal = formData.outboundGoal;
                 agentConfig.outbound_scenario = formData.outboundScenario || null;
+                // Persist the voice + SMS channel prompts and the shared offer
+                // context so the sequencer can adapt personality per channel for
+                // sequences bound to this agent. The SMS prompt is built from the
+                // same context as the voice prompt unless the user edited it.
+                agentConfig.voice_prompt = formData.outboundPrompt;
+                agentConfig.voice_first_message = formData.outboundFirstMessage;
+                const reSms =
+                    formData.smsPrompt && formData.smsFirstMessage
+                        ? {
+                              smsPrompt: formData.smsPrompt,
+                              smsFirstMessage: formData.smsFirstMessage,
+                          }
+                        : buildRESmsStarter(formData.outboundGoal, formData);
+                agentConfig.sms_prompt = reSms.smsPrompt;
+                agentConfig.sms_first_message = reSms.smsFirstMessage;
+                agentConfig.shared_context = {
+                    company_name: formData.companyName,
+                    persona_name: formData.agentPersonaName,
+                    markets: formData.markets,
+                    deal_types: formData.dealTypes,
+                    appointment_type: formData.appointmentType,
+                    goal: formData.outboundGoal,
+                };
             }
 
             const { data: agentRecord, error: agentError } = await supabase
@@ -573,6 +598,37 @@ export async function deploySaaSAgents(
                 mode: formData.outboundTransfer.mode,
             },
             business_phone: formData.businessPhone,
+            // Voice + SMS channel prompts and the shared offer context. The
+            // sequencer reads these to adapt personality per channel for any
+            // sequence bound to this agent. SMS prompt is built from the same
+            // context as the voice prompt unless the user edited it on the
+            // SMS-config phase.
+            voice_prompt: formData.outboundPrompt,
+            voice_first_message: formData.outboundFirstMessage,
+            ...(() => {
+                const sms =
+                    formData.smsPrompt && formData.smsFirstMessage
+                        ? {
+                              smsPrompt: formData.smsPrompt,
+                              smsFirstMessage: formData.smsFirstMessage,
+                          }
+                        : buildSaaSSmsStarter(formData.outboundGoal, formData);
+                return {
+                    sms_prompt: sms.smsPrompt,
+                    sms_first_message: sms.smsFirstMessage,
+                };
+            })(),
+            shared_context: {
+                company_name: formData.companyName,
+                product_one_liner: formData.productOneLiner,
+                icp: formData.icpDescription,
+                value_props: formData.valueProps,
+                common_objections: formData.commonObjections || null,
+                pricing_summary: formData.pricingSummary || null,
+                persona_name: formData.agentPersonaName,
+                demo_type: formData.demoType,
+                goal: formData.outboundGoal,
+            },
         };
 
         const { data: agentRecord, error: agentError } = await supabase

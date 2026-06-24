@@ -13,6 +13,10 @@ const isPublicRoute = createRouteMatcher([
     '/api/webhooks/vapi',
     '/api/vapi/tools/(.*)',
     '/api/client/(.*)/leads',
+    // Internal MCP / admin programmatic surface. Bypasses Clerk so the route
+    // handlers can enforce the MCP_ADMIN_TOKEN bearer check themselves
+    // (same pattern as the leads endpoint above).
+    '/api/admin/mcp/(.*)',
     '/api/integrations/google-calendar/callback',
     '/api/offers/clear-tier',
     '/'

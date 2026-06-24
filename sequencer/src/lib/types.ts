@@ -126,6 +126,9 @@ export interface SequenceStrategy {
 export interface Sequence {
     id: string;
     client_id: string;
+    // Outbound agent this sequence is bound to. Drives the voice assistant for
+    // calls and the SMS persona + shared context for texts (agent-messaging.ts).
+    agent_id: string | null;
     name: string;
     description: string | null;
     trigger_conditions: {
