@@ -22,9 +22,17 @@
  *
  * Secrets are read from sequencer/.env.production and never printed.
  *
+ * Scope: by default it sweeps ALL non-custom (shared-VAPI-key) accounts and
+ * skips own-key "custom" accounts (CUSTOM / type_a_byoa) — we don't auto-mutate
+ * real external customers' agents. Pass --client to target one, or
+ * --include-custom to override the skip.
+ *
  * USAGE
- *   node scripts/backfill-agent-messaging.mjs --client <uuid>            # DRY RUN (default)
- *   node scripts/backfill-agent-messaging.mjs --client <uuid> --apply    # write changes
+ *   node scripts/backfill-agent-messaging.mjs                  # DRY RUN, all non-custom accounts
+ *   node scripts/backfill-agent-messaging.mjs --apply          # write, all non-custom accounts
+ *   node scripts/backfill-agent-messaging.mjs --client <uuid>          # dry run, one client
+ *   node scripts/backfill-agent-messaging.mjs --client <uuid> --apply  # write, one client
+ *   node scripts/backfill-agent-messaging.mjs --include-custom --apply # also custom accounts
  *
  * ENV: SUPABASE_URL, SUPABASE_SERVICE_KEY (required); VAPI_API_KEY (optional).
  */
@@ -45,18 +53,20 @@ const opt = (n, env, dflt) => {
   return process.env[env] ?? dflt;
 };
 
-const CLIENT_ID = opt('client', 'CLIENT_ID', process.env.TENANT_ID);
+const CLIENT_ID = opt('client', 'CLIENT_ID', null); // optional — omit to sweep all non-custom
 const APPLY = flag('apply');
+const INCLUDE_CUSTOM = flag('include-custom');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const VAPI_API_KEY = process.env.VAPI_API_KEY || null;
 
+// Own-VAPI-key ("custom") account types — skipped by default. We don't auto-inject
+// SMS prompts / enable auto-replies / rebind agents on real external customers'
+// accounts (and their assistants live under their own VAPI key anyway).
+const CUSTOM_ACCOUNT_TYPES = ['CUSTOM', 'type_a_byoa'];
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error('Missing SUPABASE_URL / SUPABASE_SERVICE_KEY in sequencer/.env.production');
-  process.exit(1);
-}
-if (!CLIENT_ID) {
-  console.error('Pass --client <uuid> (or set CLIENT_ID / TENANT_ID).');
   process.exit(1);
 }
 
@@ -134,30 +144,30 @@ async function fetchVapiPrompt(vapiId) {
   }
 }
 
-async function main() {
-  log(`\nBackfill agent messaging for client ${CLIENT_ID} — ${APPLY ? 'APPLY' : 'DRY RUN'}\n`);
+// Returns counts so the sweep can print a summary.
+async function processClient(client) {
+  const clientId = client.id;
+  const counts = { agents: 0, agentsUpdated: 0, seqsUpdated: 0 };
 
   const { data: agents, error: aErr } = await db
     .from('agents')
     .select('id, name, vapi_id, agent_type, agent_config')
-    .eq('client_id', CLIENT_ID)
+    .eq('client_id', clientId)
     .eq('agent_type', 'outbound');
-  if (aErr) throw aErr;
-
-  if (!agents || agents.length === 0) {
-    log('No outbound agents for this client. Nothing to do.');
-    return;
+  if (aErr) {
+    log(`  ! agents query failed: ${aErr.message}`);
+    return counts;
   }
+  if (!agents || agents.length === 0) return counts; // nothing outbound here
+
+  log(`\n── Client ${clientId} (account_type=${client.account_type ?? 'null'}) — ${agents.length} outbound agent(s) ──`);
+  counts.agents = agents.length;
 
   for (const agent of agents) {
     const cfg = { ...(agent.agent_config || {}) };
-    const before = JSON.stringify({
-      shared: !!cfg.shared_context,
-      sms: !!cfg.sms_prompt,
-      voice: !!cfg.voice_prompt,
-    });
+    const before = `shared=${!!cfg.shared_context} sms=${!!cfg.sms_prompt} voice=${!!cfg.voice_prompt}`;
 
-    cfg.shared_context = cfg.shared_context || buildSharedContext(cfg);
+    if (!cfg.shared_context) cfg.shared_context = buildSharedContext(cfg);
     if (!cfg.sms_prompt) cfg.sms_prompt = defaultSmsPrompt(cfg.shared_context);
     if (!cfg.sms_first_message) {
       const persona = cfg.shared_context.persona_name || 'the team';
@@ -170,14 +180,13 @@ async function main() {
       if (v?.voice_first_message) cfg.voice_first_message = v.voice_first_message;
     }
 
-    log(`Agent ${agent.name} (${agent.id})`);
-    log(`  before: ${before}`);
-    log(`  after:  shared=${!!cfg.shared_context} sms=${!!cfg.sms_prompt} voice=${!!cfg.voice_prompt}`);
-
+    log(`  agent ${agent.name} (${agent.id}): ${before} → shared=${!!cfg.shared_context} sms=${!!cfg.sms_prompt} voice=${!!cfg.voice_prompt}`);
     if (APPLY) {
       const { error } = await db.from('agents').update({ agent_config: cfg }).eq('id', agent.id);
-      if (error) log(`  ! update failed: ${error.message}`);
-      else log('  ✓ agent_config updated');
+      if (error) log(`    ! update failed: ${error.message}`);
+      else { log('    ✓ agent_config updated'); counts.agentsUpdated++; }
+    } else {
+      counts.agentsUpdated++;
     }
   }
 
@@ -186,8 +195,11 @@ async function main() {
   const { data: seqs, error: sErr } = await db
     .from('sequences')
     .select('id, name, agent_id, enable_chatbot_mode')
-    .eq('client_id', CLIENT_ID);
-  if (sErr) throw sErr;
+    .eq('client_id', clientId);
+  if (sErr) {
+    log(`  ! sequences query failed: ${sErr.message}`);
+    return counts;
+  }
 
   for (const seq of seqs || []) {
     const updates = {};
@@ -195,14 +207,58 @@ async function main() {
     if (!seq.enable_chatbot_mode) updates.enable_chatbot_mode = true;
     if (Object.keys(updates).length === 0) continue;
 
-    log(`Sequence ${seq.name} (${seq.id}) → ${JSON.stringify(updates)}`);
+    log(`  sequence ${seq.name} (${seq.id}) → ${JSON.stringify(updates)}`);
     if (APPLY) {
       const { error } = await db.from('sequences').update(updates).eq('id', seq.id);
-      if (error) log(`  ! update failed: ${error.message}`);
-      else log('  ✓ sequence updated');
+      if (error) log(`    ! update failed: ${error.message}`);
+      else { log('    ✓ sequence updated'); counts.seqsUpdated++; }
+    } else {
+      counts.seqsUpdated++;
     }
   }
 
+  return counts;
+}
+
+async function main() {
+  log(`\nBackfill agent messaging — ${APPLY ? 'APPLY' : 'DRY RUN'} — skipping account types: ${CUSTOM_ACCOUNT_TYPES.join(', ')}${INCLUDE_CUSTOM ? ' (overridden: --include-custom)' : ''}\n`);
+
+  // Resolve the target client list.
+  let clients;
+  if (CLIENT_ID) {
+    const { data, error } = await db
+      .from('clients')
+      .select('id, account_type')
+      .eq('id', CLIENT_ID)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) { log(`Client ${CLIENT_ID} not found.`); return; }
+    if (!INCLUDE_CUSTOM && CUSTOM_ACCOUNT_TYPES.includes(data.account_type)) {
+      log(`Client ${CLIENT_ID} is account_type=${data.account_type} (custom/own-key) — skipping. Pass --include-custom to force.`);
+      return;
+    }
+    clients = [data];
+  } else {
+    const { data, error } = await db.from('clients').select('id, account_type');
+    if (error) throw error;
+    const all = data || [];
+    clients = all.filter((c) => INCLUDE_CUSTOM || !CUSTOM_ACCOUNT_TYPES.includes(c.account_type));
+    log(`${clients.length} non-custom client(s) to scan; ${all.length - clients.length} custom client(s) skipped.`);
+  }
+
+  const totals = { clientsTouched: 0, agents: 0, agentsUpdated: 0, seqsUpdated: 0 };
+  for (const c of clients) {
+    const r = await processClient(c);
+    if (r.agents > 0) totals.clientsTouched++;
+    totals.agents += r.agents;
+    totals.agentsUpdated += r.agentsUpdated;
+    totals.seqsUpdated += r.seqsUpdated;
+  }
+
+  log(`\n── Summary ──`);
+  log(`clients with outbound agents: ${totals.clientsTouched}`);
+  log(`agents ${APPLY ? 'updated' : 'to update'}: ${totals.agentsUpdated}/${totals.agents}`);
+  log(`sequences ${APPLY ? 'updated' : 'to update'}: ${totals.seqsUpdated}`);
   log(`\nDone.${APPLY ? '' : ' (dry run — re-run with --apply to write)'}\n`);
 }
 
