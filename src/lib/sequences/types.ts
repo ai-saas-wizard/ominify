@@ -39,11 +39,8 @@ export interface UpdateSequenceInput {
 export interface StepInput {
     channel: string; // "sms" | "email" | "voice"
     delay_minutes?: number;
-    delay_type?: string;
     content?: any | null;
     skip_conditions?: any | null;
-    on_success?: any | null;
-    on_failure?: any | null;
     enable_ai_mutation?: boolean;
     mutation_instructions?: string | null;
 }

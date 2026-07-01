@@ -206,11 +206,8 @@ export async function addSequenceStepCore(
                 step_order: nextOrder,
                 channel: input.channel,
                 delay_minutes: input.delay_minutes ?? 0,
-                delay_type: input.delay_type || "after_previous",
                 content: input.content ?? null,
                 skip_conditions: input.skip_conditions ?? null,
-                on_success: input.on_success ?? null,
-                on_failure: input.on_failure ?? null,
                 enable_ai_mutation: enableMutation,
                 mutation_instructions:
                     input.mutation_instructions ||
@@ -248,12 +245,9 @@ export async function updateSequenceStepCore(
         if (input.channel) updates.channel = input.channel;
         if (input.delay_minutes !== undefined)
             updates.delay_minutes = input.delay_minutes ?? 0;
-        if (input.delay_type) updates.delay_type = input.delay_type;
         if (input.content !== undefined) updates.content = input.content;
         if (input.skip_conditions !== undefined)
             updates.skip_conditions = input.skip_conditions;
-        if (input.on_success !== undefined) updates.on_success = input.on_success;
-        if (input.on_failure !== undefined) updates.on_failure = input.on_failure;
         if (input.enable_ai_mutation !== undefined)
             updates.enable_ai_mutation = input.enable_ai_mutation;
         if (input.mutation_instructions !== undefined)

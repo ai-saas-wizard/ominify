@@ -58,6 +58,7 @@ import {
 } from '../lib/blueprint-assembler.js';
 import {
     generateOutboundContent,
+    type VoiceGeneratedContent,
 } from '../lib/outbound-generator.js';
 import { getAgentMessaging } from '../lib/agent-messaging.js';
 import type {
@@ -573,8 +574,11 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     let renderedContent = renderTemplate(contentToRender, variables);
 
     // 6. Adaptive Mutation — AI-rewrite step content based on conversation context
+    // Brief-based steps skip this entirely: intent-guided generation (7b)
+    // overwrites the content anyway, so mutating first would burn an OpenAI
+    // call and write recordMutation audit rows for output that's discarded.
     let wasMutated = false;
-    if (shouldMutate(step, sequence, enrollment, conversationCtx)) {
+    if (!step.step_brief && shouldMutate(step, sequence, enrollment, conversationCtx)) {
         try {
             const mutation = await mutateStepContent(
                 step,
@@ -651,12 +655,15 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     }
 
     // 7b. Intent-guided generation — if step has a brief, generate content from it
-    // This bypasses the template+mutation path for brief-based steps
-    if (step.step_brief && (dispatchChannel === 'sms' || dispatchChannel === 'email')) {
+    // This bypasses the template+mutation path for brief-based steps.
+    // Voice generates only the opening line (first_message) and MERGES it
+    // into the rendered content so vapi_assistant_id / system_prompt /
+    // override_variables from the step survive.
+    if (step.step_brief) {
         try {
             console.log(`[SCHEDULER] Brief-based generation for step ${step.step_order} (${dispatchChannel}): "${step.step_brief.intent}"`);
             const generated = await generateOutboundContent({
-                channel: dispatchChannel as 'sms' | 'email',
+                channel: dispatchChannel,
                 brief: step.step_brief,
                 conversationContext: conversationCtx,
                 tenantProfile,
@@ -672,11 +679,71 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                     isAtRisk: enrollmentEI.is_at_risk || false,
                 },
             });
-            renderedContent = generated.content;
+            renderedContent = dispatchChannel === 'voice'
+                ? { ...(renderedContent as VoiceContent), ...(generated.content as VoiceGeneratedContent) }
+                : (generated.content as SmsContent | EmailContent);
             console.log(`[SCHEDULER] Brief generation succeeded: ${generated.reasoning}`);
         } catch (err) {
             console.log(`[SCHEDULER] Brief generation failed, using template fallback:`, err);
         }
+    }
+
+    // 7c. Placeholder guard — wizard-created steps store literal
+    // "[AI-generated at dispatch]" template content that must NEVER reach a
+    // lead. If it's still present here (brief generation threw, or an old
+    // row was created before step_brief was persisted), withhold the send.
+    // Nothing has been dispatched yet, so parking and returning is
+    // duplicate-free: the claim lease bumped next_step_at, and this update
+    // re-surfaces the row for a fresh attempt. 30min (not the bare 5min
+    // lease) keeps persistent generation failures from churning a batch
+    // slot every tick. Known edge: a placeholder email step for a contact
+    // with no email parks here instead of skip-advancing at dispatch.
+    //
+    // Only the fields the dispatch channel actually sends are checked — a
+    // channel override leaves the original channel's keys on the object
+    // (e.g. an SMS step's placeholder body riding along on a voice
+    // dispatch after 7b generated a real opener), and stale foreign-channel
+    // keys must not block a successful send.
+    const placeholderCheckFields: Array<string | undefined> =
+        dispatchChannel === 'sms'
+            ? [(renderedContent as SmsContent).body]
+            : dispatchChannel === 'email'
+            ? [
+                  (renderedContent as EmailContent).subject,
+                  (renderedContent as EmailContent).body_text,
+                  (renderedContent as EmailContent).body_html,
+              ]
+            : [
+                  (renderedContent as VoiceContent).first_message,
+                  (renderedContent as VoiceContent).system_prompt,
+              ];
+    if (placeholderCheckFields.some((f) => typeof f === 'string' && f.includes('[AI-generated at dispatch]'))) {
+        const retryAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        console.error(
+            `[SCHEDULER] Step ${step.id} (enrollment ${enrollment.id}) still contains dispatch placeholder ` +
+            `(${step.step_brief ? 'brief generation failed' : 'step_brief missing — needs backfill'}) — withholding send, retrying at ${retryAt}`
+        );
+        const { error: parkErr } = await supabase
+            .from('sequence_enrollments')
+            .update({ next_step_at: retryAt, updated_at: new Date().toISOString() })
+            .eq('id', enrollment.id);
+        if (parkErr) {
+            console.error(`[SCHEDULER] Failed to park placeholder-blocked enrollment ${enrollment.id}:`, parkErr);
+        }
+        const { error: logErr } = await supabase.from('sequence_execution_log').insert({
+            enrollment_id: enrollment.id,
+            step_id: step.id,
+            channel: dispatchChannel,
+            action: 'blocked_placeholder',
+            provider_id: null,
+            provider_response: { has_step_brief: !!step.step_brief, retry_at: retryAt },
+            call_status: 'skipped',
+            executed_at: new Date().toISOString(),
+        });
+        if (logErr) {
+            console.error(`[SCHEDULER] Failed to log placeholder block for enrollment ${enrollment.id}:`, logErr);
+        }
+        return;
     }
 
     // 8. Dispatch to channel queue

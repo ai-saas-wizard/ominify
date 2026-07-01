@@ -11,10 +11,16 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
     const modelId = formData.get("model") as string;
     const voiceId = formData.get("voiceId") as string;
 
-    // The SMS prompt + first message live in our DB (agent_config), NOT on
-    // VAPI. Persist them separately when the SMS tab submitted them. agentId
-    // here is the VAPI assistant id → match the row by vapi_id.
-    if (formData.has("smsPrompt") || formData.has("smsFirstMessage")) {
+    // The SMS prompt, first message + shared context live in our DB
+    // (agent_config), NOT on VAPI. shared_context is the offer/context the
+    // sequencer feeds into every generated SMS. Persist them separately when the
+    // SMS tab submitted them. agentId here is the VAPI assistant id → match the
+    // row by vapi_id.
+    if (
+        formData.has("smsPrompt") ||
+        formData.has("smsFirstMessage") ||
+        formData.has("sharedContext")
+    ) {
         const { data: row } = await supabase
             .from("agents")
             .select("agent_config")
@@ -28,6 +34,9 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
             if (formData.has("smsFirstMessage"))
                 merged.sms_first_message =
                     (formData.get("smsFirstMessage") as string) || "";
+            if (formData.has("sharedContext"))
+                merged.shared_context =
+                    (formData.get("sharedContext") as string) || "";
             await supabase
                 .from("agents")
                 .update({ agent_config: merged })
@@ -87,6 +96,30 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
     const result = await updateAgent(agentId, payload, vapiKey);
 
     if (result) {
+        // Keep agent_config.voice_prompt (read by the sequencer for voice
+        // context) in sync with the system prompt just written to VAPI —
+        // otherwise it goes permanently stale after Role & Prompt edits.
+        if (systemPrompt) {
+            const { data: row } = await supabase
+                .from("agents")
+                .select("agent_config")
+                .eq("vapi_id", agentId)
+                .eq("client_id", clientId)
+                .single();
+            if (row) {
+                await supabase
+                    .from("agents")
+                    .update({
+                        agent_config: {
+                            ...(row.agent_config || {}),
+                            voice_prompt: systemPrompt,
+                        },
+                    })
+                    .eq("vapi_id", agentId)
+                    .eq("client_id", clientId);
+            }
+        }
+
         revalidatePath(`/client/${clientId}/agents`);
         revalidatePath(`/client/${clientId}/agents/${agentId}`);
         return { success: true };

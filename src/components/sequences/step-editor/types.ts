@@ -16,19 +16,12 @@ export interface VoiceContent {
   vapi_assistant_id?: string;
 }
 
-export interface WaitContent {
-  reason: string;
-}
-
-export interface ConditionContent {
-  check: string;
-  true_step: number;
-  false_step: number;
-}
-
 // ── Channel type ─────────────────────────────────────────────────────────────
+// Only the channels the sequencer runtime actually dispatches. 'wait' and
+// 'condition' were authored here but never read by the scheduler, so they are
+// no longer offered.
 
-export type ChannelType = "sms" | "email" | "voice" | "wait" | "condition";
+export type ChannelType = "sms" | "email" | "voice";
 
 // ── Existing step (mirrors DB row) ───────────────────────────────────────────
 
@@ -37,11 +30,8 @@ export interface ExistingStep {
   step_order: number;
   channel: string;
   delay_minutes: number;
-  delay_type: string;
   content: any;
   skip_conditions: any;
-  on_success: any;
-  on_failure: any;
   enable_ai_mutation?: boolean;
   mutation_instructions?: string | null;
 }
@@ -68,39 +58,6 @@ export const SKIP_CONDITION_OPTIONS: { key: SkipConditionKey; label: string }[] 
   { key: "appointment_booked", label: "Appointment booked" },
 ];
 
-// ── Channel options ──────────────────────────────────────────────────────────
-
-export const CHANNEL_OPTIONS: { value: ChannelType; label: string }[] = [
-  { value: "sms", label: "SMS" },
-  { value: "email", label: "Email" },
-  { value: "voice", label: "Voice Call" },
-  { value: "wait", label: "Wait / Delay" },
-  { value: "condition", label: "Condition" },
-];
-
-// ── Delay type options ───────────────────────────────────────────────────────
-
-export const DELAY_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "minutes", label: "Minutes" },
-  { value: "hours", label: "Hours" },
-  { value: "days", label: "Days" },
-];
-
-// ── On-success options ───────────────────────────────────────────────────────
-
-export const ON_SUCCESS_OPTIONS: { value: string; label: string }[] = [
-  { value: "continue", label: "Continue to next step" },
-  { value: "stop", label: "Stop sequence" },
-];
-
-// ── On-failure options ───────────────────────────────────────────────────────
-
-export const ON_FAILURE_OPTIONS: { value: string; label: string }[] = [
-  { value: "continue", label: "Continue to next step" },
-  { value: "retry", label: "Retry this step" },
-  { value: "stop", label: "Stop sequence" },
-];
-
 // ── Template variables ───────────────────────────────────────────────────────
 
 export const TEMPLATE_VARIABLES: { key: string; label: string }[] = [
@@ -119,7 +76,7 @@ function stripHtmlTags(html: string): string {
 
 export function serializeContent(
   channel: ChannelType,
-  content: SmsContent | EmailContent | VoiceContent | WaitContent | ConditionContent
+  content: SmsContent | EmailContent | VoiceContent
 ): string {
   if (channel === "email") {
     const emailContent = content as EmailContent;
@@ -138,7 +95,7 @@ export function serializeContent(
 export function deserializeContent(
   channel: ChannelType,
   rawContent: any
-): SmsContent | EmailContent | VoiceContent | WaitContent | ConditionContent {
+): SmsContent | EmailContent | VoiceContent {
   const parsed =
     typeof rawContent === "string"
       ? (() => {
@@ -172,49 +129,7 @@ export function deserializeContent(
           : {}),
       } as VoiceContent;
 
-    case "wait":
-      return {
-        reason: parsed.reason ?? "",
-      } as WaitContent;
-
-    case "condition":
-      return {
-        check: parsed.check ?? "",
-        true_step: parsed.true_step ?? 0,
-        false_step: parsed.false_step ?? 0,
-      } as ConditionContent;
-
     default:
       return { body: "" } as SmsContent;
   }
-}
-
-// ── Build FormData for the addSequenceStep server action ─────────────────────
-
-export interface StepFormState {
-  channel: ChannelType;
-  delay_minutes: number;
-  delay_type: string;
-  content: SmsContent | EmailContent | VoiceContent | WaitContent | ConditionContent;
-  skip_conditions: SkipConditionKey[];
-  on_success: string;
-  on_failure: string;
-  enable_ai_mutation: boolean;
-  mutation_instructions: string;
-}
-
-export function buildFormData(state: StepFormState): FormData {
-  const fd = new FormData();
-
-  fd.set("channel", state.channel);
-  fd.set("delay_minutes", String(state.delay_minutes));
-  fd.set("delay_type", state.delay_type);
-  fd.set("content_template", serializeContent(state.channel, state.content));
-  fd.set("skip_conditions", JSON.stringify(state.skip_conditions));
-  fd.set("on_success", state.on_success);
-  fd.set("on_failure", state.on_failure);
-  fd.set("enable_ai_mutation", String(state.enable_ai_mutation));
-  fd.set("mutation_instructions", state.mutation_instructions || "");
-
-  return fd;
 }

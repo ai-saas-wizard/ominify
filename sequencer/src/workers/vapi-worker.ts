@@ -297,6 +297,18 @@ async function makeVapiCall(
                 assistantOverrides,
                 buildAssistantOverridesFromInline(inlineAgent)
             );
+        } else if (
+            assistantConfig.first_message &&
+            !assistantConfig.first_message.includes('[AI-generated at dispatch]')
+        ) {
+            // The step (or the scheduler's brief-based generation) authored
+            // an explicit opening line — it must win over the assistant's
+            // baked-in firstMessage on the assistantId path too. Without
+            // this, brief-generated openers for agent-bound sequences are
+            // silently discarded. The unrendered wizard placeholder is the
+            // one first_message that must never be spoken; dropping it here
+            // falls back to the baked-in opener.
+            assistantOverrides.firstMessage = assistantConfig.first_message;
         }
     } else {
         requestBody.assistant = buildLegacyTransientAssistant(assistantConfig);

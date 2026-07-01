@@ -4,9 +4,7 @@ import { useState, useEffect } from "react";
 
 interface DelayConfigProps {
   delayMinutes: number;
-  delayType: string;
   onDelayMinutesChange: (minutes: number) => void;
-  onDelayTypeChange: (type: string) => void;
 }
 
 function deriveUnit(minutes: number): { amount: number; unit: string } {
@@ -21,9 +19,7 @@ function deriveUnit(minutes: number): { amount: number; unit: string } {
 
 export default function DelayConfig({
   delayMinutes,
-  delayType,
   onDelayMinutesChange,
-  onDelayTypeChange,
 }: DelayConfigProps) {
   const initial = deriveUnit(delayMinutes);
   const [amount, setAmount] = useState(initial.amount);
@@ -52,39 +48,24 @@ export default function DelayConfig({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className="text-sm font-medium text-gray-700">Delay</label>
-        <div className="flex gap-2 mt-1">
-          <input
-            type="number"
-            min={1}
-            value={amount}
-            onChange={(e) => handleAmountChange(Math.max(1, parseInt(e.target.value) || 1))}
-            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <select
-            value={unit}
-            onChange={(e) => handleUnitChange(e.target.value)}
-            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="minutes">minutes</option>
-            <option value="hours">hours</option>
-            <option value="days">days</option>
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <label className="text-sm font-medium text-gray-700">Delay Type</label>
+    <div>
+      <label className="text-sm font-medium text-gray-700">Delay before this step</label>
+      <div className="flex gap-2 mt-1 max-w-xs">
+        <input
+          type="number"
+          min={1}
+          value={amount}
+          onChange={(e) => handleAmountChange(Math.max(1, parseInt(e.target.value) || 1))}
+          className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+        />
         <select
-          value={delayType}
-          onChange={(e) => onDelayTypeChange(e.target.value)}
-          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 mt-1"
+          value={unit}
+          onChange={(e) => handleUnitChange(e.target.value)}
+          className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
         >
-          <option value="after_previous">After Previous Step</option>
-          <option value="after_enrollment">After Enrollment</option>
-          <option value="specific_time">At Specific Time</option>
+          <option value="minutes">minutes</option>
+          <option value="hours">hours</option>
+          <option value="days">days</option>
         </select>
       </div>
     </div>

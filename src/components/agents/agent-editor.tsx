@@ -61,6 +61,8 @@ interface AgentEditorProps {
   showSms?: boolean;
   smsPrompt?: string;
   smsFirstMessage?: string;
+  /** Offer/context the sequencer feeds into every generated SMS. */
+  sharedContext?: string;
 }
 
 const LANGUAGES = [
@@ -113,6 +115,7 @@ export const AgentEditor = ({
   showSms = false,
   smsPrompt = "",
   smsFirstMessage = "",
+  sharedContext = "",
 }: AgentEditorProps) => {
   const [activeTab, setActiveTab] = useState<string>("profile");
   const [showCopilot, setShowCopilot] = useState(false);
@@ -424,6 +427,28 @@ export const AgentEditor = ({
                       How this agent texts. The same offer context drives both
                       channels; this is the texting personality used for outbound
                       SMS and auto-replies when a sequence is bound to this agent.
+                    </div>
+
+                    {/* Shared context / offer */}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-sky-50 flex items-center justify-center">
+                          <FileText className="w-3.5 h-3.5 text-sky-600" />
+                        </div>
+                        <h3 className="text-sm font-bold text-gray-900">
+                          Shared context &amp; offer
+                        </h3>
+                        <span className="text-[11px] text-gray-400">
+                          Fed into every sequence SMS this agent generates.
+                        </span>
+                      </div>
+                      <textarea
+                        name="sharedContext"
+                        defaultValue={sharedContext}
+                        rows={6}
+                        className="w-full p-4 border border-gray-200 rounded-xl text-sm font-mono leading-relaxed text-gray-800 bg-gray-50/30 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-400 resize-y transition-all"
+                        placeholder="What you're offering, who it's for, and the key facts the agent should reference in its texts..."
+                      />
                     </div>
 
                     {/* SMS first message */}

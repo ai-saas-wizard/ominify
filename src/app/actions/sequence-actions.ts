@@ -296,26 +296,6 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
         }
     }
 
-    const on_success_raw = formData.get("on_success") as string | null;
-    let on_success: any = null;
-    if (on_success_raw) {
-        try {
-            on_success = JSON.parse(on_success_raw);
-        } catch {
-            on_success = { action: on_success_raw };
-        }
-    }
-
-    const on_failure_raw = formData.get("on_failure") as string | null;
-    let on_failure: any = null;
-    if (on_failure_raw) {
-        try {
-            on_failure = JSON.parse(on_failure_raw);
-        } catch {
-            on_failure = { action: on_failure_raw };
-        }
-    }
-
     const enable_ai_mutation_raw = formData.get("enable_ai_mutation") as string | null;
     const enable_ai_mutation =
         enable_ai_mutation_raw !== null ? enable_ai_mutation_raw === "true" : undefined;
@@ -325,11 +305,8 @@ export async function addSequenceStep(sequenceId: string, formData: FormData) {
         {
             channel,
             delay_minutes: parseInt(formData.get("delay_minutes") as string) || 0,
-            delay_type: (formData.get("delay_type") as string) || undefined,
             content,
             skip_conditions,
-            on_success,
-            on_failure,
             enable_ai_mutation,
             mutation_instructions:
                 (formData.get("mutation_instructions") as string | null) || undefined,
@@ -349,9 +326,6 @@ export async function updateSequenceStep(stepId: string, formData: FormData) {
     const delay_minutes_raw = formData.get("delay_minutes") as string | null;
     if (delay_minutes_raw !== null) input.delay_minutes = parseInt(delay_minutes_raw) || 0;
 
-    const delay_type = formData.get("delay_type") as string | null;
-    if (delay_type) input.delay_type = delay_type;
-
     const content_template = formData.get("content_template") as string | null;
     if (content_template) {
         try {
@@ -367,24 +341,6 @@ export async function updateSequenceStep(stepId: string, formData: FormData) {
             input.skip_conditions = JSON.parse(skip_conditions_raw);
         } catch {
             return { success: false, error: "Invalid JSON in skip conditions" };
-        }
-    }
-
-    const on_success_raw = formData.get("on_success") as string | null;
-    if (on_success_raw) {
-        try {
-            input.on_success = JSON.parse(on_success_raw);
-        } catch {
-            input.on_success = { action: on_success_raw };
-        }
-    }
-
-    const on_failure_raw = formData.get("on_failure") as string | null;
-    if (on_failure_raw) {
-        try {
-            input.on_failure = JSON.parse(on_failure_raw);
-        } catch {
-            input.on_failure = { action: on_failure_raw };
         }
     }
 
@@ -604,17 +560,45 @@ export async function getEnrollments(sequenceId: string) {
     }
 }
 
-// ─── Get execution log for an enrollment ───────────────────────────────────────
+// ─── Get execution log for a whole sequence (grouped per lead) ─────────────────
+//
+// The execution log rows belong to individual enrollments, so to show a
+// sequence's history we first resolve all of that sequence's enrollments (with
+// their contact), then pull every log row for those enrollments. Each returned
+// row carries `_contact` so the UI can group entries per lead.
 
-export async function getExecutionLog(enrollmentId: string) {
+export async function getExecutionLog(sequenceId: string) {
     try {
+        // 1. All enrollments of this sequence, with the contact behind each.
+        const { data: enrollments, error: enrErr } = await supabase
+            .from("sequence_enrollments")
+            .select("id, contact_id, contacts(id, name, phone)")
+            .eq("sequence_id", sequenceId);
+
+        if (enrErr) {
+            console.error("getExecutionLog enrollments error:", enrErr);
+            return { success: false, error: enrErr.message, data: [] };
+        }
+
+        const enrollmentIds = (enrollments || []).map((e: any) => e.id);
+        if (enrollmentIds.length === 0) {
+            return { success: true, data: [] };
+        }
+
+        // Map enrollment_id → contact for per-lead grouping in the UI.
+        const contactByEnrollment = new Map<string, any>();
+        for (const e of enrollments || []) {
+            contactByEnrollment.set(e.id, (e as any).contacts || null);
+        }
+
+        // 2. Every log row across those enrollments.
         const { data, error } = await supabase
             .from("sequence_execution_log")
             .select(`
                 *,
                 sequence_steps(step_order, channel, content)
             `)
-            .eq("enrollment_id", enrollmentId)
+            .in("enrollment_id", enrollmentIds)
             .order("executed_at", { ascending: true });
 
         if (error) {
@@ -622,9 +606,8 @@ export async function getExecutionLog(enrollmentId: string) {
             return { success: false, error: error.message, data: [] };
         }
 
-        // Phase 3: Enrich with mutation data for this enrollment
+        // Phase 3/4: Enrich with mutation + healing data for these enrollments.
         let mutations: any[] = [];
-        // Phase 4: Enrich with healing data for this enrollment
         let healings: any[] = [];
 
         if (data && data.length > 0) {
@@ -632,26 +615,29 @@ export async function getExecutionLog(enrollmentId: string) {
                 supabase
                     .from("step_mutations")
                     .select("*")
-                    .eq("enrollment_id", enrollmentId),
+                    .in("enrollment_id", enrollmentIds),
                 supabase
                     .from("healing_log")
                     .select("*")
-                    .eq("enrollment_id", enrollmentId),
+                    .in("enrollment_id", enrollmentIds),
             ]);
             mutations = mutResult.data || [];
             healings = healResult.data || [];
         }
 
-        // Attach mutation + healing info to matching log entries
+        // Attach mutation + healing info to matching log entries. Match on BOTH
+        // enrollment_id and step_id — static sequences reuse the same step_id
+        // across many enrollments, so a step_id-only match would cross-attach.
         const enrichedData = (data || []).map((log: any) => {
             const mutation = mutations.find(
-                (m: any) => m.step_id === log.step_id
+                (m: any) => m.step_id === log.step_id && m.enrollment_id === log.enrollment_id
             );
             const healing = healings.find(
-                (h: any) => h.step_id === log.step_id
+                (h: any) => h.step_id === log.step_id && h.enrollment_id === log.enrollment_id
             );
             return {
                 ...log,
+                _contact: contactByEnrollment.get(log.enrollment_id) || null,
                 was_mutated: !!mutation,
                 mutation: mutation || null,
                 was_healed: !!healing,
@@ -2150,6 +2136,15 @@ export async function createSequenceFromWizard(
                     delay_minutes: delayMinutes,
                     delay_type: idx === 0 ? "immediate" : "fixed_delay",
                     content,
+                    // The scheduler's intent-guided generation path keys off
+                    // step_brief — without it, the placeholder content above
+                    // is dispatched verbatim as the lead's first touch.
+                    step_brief: {
+                        intent: brief.intent || input.customGoalDescription || meta.description,
+                        key_points: [],
+                        cta: brief.cta || "",
+                        constraints: [],
+                    },
                     enable_ai_mutation: true,
                     mutation_instructions: `Goal: ${brief.intent}. CTA: ${brief.cta}. Generate fresh content at dispatch time using real conversation context.`,
                     generated_dynamically: true,

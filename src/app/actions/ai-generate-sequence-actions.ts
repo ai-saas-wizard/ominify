@@ -393,6 +393,7 @@ async function insertSequence(
     options?: {
         generation_mode?: "static" | "dynamic";
         sequence_strategy?: Record<string, any> | null;
+        agent_id?: string | null;
     }
 ) {
     return supabase
@@ -403,6 +404,7 @@ async function insertSequence(
             description,
             trigger_type: triggerType || "manual",
             urgency_tier: urgencyTier || "medium",
+            agent_id: options?.agent_id || null,
             ai_generated: true,
             is_active: false,
             enable_adaptive_mutation: true,
@@ -1391,6 +1393,10 @@ Output ONLY the JSON object.`;
                 description: extracted.goal,
                 trigger_type: "manual",
                 urgency_tier: urgency,
+                // Bind the selected outbound agent: the sequencer resolves the
+                // SMS persona (and voice) from sequences.agent_id, so a task
+                // that omits it loses the agent's voice on every text.
+                agent_id: agentId || null,
                 ai_generated: true,
                 is_active: false,
                 enable_adaptive_mutation: true,
@@ -1423,6 +1429,7 @@ Output ONLY the JSON object.`;
                     {
                         generation_mode: "dynamic",
                         sequence_strategy: { ...sequenceStrategy, is_task: true, source_instruction: instruction },
+                        agent_id: agentId || null,
                     }
                 );
 
