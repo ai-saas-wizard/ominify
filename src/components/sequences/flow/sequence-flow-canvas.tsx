@@ -222,6 +222,7 @@ export function SequenceFlowCanvas({
                         sequence={sequence}
                         enrollments={enrollments}
                         sequenceId={sequenceId}
+                        clientId={clientId}
                         onClose={() => setSidebarTab(null)}
                     />
                 )}

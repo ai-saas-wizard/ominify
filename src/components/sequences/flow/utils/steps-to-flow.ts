@@ -110,101 +110,30 @@ export function stepsToFlow(
         });
     }
 
-    // Step-to-step edges
+    // Step-to-step edges. The scheduler always advances linearly
+    // (current_step_order + 1); it never reads on_success/on_failure/condition
+    // branches, so the flow only renders the real linear path.
     sorted.forEach((step, index) => {
-        const channel = step.action_type || step.channel || "sms";
-        const isCondition = channel === "condition";
-        const onSuccess = step.on_success;
         const nextStep = sorted[index + 1];
 
-        if (isCondition) {
-            // Condition node: two edges (true/false)
-            // True branch → next step or end
-            if (nextStep) {
-                edges.push({
-                    id: `${step.id}-true`,
-                    source: step.id,
-                    sourceHandle: "true",
-                    target: nextStep.id,
-                    type: "flowEdge",
-                    data: { sequenceId, insertIndex: index + 1, label: "True" },
-                    style: { stroke: "#22c55e" },
-                    label: "True",
-                    labelStyle: { fill: "#22c55e", fontWeight: 600, fontSize: 11 },
-                });
-            }
-            // False branch → skip to step after next or end
-            const falseTarget = sorted[index + 2];
-            if (falseTarget) {
-                edges.push({
-                    id: `${step.id}-false`,
-                    source: step.id,
-                    sourceHandle: "false",
-                    target: falseTarget.id,
-                    type: "flowEdge",
-                    data: { sequenceId, label: "False" },
-                    style: { stroke: "#ef4444" },
-                    label: "False",
-                    labelStyle: { fill: "#ef4444", fontWeight: 600, fontSize: 11 },
-                });
-            }
-            return;
-        }
-
-        if (onSuccess?.action === "jump_to_step" && onSuccess.target_step) {
-            // Jump to specific step
-            const target = sorted.find((s) => s.step_order === onSuccess.target_step);
-            if (target) {
-                edges.push({
-                    id: `${step.id}-jump`,
-                    source: step.id,
-                    target: target.id,
-                    type: "flowEdge",
-                    data: { sequenceId },
-                    style: { stroke: "#10b981", strokeDasharray: "5,5" },
-                    label: "Jump",
-                    labelStyle: { fill: "#10b981", fontWeight: 600, fontSize: 11 },
-                    animated: true,
-                });
-            }
-        } else if (onSuccess?.action === "end_sequence") {
-            // End sequence - add terminal node
-            const endNodeId = `end-${step.id}`;
-            nodes.push({
-                id: endNodeId,
-                type: "end",
-                position: { x: FLOW_CENTER_X - 40, y: (index + 2) * FLOW_VERTICAL_SPACING },
-                data: { label: "End" },
-                draggable: false,
-            });
+        if (nextStep) {
+            // Continue to next step
             edges.push({
-                id: `${step.id}-to-end`,
+                id: `${step.id}-to-${nextStep.id}`,
                 source: step.id,
-                target: endNodeId,
+                target: nextStep.id,
                 type: "flowEdge",
-                data: { sequenceId },
-                style: { stroke: "#ef4444" },
+                data: { sequenceId, insertIndex: index + 1 },
             });
         } else {
-            // Default: continue to next step
-            if (nextStep) {
-                edges.push({
-                    id: `${step.id}-to-${nextStep.id}`,
-                    source: step.id,
-                    target: nextStep.id,
-                    type: "flowEdge",
-                    data: { sequenceId, insertIndex: index + 1 },
-                });
-            } else {
-                // Last step → add node
-                edges.push({
-                    id: `${step.id}-to-add`,
-                    source: step.id,
-                    target: "add-node",
-                    type: "flowEdge",
-                    data: { sequenceId },
-                });
-            }
+            // Last step → add node
+            edges.push({
+                id: `${step.id}-to-add`,
+                source: step.id,
+                target: "add-node",
+                type: "flowEdge",
+                data: { sequenceId },
+            });
         }
     });
 

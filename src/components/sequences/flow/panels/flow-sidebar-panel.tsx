@@ -13,8 +13,8 @@ import {
     Activity,
     Mail,
     Phone,
-    Clock,
-    GitBranch,
+    Bot,
+    Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EnrollmentTable } from "@/components/sequences/enrollment-table";
 import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
-import { getExecutionLog } from "@/app/actions/sequence-actions";
+import { getExecutionLog, listOutboundAgents, updateSequence } from "@/app/actions/sequence-actions";
 
 const TRIGGER_LABELS: Record<string, string> = {
     new_lead: "New Lead",
@@ -45,16 +45,41 @@ const URGENCY_COLORS: Record<string, string> = {
 const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
     sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "SMS" },
     email: { icon: Mail, color: "text-blue-600 bg-blue-100", label: "Email" },
+    voice: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
     voice_call: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
-    wait: { icon: Clock, color: "text-amber-600 bg-amber-100", label: "Wait / Delay" },
-    condition: { icon: GitBranch, color: "text-pink-600 bg-pink-100", label: "Condition" },
 };
+
+const DEFAULT_CHANNEL_CONFIG = {
+    icon: Activity,
+    color: "text-gray-600 bg-gray-100",
+    label: "Step",
+};
+
+/**
+ * Group a flat, time-sorted list of execution-log rows into per-lead sections.
+ * Each row carries `_contact` (the contact behind its enrollment) so we can
+ * label the group. Insertion order follows first-seen executed_at.
+ */
+function groupLogsByLead(
+    logs: any[]
+): { enrollmentId: string; contact: any; logs: any[] }[] {
+    const map = new Map<string, { enrollmentId: string; contact: any; logs: any[] }>();
+    for (const log of logs) {
+        const key = log.enrollment_id || "unknown";
+        if (!map.has(key)) {
+            map.set(key, { enrollmentId: key, contact: log._contact || null, logs: [] });
+        }
+        map.get(key)!.logs.push(log);
+    }
+    return Array.from(map.values());
+}
 
 interface FlowSidebarPanelProps {
     activeTab: string;
     sequence: any;
     enrollments: any[];
     sequenceId: string;
+    clientId: string;
     onClose: () => void;
 }
 
@@ -63,14 +88,27 @@ export function FlowSidebarPanel({
     sequence,
     enrollments,
     sequenceId,
+    clientId,
     onClose,
 }: FlowSidebarPanelProps) {
     const [executionLog, setExecutionLog] = useState<any[]>([]);
     const [logLoaded, setLogLoaded] = useState(false);
 
+    // Bound-agent picker (Info tab). The agent drives voice calls + SMS persona.
+    const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+    const [agentsLoaded, setAgentsLoaded] = useState(false);
+    const [boundAgentId, setBoundAgentId] = useState<string>(sequence.agent_id || "");
+    const [savingAgent, setSavingAgent] = useState(false);
+
     useEffect(() => {
         if (activeTab === "log" && !logLoaded) {
             loadExecutionLog();
+        }
+        if (activeTab === "info" && !agentsLoaded) {
+            listOutboundAgents(clientId).then((list) => {
+                setAgents(list);
+                setAgentsLoaded(true);
+            });
         }
     }, [activeTab]);
 
@@ -78,6 +116,20 @@ export function FlowSidebarPanel({
         const result = await getExecutionLog(sequenceId);
         setExecutionLog(result.data || []);
         setLogLoaded(true);
+    }
+
+    async function handleAgentChange(newAgentId: string) {
+        const prev = boundAgentId;
+        setBoundAgentId(newAgentId); // optimistic
+        setSavingAgent(true);
+        const fd = new FormData();
+        fd.set("agent_id", newAgentId); // "" → unbind
+        const res = await updateSequence(sequenceId, fd);
+        setSavingAgent(false);
+        if (!res?.success) {
+            setBoundAgentId(prev); // revert on failure
+            alert(res?.error || "Failed to update the bound agent");
+        }
     }
 
     // Keyboard escape handler
@@ -168,6 +220,50 @@ export function FlowSidebarPanel({
 
                             <Separator />
 
+                            {/* Bound Agent */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Bot className="w-3.5 h-3.5" />
+                                        Bound Agent
+                                    </h4>
+                                    {savingAgent && (
+                                        <span className="flex items-center gap-1 text-[11px] text-emerald-600">
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Saving
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Drives voice calls and the SMS persona for this sequence&apos;s texts.
+                                </p>
+                                <select
+                                    value={boundAgentId}
+                                    onChange={(e) => handleAgentChange(e.target.value)}
+                                    disabled={savingAgent || !agentsLoaded}
+                                    className="w-full p-2 border rounded-lg bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                                >
+                                    <option value="">Unassigned</option>
+                                    {/* Keep the current binding selectable even if it's not in the fetched list. */}
+                                    {boundAgentId &&
+                                        !agents.some((a) => a.id === boundAgentId) && (
+                                            <option value={boundAgentId}>Current agent</option>
+                                        )}
+                                    {agents.map((a) => (
+                                        <option key={a.id} value={a.id}>
+                                            {a.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {agentsLoaded && agents.length === 0 && (
+                                    <p className="text-[11px] text-gray-400 mt-1.5">
+                                        No outbound agents yet. Create one from the Agents page to bind it here.
+                                    </p>
+                                )}
+                            </div>
+
+                            <Separator />
+
                             {/* Enrollment stats grid */}
                             <div>
                                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -243,75 +339,89 @@ export function FlowSidebarPanel({
                                     <p className="text-sm">No execution history yet.</p>
                                 </div>
                             ) : (
-                                <div className="space-y-2">
-                                    {executionLog.map((log: any) => {
-                                        const config = CHANNEL_CONFIG[log.action_type] || CHANNEL_CONFIG.condition;
-                                        return (
-                                            <motion.div
-                                                key={log.id}
-                                                initial={{ opacity: 0, y: 5 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                className="bg-gray-50 rounded-lg border p-3 space-y-1.5"
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Badge
-                                                            variant="secondary"
-                                                            className={config.color}
-                                                        >
-                                                            {config.label}
-                                                        </Badge>
-                                                        {log.was_mutated && log.mutation && (
-                                                            <MutationBadge
-                                                                originalContent={log.mutation.original_content}
-                                                                mutatedContent={log.mutation.mutated_content}
-                                                                mutationReason={log.mutation.mutation_reason}
-                                                                confidence={log.mutation.confidence_score}
-                                                                model={log.mutation.mutation_model}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <Badge
-                                                        variant="outline"
-                                                        className={
-                                                            log.status === "delivered" || log.status === "success"
-                                                                ? "bg-green-50 text-green-700 border-green-200"
-                                                                : log.status === "failed"
-                                                                    ? "bg-red-50 text-red-700 border-red-200"
-                                                                    : log.status === "pending"
-                                                                        ? "bg-yellow-50 text-yellow-700 border-yellow-200"
-                                                                        : "bg-gray-50 text-gray-600 border-gray-200"
-                                                        }
+                                <div className="space-y-5">
+                                    {groupLogsByLead(executionLog).map((group) => (
+                                        <div key={group.enrollmentId} className="space-y-2">
+                                            {/* Lead header */}
+                                            <div className="flex items-center justify-between px-1">
+                                                <div className="flex items-center gap-1.5 min-w-0">
+                                                    <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                                    <span className="text-xs font-semibold text-gray-700 truncate">
+                                                        {group.contact?.name ||
+                                                            group.contact?.phone ||
+                                                            `Lead ${group.enrollmentId.substring(0, 8)}`}
+                                                    </span>
+                                                </div>
+                                                <span className="text-[10px] text-gray-400 shrink-0">
+                                                    {group.logs.length} event{group.logs.length === 1 ? "" : "s"}
+                                                </span>
+                                            </div>
+
+                                            {group.logs.map((log: any) => {
+                                                const config = CHANNEL_CONFIG[log.channel] || DEFAULT_CHANNEL_CONFIG;
+                                                return (
+                                                    <motion.div
+                                                        key={log.id}
+                                                        initial={{ opacity: 0, y: 5 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className="bg-gray-50 rounded-lg border p-3 space-y-1.5"
                                                     >
-                                                        {log.status}
-                                                    </Badge>
-                                                </div>
-                                                <div className="flex items-center justify-between text-[11px] text-gray-500">
-                                                    <span>
-                                                        {new Date(log.executed_at).toLocaleString()}
-                                                    </span>
-                                                    <span>
-                                                        {log.enrollment_id?.substring(0, 8)}...
-                                                    </span>
-                                                </div>
-                                                {log.was_healed && log.healing && (
-                                                    <div className="mt-1">
-                                                        <HealingBadge
-                                                            failureType={log.healing.failure_type}
-                                                            healingAction={log.healing.healing_action}
-                                                            healingDetails={log.healing.healing_details}
-                                                            failureDetails={log.healing.failure_details}
-                                                        />
-                                                    </div>
-                                                )}
-                                                {(log.provider_message_id || log.error_message) && (
-                                                    <p className="text-[11px] text-gray-400 truncate">
-                                                        {log.provider_message_id || log.error_message}
-                                                    </p>
-                                                )}
-                                            </motion.div>
-                                        );
-                                    })}
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <Badge
+                                                                    variant="secondary"
+                                                                    className={config.color}
+                                                                >
+                                                                    {config.label}
+                                                                </Badge>
+                                                                {log.was_mutated && log.mutation && (
+                                                                    <MutationBadge
+                                                                        originalContent={log.mutation.original_content}
+                                                                        mutatedContent={log.mutation.mutated_content}
+                                                                        mutationReason={log.mutation.mutation_reason}
+                                                                        confidence={log.mutation.confidence_score}
+                                                                        model={log.mutation.mutation_model}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                            <Badge
+                                                                variant="outline"
+                                                                className={
+                                                                    log.status === "delivered" || log.status === "success" || log.status === "completed"
+                                                                        ? "bg-green-50 text-green-700 border-green-200"
+                                                                        : log.status === "failed"
+                                                                            ? "bg-red-50 text-red-700 border-red-200"
+                                                                            : log.status === "pending" || log.status === "executing"
+                                                                                ? "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                                                                : "bg-gray-50 text-gray-600 border-gray-200"
+                                                                }
+                                                            >
+                                                                {log.status}
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="text-[11px] text-gray-500">
+                                                            {new Date(log.executed_at).toLocaleString()}
+                                                        </div>
+                                                        {log.was_healed && log.healing && (
+                                                            <div className="mt-1">
+                                                                <HealingBadge
+                                                                    failureType={log.healing.failure_type}
+                                                                    healingAction={log.healing.healing_action}
+                                                                    healingDetails={log.healing.healing_details}
+                                                                    failureDetails={log.healing.failure_details}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        {(log.provider_id || log.error_message) && (
+                                                            <p className="text-[11px] text-gray-400 truncate">
+                                                                {log.provider_id || log.error_message}
+                                                            </p>
+                                                        )}
+                                                    </motion.div>
+                                                );
+                                            })}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>

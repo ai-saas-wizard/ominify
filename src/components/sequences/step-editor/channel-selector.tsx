@@ -1,13 +1,11 @@
 "use client";
 
-import { MessageSquare, Mail, Phone, Clock, GitBranch } from "lucide-react";
+import { MessageSquare, Mail, Phone } from "lucide-react";
 
 const CHANNEL_OPTIONS = [
   { value: "sms", label: "SMS", icon: MessageSquare },
   { value: "email", label: "Email", icon: Mail },
   { value: "voice", label: "Voice Call", icon: Phone },
-  { value: "wait", label: "Wait / Delay", icon: Clock },
-  { value: "condition", label: "Condition / Branch", icon: GitBranch },
 ];
 
 interface ChannelSelectorProps {
@@ -17,7 +15,7 @@ interface ChannelSelectorProps {
 
 export default function ChannelSelector({ value, onChange }: ChannelSelectorProps) {
   return (
-    <div className="grid grid-cols-5 gap-2">
+    <div className="grid grid-cols-3 gap-2">
       {CHANNEL_OPTIONS.map((option) => {
         const Icon = option.icon;
         const isSelected = value === option.value;

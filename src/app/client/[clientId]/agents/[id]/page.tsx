@@ -133,6 +133,9 @@ export default async function AgentEditorPage(props: {
                                 smsFirstMessage={
                                     agentRecord?.agent_config?.sms_first_message || ""
                                 }
+                                sharedContext={
+                                    agentRecord?.agent_config?.shared_context || ""
+                                }
                             />
                         </div>
 
