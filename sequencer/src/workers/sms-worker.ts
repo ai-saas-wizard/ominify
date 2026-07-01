@@ -255,7 +255,7 @@ async function detectAndCachePhoneType(
  * SMS Worker processor
  */
 async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; status: string }> {
-    const { tenantId, contactPhone, body, enrollmentId, stepId } = job.data;
+    const { tenantId, contactPhone, body, enrollmentId, stepId, metadata } = job.data;
     // variantId/dedupKey are stamped by the scheduler (see lib/types.ts payload contract)
     const { variantId, dedupKey } = job.data as SmsJobPayload & { variantId?: string; dedupKey?: string };
 
@@ -371,7 +371,9 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
     // Increment the enrollment's sms_sent counter (review C7: was never called)
     await updateEnrollmentSmsCount(enrollmentId);
 
-    // Record interaction for conversation memory
+    // Record interaction for conversation memory. Ad-hoc sends (e.g. chatbot
+    // replies) pass metadata through the job so it's recorded exactly once here
+    // after a confirmed send, rather than at enqueue time by the caller.
     if (enrollment) {
         await recordInteraction({
             clientId: enrollment.tenant_id,
@@ -383,6 +385,7 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
             contentBody: body,
             outcome: 'delivered',
             providerId: message.sid,
+            metadata,
         });
     }
 

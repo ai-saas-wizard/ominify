@@ -345,6 +345,10 @@ export interface SmsJobPayload {
     variantId?: string;
     // Idempotency key for ad-hoc sends (chatbot/healing) where stepId-based dedup doesn't apply
     dedupKey?: string;
+    // Interaction metadata to persist on the conversation record after a
+    // confirmed send (e.g. { source: 'chatbot', turn } for chatbot replies).
+    // The worker records once here so enqueuers don't double-record.
+    metadata?: Record<string, any>;
 }
 
 export interface EmailJobPayload {
