@@ -75,6 +75,16 @@ import type {
 } from '../lib/types.js';
 
 /**
+ * How long to hold a sequence while a lead is actively conversing with the SMS
+ * chatbot, so a scheduled template step can't fire over the live chat. The hold
+ * rolls forward on every inbound reply and lapses after this much silence, at
+ * which point the normal schedule resumes (dynamic: outcome_timeout_at fires
+ * and JIT-generates the next step; static: next_step_at comes due and the
+ * scheduler sends the next template touch).
+ */
+const CHATBOT_CONVERSATION_HOLD_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
  * Fetch recent interactions for a contact (for EI scoring and trend analysis)
  */
 async function getRecentInteractions(contactId: string, limit: number = 10): Promise<ContactInteraction[]> {
@@ -558,160 +568,194 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
 
     console.log(`[EVENT] SMS reply received: "${messageBody.substring(0, 50)}..."`);
 
-    // 1. Run EI analysis on the reply (replaces old classifyReplyIntent)
-    let eiAnalysis: EmotionalAnalysis | null = null;
-    let conversationHistory = '';
-    let contactId: string | null = null;
-
+    // Fetch the enrollment up front. supabase-js returns {error} instead of
+    // throwing, so we MUST inspect it: a transient failure here used to yield
+    // enroll=null, which silently skipped the STOP check below and let the job
+    // "complete" with no BullMQ retry. We capture the error and (a) still honor
+    // STOP/START/HELP at the CONTACT level via a phone lookup that needs no
+    // enrollment, and (b) throw so the rest of the handler is retried.
+    let enroll: { contact_id: string; tenant_id: string; contacts?: { name?: string | null } | null } | null = null;
+    let enrollFetchError: { message: string } | null = null;
     if (enrollmentId) {
-        const { data: enroll } = await supabase
+        const { data, error } = await supabase
             .from('sequence_enrollments')
             .select('contact_id, tenant_id, contacts(name)')
             .eq('id', enrollmentId)
             .single();
+        enroll = (data as any) ?? null;
+        enrollFetchError = error;
+    }
 
-        if (enroll) {
-            contactId = enroll.contact_id;
+    // 0. Deterministic STOP/START/HELP keyword handling — MUST run before any
+    // LLM call AND before the enrollment gate. TCPA/carrier compliance cannot
+    // depend on GPT availability, classification accuracy, or the enrollment
+    // fetch succeeding. The opt-out is contact-level, so we resolve the contact
+    // from the enrollment when present, else by phone (works for just-completed
+    // sequences, paused leads, and contacts ingested without an enrollment).
+    if (isStopMessage(messageBody) || isStartMessage(messageBody) || isHelpMessage(messageBody)) {
+        const kwTenantId = enroll?.tenant_id || tenantId || null;
+        let kwContactId: string | null = enroll?.contact_id || null;
+        if (!kwContactId && kwTenantId && event.fromPhone) {
+            const { data: c, error: lookupErr } = await supabase
+                .from('contacts')
+                .select('id')
+                .eq('client_id', kwTenantId)
+                .in('phone', phoneLookupCandidates(event.fromPhone))
+                .limit(1)
+                .maybeSingle();
+            if (lookupErr) {
+                console.error('[EVENT] Contact lookup for keyword handling failed:', lookupErr);
+            }
+            kwContactId = c?.id || null;
+        }
 
-            // 0. Deterministic STOP/START/HELP keyword handling — MUST run
-            // before any LLM call. TCPA/carrier compliance cannot depend on
-            // GPT availability or classification accuracy.
+        if (kwContactId) {
             if (isStopMessage(messageBody)) {
-                console.log(`[EVENT] STOP keyword detected for enrollment ${enrollmentId} — opting out contact ${enroll.contact_id}`);
-                await optOutContact(supabase, enroll.contact_id, 'sms', 'keyword');
-                await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
-                const { error: stopLogErr } = await supabase.from('sequence_execution_log').insert({
-                    enrollment_id: enrollmentId,
-                    step_id: null,
-                    channel: 'sms',
-                    action: 'opt_out_keyword',
-                    provider_id: null,
-                    provider_response: { body: messageBody.substring(0, 200) },
-                    executed_at: new Date().toISOString(),
-                });
-                if (stopLogErr) {
-                    console.error(`[EVENT] Failed to log STOP keyword for ${enrollmentId}:`, stopLogErr);
+                console.log(`[EVENT] STOP keyword detected — opting out contact ${kwContactId}`);
+                await optOutContact(supabase, kwContactId, 'sms', enrollmentId ? 'keyword' : 'keyword_untracked');
+                if (enrollmentId) {
+                    await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+                    const { error: stopLogErr } = await supabase.from('sequence_execution_log').insert({
+                        enrollment_id: enrollmentId,
+                        step_id: null,
+                        channel: 'sms',
+                        action: 'opt_out_keyword',
+                        provider_id: null,
+                        provider_response: { body: messageBody.substring(0, 200) },
+                        executed_at: new Date().toISOString(),
+                    });
+                    if (stopLogErr) {
+                        console.error(`[EVENT] Failed to log STOP keyword for ${enrollmentId}:`, stopLogErr);
+                    }
                 }
                 return; // Skip the LLM entirely
             }
 
             if (isStartMessage(messageBody)) {
-                console.log(`[EVENT] START keyword detected — re-opting in contact ${enroll.contact_id}`);
-                await reoptInContact(supabase, enroll.contact_id);
+                console.log(`[EVENT] START keyword detected — re-opting in contact ${kwContactId}`);
+                await reoptInContact(supabase, kwContactId);
                 return;
             }
 
-            if (isHelpMessage(messageBody)) {
-                console.log(`[EVENT] HELP keyword detected for enrollment ${enrollmentId} — notifying tenant`);
+            // HELP
+            console.log(`[EVENT] HELP keyword detected — notifying tenant`);
+            if (enrollmentId) {
                 await updateEnrollmentStatus(enrollmentId, { contact_replied: true });
+            }
+            if (kwTenantId) {
                 await createNotification({
-                    clientId: enroll.tenant_id,
-                    enrollmentId,
-                    contactId: enroll.contact_id,
+                    clientId: kwTenantId,
+                    enrollmentId: enrollmentId || undefined,
+                    contactId: kwContactId,
                     type: 'needs_human',
                     title: 'HELP keyword received',
                     body: `Contact replied: "${messageBody.substring(0, 100)}"`,
                     priority: 'high',
                 });
-                return;
             }
+            return;
+        }
 
-            // Build conversation history for context-aware analysis
-            conversationHistory = await buildConversationHistoryString(enroll.contact_id);
+        // Keyword detected but no contact resolved. If the enrollment fetch
+        // errored, throw so BullMQ retries (the contact may resolve on retry);
+        // otherwise fall through to the untracked-notification path below.
+        if (enrollFetchError) {
+            throw new Error(`[EVENT] enrollment fetch failed for ${enrollmentId} during STOP/START/HELP handling: ${enrollFetchError.message}`);
+        }
+    }
 
-            // Analyze with full EI
-            try {
-                eiAnalysis = await analyzeMessage(messageBody, 'sms', conversationHistory);
-                console.log(`[EVENT] EI analysis: emotion=${eiAnalysis.primary_emotion}, intent=${eiAnalysis.intent}, hot=${eiAnalysis.is_hot_lead}, at_risk=${eiAnalysis.is_at_risk}`);
-            } catch (err) {
-                console.error('[EVENT] EI analysis failed, using fallback:', err);
-            }
+    // A transient enrollment-fetch failure on a non-keyword reply must retry,
+    // not silently complete — throw so BullMQ re-runs the EI/record/status path.
+    if (enrollFetchError) {
+        throw new Error(`[EVENT] enrollment fetch failed for ${enrollmentId}: ${enrollFetchError.message}`);
+    }
 
-            // Map EI sentiment for the interaction record
-            const emotionToSentiment: Record<string, 'positive' | 'negative' | 'neutral' | 'interested' | 'objection' | 'confused'> = {
-                excited: 'positive',
-                interested: 'interested',
-                neutral: 'neutral',
-                hesitant: 'neutral',
-                frustrated: 'negative',
-                confused: 'confused',
-                angry: 'negative',
-                dismissive: 'negative',
-            };
+    // 1. Run EI analysis on the reply (replaces old classifyReplyIntent)
+    let eiAnalysis: EmotionalAnalysis | null = null;
+    let conversationHistory = '';
+    let contactId: string | null = null;
 
-            const sentiment = eiAnalysis
-                ? (emotionToSentiment[eiAnalysis.primary_emotion] || 'neutral')
-                : 'neutral';
+    // enrollmentId is guaranteed when enroll is set (enroll is only fetched
+    // inside `if (enrollmentId)`); the `&& enrollmentId` narrows it to string.
+    if (enroll && enrollmentId) {
+        contactId = enroll.contact_id;
 
-            const intent = eiAnalysis?.intent || 'unknown';
+        // Build conversation history for context-aware analysis
+        conversationHistory = await buildConversationHistoryString(enroll.contact_id);
 
-            // 2. Record inbound SMS interaction with EI data
-            const interactionId = await recordInteraction({
-                clientId: enroll.tenant_id,
-                contactId: enroll.contact_id,
+        // Analyze with full EI
+        try {
+            eiAnalysis = await analyzeMessage(messageBody, 'sms', conversationHistory);
+            console.log(`[EVENT] EI analysis: emotion=${eiAnalysis.primary_emotion}, intent=${eiAnalysis.intent}, hot=${eiAnalysis.is_hot_lead}, at_risk=${eiAnalysis.is_at_risk}`);
+        } catch (err) {
+            console.error('[EVENT] EI analysis failed, using fallback:', err);
+        }
+
+        // Map EI sentiment for the interaction record
+        const emotionToSentiment: Record<string, 'positive' | 'negative' | 'neutral' | 'interested' | 'objection' | 'confused'> = {
+            excited: 'positive',
+            interested: 'interested',
+            neutral: 'neutral',
+            hesitant: 'neutral',
+            frustrated: 'negative',
+            confused: 'confused',
+            angry: 'negative',
+            dismissive: 'negative',
+        };
+
+        const sentiment = eiAnalysis
+            ? (emotionToSentiment[eiAnalysis.primary_emotion] || 'neutral')
+            : 'neutral';
+
+        const intent = eiAnalysis?.intent || 'unknown';
+
+        // 2. Record inbound SMS interaction with EI data
+        const interactionId = await recordInteraction({
+            clientId: enroll.tenant_id,
+            contactId: enroll.contact_id,
+            enrollmentId,
+            channel: 'sms',
+            direction: 'inbound',
+            contentBody: messageBody,
+            outcome: 'replied',
+            sentiment,
+            intent: intent as any,
+        });
+
+        // Store full EI analysis on the interaction
+        if (interactionId && eiAnalysis) {
+            await supabase
+                .from('contact_interactions')
+                .update({
+                    emotional_analysis: eiAnalysis,
+                    engagement_score: eiAnalysis.is_hot_lead ? 80 : eiAnalysis.is_at_risk ? 25 : 50,
+                })
+                .eq('id', interactionId);
+        }
+
+        // 3. Update contact conversation summary
+        await updateContactConversationSummary(enroll.contact_id);
+
+        // 4. Update enrollment EI state + generate notifications
+        if (eiAnalysis) {
+            const interactions = await getRecentInteractions(enroll.contact_id);
+            await updateEnrollmentEI(enrollmentId, eiAnalysis, interactions);
+
+            const contactName = (enroll as any).contacts?.name || undefined;
+            await generateEINotifications(
+                enroll.tenant_id,
+                enroll.contact_id,
                 enrollmentId,
-                channel: 'sms',
-                direction: 'inbound',
-                contentBody: messageBody,
-                outcome: 'replied',
-                sentiment,
-                intent: intent as any,
-            });
-
-            // Store full EI analysis on the interaction
-            if (interactionId && eiAnalysis) {
-                await supabase
-                    .from('contact_interactions')
-                    .update({
-                        emotional_analysis: eiAnalysis,
-                        engagement_score: eiAnalysis.is_hot_lead ? 80 : eiAnalysis.is_at_risk ? 25 : 50,
-                    })
-                    .eq('id', interactionId);
-            }
-
-            // 3. Update contact conversation summary
-            await updateContactConversationSummary(enroll.contact_id);
-
-            // 4. Update enrollment EI state + generate notifications
-            if (eiAnalysis) {
-                const interactions = await getRecentInteractions(enroll.contact_id);
-                await updateEnrollmentEI(enrollmentId, eiAnalysis, interactions);
-
-                const contactName = (enroll as any).contacts?.name || undefined;
-                await generateEINotifications(
-                    enroll.tenant_id,
-                    enroll.contact_id,
-                    enrollmentId,
-                    eiAnalysis,
-                    contactName
-                );
-            }
+                eiAnalysis,
+                contactName
+            );
         }
     }
 
     if (!enrollmentId) {
-        // STOP must be honored even when no in-flight enrollment resolves
-        // (just-completed sequence, paused lead, contact ingested without
-        // enrollment) — otherwise opted_out_at is never set and the lead
-        // can be re-enrolled and re-contacted later.
-        if (isStopMessage(messageBody) && tenantId && event.fromPhone) {
-            const { data: untrackedContact, error: lookupErr } = await supabase
-                .from('contacts')
-                .select('id')
-                .eq('client_id', tenantId)
-                .in('phone', phoneLookupCandidates(event.fromPhone))
-                .limit(1)
-                .maybeSingle();
-            if (lookupErr) {
-                console.error('[EVENT] Contact lookup for untracked STOP failed:', lookupErr);
-            }
-            if (untrackedContact) {
-                console.log(`[EVENT] STOP keyword from untracked contact ${untrackedContact.id} — opting out`);
-                await optOutContact(supabase, untrackedContact.id, 'sms', 'keyword_untracked');
-                return;
-            }
-        }
-
+        // STOP/START/HELP was already handled above at the contact level
+        // (phone-resolved), so opted_out_at is set even without an enrollment.
+        // Anything else from an untracked contact just notifies a human.
         console.log('[EVENT] No enrollmentId in SMS reply, creating notification only');
         if (tenantId && messageBody) {
             await createNotification({
@@ -954,6 +998,12 @@ async function maybeTriggerChatbotReply(
                 if (!inboundSid) {
                     console.log(`[EVENT] Chatbot reply for ${enrollmentId} has no inbound MessageSid — dedupKey falls back to timestamp`);
                 }
+                // Record the outbound interaction exactly ONCE — in sms-worker
+                // after a confirmed send — by carrying the chatbot metadata
+                // through the job payload. Recording it here at enqueue time as
+                // well double-counted every chatbot turn in the GPT-fed timeline
+                // and inflated engagement scoring.
+                const turnNumber = result.metadata?.turn || 1;
                 await smsQueue.add('sms:chatbot-reply', {
                     tenantId: enrollment.tenant_id,
                     contactPhone: contact?.phone || fromPhone,
@@ -961,35 +1011,45 @@ async function maybeTriggerChatbotReply(
                     enrollmentId,
                     stepId: null, // No specific step — this is a chatbot reply
                     dedupKey: `chatbot:${enrollmentId}:${inboundSid || Date.now()}`,
-                });
-
-                // Extend the dynamic-outcome timeout: the lead is mid-
-                // conversation with the chatbot; without this the timeout
-                // fires and JIT-generates a parallel step over the chat.
-                const { error: timeoutErr } = await supabase
-                    .from('sequence_enrollments')
-                    .update({
-                        outcome_timeout_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', enrollmentId)
-                    .eq('status', 'awaiting_outcome');
-                if (timeoutErr) {
-                    console.error(`[EVENT] Failed to extend outcome_timeout_at for ${enrollmentId}:`, timeoutErr);
-                }
-
-                // Record the outbound chatbot interaction with metadata
-                const turnNumber = result.metadata?.turn || 1;
-                await recordInteraction({
-                    clientId: enrollment.tenant_id,
-                    contactId: enrollment.contact_id,
-                    enrollmentId,
-                    channel: 'sms',
-                    direction: 'outbound',
-                    contentBody: result.message,
-                    outcome: 'delivered',
                     metadata: { source: 'chatbot', turn: turnNumber },
                 });
+
+                // Hold the sequence while the lead is mid-conversation with the
+                // chatbot so a scheduled step can't fire over the live chat.
+                // DYNAMIC enrollments are gated by outcome_timeout_at (the timeout
+                // generator would otherwise JIT a parallel step). STATIC
+                // enrollments — the default (generation_mode !== 'dynamic') — are
+                // gated by next_step_at, which the chatbot previously never
+                // touched, so the next scheduled template SMS/call still went out
+                // mid-conversation. Push whichever clock applies forward by the
+                // hold window; it rolls forward on each reply and lapses after
+                // CHATBOT_CONVERSATION_HOLD_MS of silence, resuming the schedule.
+                const holdUntil = new Date(Date.now() + CHATBOT_CONVERSATION_HOLD_MS).toISOString();
+                if (sequence?.generation_mode === 'dynamic') {
+                    const { error: timeoutErr } = await supabase
+                        .from('sequence_enrollments')
+                        .update({
+                            outcome_timeout_at: holdUntil,
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq('id', enrollmentId)
+                        .eq('status', 'awaiting_outcome');
+                    if (timeoutErr) {
+                        console.error(`[EVENT] Failed to extend outcome_timeout_at for ${enrollmentId}:`, timeoutErr);
+                    }
+                } else {
+                    const { error: holdErr } = await supabase
+                        .from('sequence_enrollments')
+                        .update({
+                            next_step_at: holdUntil,
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq('id', enrollmentId)
+                        .eq('status', 'active');
+                    if (holdErr) {
+                        console.error(`[EVENT] Failed to hold static sequence ${enrollmentId} during chatbot conversation:`, holdErr);
+                    }
+                }
 
                 console.log(`[EVENT] Chatbot reply sent for ${enrollmentId} (turn ${turnNumber}): "${result.message.substring(0, 60)}..."`);
                 return true;

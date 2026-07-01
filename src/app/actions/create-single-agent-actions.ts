@@ -20,11 +20,13 @@ import {
     RE_STRUCTURED_DATA_SCHEMA,
     RE_STRUCTURED_DATA_PROMPT,
 } from "@/lib/verticals/real-estate-investor/sheets-schema";
+import { buildRESmsStarter } from "@/lib/verticals/real-estate-investor/sms-prompt-templates";
 import { buildSaaSOutboundTools } from "@/lib/verticals/saas/tools";
 import {
     SAAS_STRUCTURED_OUTPUT_SCHEMA,
     SAAS_STRUCTURED_OUTPUT_PROMPT,
 } from "@/lib/verticals/saas/structured-output";
+import { buildSaaSSmsStarter } from "@/lib/verticals/saas/sms-prompt-templates";
 import { getCalendarToolIdsForClient } from "@/app/actions/umbrella-tools-actions";
 import { getREStructuredOutputIdForClient } from "@/app/actions/umbrella-structured-outputs-actions";
 import { getAppUrl } from "@/lib/app-url";
@@ -598,6 +600,39 @@ async function createREOutboundAgent(
                     business_phone: formData.businessPhone,
                     outbound_goal: formData.outboundGoal,
                     outbound_scenario: formData.outboundScenario || null,
+                    // Dual-channel messaging assets. The sequencer reads these
+                    // (via getAgentMessaging) to adapt persona per channel for
+                    // any sequence bound to this agent; without them every SMS
+                    // path falls back to a generic AI persona. Mirrors
+                    // deployVerticalAgents — reuses buildRESmsStarter, so the
+                    // SMS prompt is built from the same context as voice unless
+                    // the operator edited it on the SMS-config phase.
+                    voice_prompt: formData.outboundPrompt,
+                    voice_first_message: formData.outboundFirstMessage,
+                    ...(() => {
+                        const sms =
+                            formData.smsPrompt && formData.smsFirstMessage
+                                ? {
+                                      smsPrompt: formData.smsPrompt,
+                                      smsFirstMessage: formData.smsFirstMessage,
+                                  }
+                                : buildRESmsStarter(
+                                      formData.outboundGoal,
+                                      formData
+                                  );
+                        return {
+                            sms_prompt: sms.smsPrompt,
+                            sms_first_message: sms.smsFirstMessage,
+                        };
+                    })(),
+                    shared_context: {
+                        company_name: formData.companyName,
+                        persona_name: formData.agentPersonaName,
+                        markets: formData.markets,
+                        deal_types: formData.dealTypes,
+                        appointment_type: formData.appointmentType,
+                        goal: formData.outboundGoal,
+                    },
                 },
                 auto_created: false,
                 template_version: "vertical-re-outbound-v1-adhoc",
@@ -772,6 +807,42 @@ async function createSaaSOutboundAgent(
                     business_phone: formData.businessPhone,
                     outbound_goal: formData.outboundGoal,
                     outbound_scenario: formData.outboundScenario || null,
+                    // Dual-channel messaging assets. The sequencer reads these
+                    // (via getAgentMessaging) to adapt persona per channel for
+                    // any sequence bound to this agent; without them every SMS
+                    // path falls back to a generic AI persona. Mirrors
+                    // deploySaaSAgents — reuses buildSaaSSmsStarter, so the SMS
+                    // prompt is built from the same context as voice unless the
+                    // operator edited it on the SMS-config phase.
+                    voice_prompt: formData.outboundPrompt,
+                    voice_first_message: formData.outboundFirstMessage,
+                    ...(() => {
+                        const sms =
+                            formData.smsPrompt && formData.smsFirstMessage
+                                ? {
+                                      smsPrompt: formData.smsPrompt,
+                                      smsFirstMessage: formData.smsFirstMessage,
+                                  }
+                                : buildSaaSSmsStarter(
+                                      formData.outboundGoal,
+                                      formData
+                                  );
+                        return {
+                            sms_prompt: sms.smsPrompt,
+                            sms_first_message: sms.smsFirstMessage,
+                        };
+                    })(),
+                    shared_context: {
+                        company_name: formData.companyName,
+                        product_one_liner: formData.productOneLiner,
+                        icp: formData.icpDescription,
+                        value_props: formData.valueProps,
+                        common_objections: formData.commonObjections || null,
+                        pricing_summary: formData.pricingSummary || null,
+                        persona_name: formData.agentPersonaName,
+                        demo_type: formData.demoType,
+                        goal: formData.outboundGoal,
+                    },
                 },
                 auto_created: false,
                 template_version: "vertical-saas-outbound-v1-adhoc",
