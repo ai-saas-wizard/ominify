@@ -2150,6 +2150,15 @@ export async function createSequenceFromWizard(
                     delay_minutes: delayMinutes,
                     delay_type: idx === 0 ? "immediate" : "fixed_delay",
                     content,
+                    // The scheduler's intent-guided generation path keys off
+                    // step_brief — without it, the placeholder content above
+                    // is dispatched verbatim as the lead's first touch.
+                    step_brief: {
+                        intent: brief.intent || input.customGoalDescription || meta.description,
+                        key_points: [],
+                        cta: brief.cta || "",
+                        constraints: [],
+                    },
                     enable_ai_mutation: true,
                     mutation_instructions: `Goal: ${brief.intent}. CTA: ${brief.cta}. Generate fresh content at dispatch time using real conversation context.`,
                     generated_dynamically: true,

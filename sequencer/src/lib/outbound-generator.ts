@@ -5,7 +5,9 @@
  * using a step brief (intent, key_points, CTA, constraints) combined with
  * conversation memory, brand voice, and emotional intelligence state.
  *
- * Supports SMS and email channels. Voice uses blueprint-based dispatch instead.
+ * Supports SMS, email, and voice. For voice it generates the opening line
+ * (first_message) the agent speaks when the call connects; the rest of the
+ * call is driven by the assistant's own prompt/blueprint.
  *
  * Used by:
  * - scheduler-worker: generate outbound content at dispatch time for brief-based steps
@@ -37,7 +39,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000,
 // ═══════════════════════════════════════════════════════════════════
 
 export interface GenerationInput {
-    channel: 'sms' | 'email';
+    channel: 'sms' | 'email' | 'voice';
     brief: StepBrief;
     conversationContext: ConversationContext | null;
     tenantProfile: TenantProfile;
@@ -54,8 +56,15 @@ export interface GenerationInput {
     };
 }
 
+// Voice generation produces ONLY the opening line — deliberately narrower
+// than VoiceContent (no system_prompt etc.), so callers merge it into the
+// step's existing voice content instead of replacing it.
+export interface VoiceGeneratedContent {
+    first_message: string;
+}
+
 export interface GenerationResult {
-    content: SmsContent | EmailContent;
+    content: SmsContent | EmailContent | VoiceGeneratedContent;
     reasoning: string;
     model: string;
 }
@@ -123,7 +132,7 @@ export async function generateOutboundContent(input: GenerationInput): Promise<G
             reasoning: parsed.reasoning || 'Generated from step brief',
             model: 'gpt-4o-mini',
         };
-    } else {
+    } else if (channel === 'email') {
         if (!parsed.subject || !parsed.body_text) {
             throw new Error('Generated email missing subject or body_text');
         }
@@ -136,6 +145,15 @@ export async function generateOutboundContent(input: GenerationInput): Promise<G
                 body_html: plainTextToHtml(parsed.body_text),
                 body_text: parsed.body_text,
             } as EmailContent,
+            reasoning: parsed.reasoning || 'Generated from step brief',
+            model: 'gpt-4o-mini',
+        };
+    } else {
+        if (!parsed.first_message || typeof parsed.first_message !== 'string') {
+            throw new Error('Generated voice content missing first_message field');
+        }
+        return {
+            content: { first_message: parsed.first_message } as VoiceGeneratedContent,
             reasoning: parsed.reasoning || 'Generated from step brief',
             model: 'gpt-4o-mini',
         };
@@ -160,7 +178,7 @@ function plainTextToHtml(text: string): string {
 // ═══════════════════════════════════════════════════════════════════
 
 function buildGenerationPrompt(
-    channel: 'sms' | 'email',
+    channel: 'sms' | 'email' | 'voice',
     brandVoice: string,
     industry: string,
     businessName: string,
@@ -173,12 +191,20 @@ function buildGenerationPrompt(
 - Conversational and direct — no email-style formatting
 - No links unless the CTA specifically requires one
 - Use contractions and casual phrasing appropriate for ${brandVoice} tone`
-        : `EMAIL RULES:
+        : channel === 'email'
+        ? `EMAIL RULES:
 - Subject line under 60 characters, compelling but not clickbait
 - Body: 3-5 sentences for follow-ups, can be longer for initial outreach
 - Plain text format — no HTML formatting needed
 - Include a greeting and sign-off with "${businessName}"
-- Professional email etiquette appropriate for ${brandVoice} tone`;
+- Professional email etiquette appropriate for ${brandVoice} tone`
+        : `VOICE RULES:
+- You are writing the OPENING LINE the AI agent speaks the moment an outbound call connects
+- 1-2 short sentences of natural spoken language — contractions, no formatting
+- Identify who is calling ("${businessName}") and why, per the brief
+- No links, emojis, markdown, or stage directions — this text is spoken aloud verbatim
+- End by inviting a response so the conversation starts naturally
+- Match the ${brandVoice} tone`;
 
     // For SMS, lead with the bound agent's texting persona so copy is
     // consistent with what the voice agent pitches on calls.
@@ -205,12 +231,14 @@ ABSOLUTE RULES:
 OUTPUT FORMAT (JSON only):
 ${channel === 'sms'
     ? `{ "body": "the SMS message text", "reasoning": "1-sentence explanation" }`
-    : `{ "subject": "email subject line", "body_text": "plain text email body", "reasoning": "1-sentence explanation" }`
+    : channel === 'email'
+    ? `{ "subject": "email subject line", "body_text": "plain text email body", "reasoning": "1-sentence explanation" }`
+    : `{ "first_message": "the spoken opening line", "reasoning": "1-sentence explanation" }`
 }`;
 }
 
 function buildGenerationRequest(params: {
-    channel: 'sms' | 'email';
+    channel: 'sms' | 'email' | 'voice';
     brief: StepBrief;
     conversationContext: ConversationContext | null;
     contactName: string;
@@ -234,8 +262,10 @@ function buildGenerationRequest(params: {
     if (brief.constraints.length > 0) {
         request += `- Constraints: ${brief.constraints.join(', ')}\n`;
     }
-    if (brief.channel_hints?.[channel]) {
-        request += `- Channel Hints: ${JSON.stringify(brief.channel_hints[channel])}\n`;
+    // channel_hints only carries sms/email keys — nothing to surface for voice
+    const channelHint = channel !== 'voice' ? brief.channel_hints?.[channel] : undefined;
+    if (channelHint) {
+        request += `- Channel Hints: ${JSON.stringify(channelHint)}\n`;
     }
 
     request += `\nCONTACT:\n`;
@@ -290,6 +320,6 @@ function buildGenerationRequest(params: {
         if (emotionalState.isAtRisk) request += `- AT RISK — be gentle and empathetic\n`;
     }
 
-    request += `\nGenerate the ${channel.toUpperCase()} message now. Return valid JSON.`;
+    request += `\nGenerate the ${channel === 'voice' ? 'call opening line' : `${channel.toUpperCase()} message`} now. Return valid JSON.`;
     return request;
 }

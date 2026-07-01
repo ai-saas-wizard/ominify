@@ -229,7 +229,7 @@ export function ApiKeysSection({
     "source": "google_ads",
     "pipeline_id": "optional-uuid",
     "stage_id": "optional-uuid",
-    "enroll_in_sequence": "optional-uuid"
+    "enroll_in_sequence": "optional-uuid (must be one of YOUR active sequences)"
   }'`}
                             </pre>
                         </motion.div>
