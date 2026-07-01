@@ -68,8 +68,18 @@ export async function getAgentMessaging(
  * Render the shared offer context object into a labeled, prompt-ready block.
  * Vertical-agnostic: only the keys present are emitted. Returns '' when empty.
  */
-export function formatSharedContext(ctx: Record<string, any> | null | undefined): string {
+export function formatSharedContext(ctx: Record<string, any> | string | null | undefined): string {
     if (!ctx) return '';
+    // Operators can save free-text context from the agent editor; render it
+    // verbatim instead of silently dropping it (string has none of the keys).
+    if (typeof ctx === 'string') {
+        const text = ctx.trim();
+        if (!text) return '';
+        return (
+            "SHARED OFFER CONTEXT (what we sell — keep messaging consistent with this; " +
+            "it's the same context the voice agent uses on calls):\n" + text
+        );
+    }
     const lines: string[] = [];
     const push = (label: string, val: any) => {
         if (val === undefined || val === null || val === '') return;

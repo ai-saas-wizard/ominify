@@ -34,9 +34,21 @@ export async function updateAgentAction(agentId: string, clientId: string, formD
             if (formData.has("smsFirstMessage"))
                 merged.sms_first_message =
                     (formData.get("smsFirstMessage") as string) || "";
-            if (formData.has("sharedContext"))
-                merged.shared_context =
-                    (formData.get("sharedContext") as string) || "";
+            if (formData.has("sharedContext")) {
+                // The editor shows structured shared_context as pretty JSON;
+                // parse it back so the sequencer's formatSharedContext keeps
+                // reading named keys. Free-text stays a string (the sequencer
+                // renders strings as-is).
+                const raw = (formData.get("sharedContext") as string) || "";
+                let parsed: unknown = raw;
+                try {
+                    const candidate = JSON.parse(raw);
+                    if (candidate && typeof candidate === "object") parsed = candidate;
+                } catch {
+                    // not JSON — keep the raw string
+                }
+                merged.shared_context = parsed;
+            }
             await supabase
                 .from("agents")
                 .update({ agent_config: merged })

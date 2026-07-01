@@ -299,7 +299,11 @@ async function makeVapiCall(
             );
         } else if (
             assistantConfig.first_message &&
-            !assistantConfig.first_message.includes('[AI-generated at dispatch]')
+            !assistantConfig.first_message.includes('[AI-generated at dispatch]') &&
+            // Self-healer requeues pass raw step.content that never went
+            // through renderTemplate — an unrendered "Hi {{first_name}}"
+            // must fall back to the baked-in opener, not be spoken verbatim.
+            !assistantConfig.first_message.includes('{{')
         ) {
             // The step (or the scheduler's brief-based generation) authored
             // an explicit opening line — it must win over the assistant's

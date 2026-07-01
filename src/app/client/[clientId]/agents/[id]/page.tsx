@@ -133,9 +133,16 @@ export default async function AgentEditorPage(props: {
                                 smsFirstMessage={
                                     agentRecord?.agent_config?.sms_first_message || ""
                                 }
-                                sharedContext={
-                                    agentRecord?.agent_config?.shared_context || ""
-                                }
+                                sharedContext={(() => {
+                                    // Deploy paths store shared_context as a structured
+                                    // object; the textarea needs a string. Pretty JSON
+                                    // round-trips through updateAgentAction's parse.
+                                    const sc = agentRecord?.agent_config?.shared_context;
+                                    if (!sc) return "";
+                                    return typeof sc === "string"
+                                        ? sc
+                                        : JSON.stringify(sc, null, 2);
+                                })()}
                             />
                         </div>
 

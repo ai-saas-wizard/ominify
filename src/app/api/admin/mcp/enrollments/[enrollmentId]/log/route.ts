@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import {
-    getExecutionLog,
+    getEnrollmentExecutionLog,
     getMutationHistory,
     getHealingLog,
 } from "@/app/actions/sequence-actions";
@@ -17,7 +17,7 @@ export async function GET(
 
     const { enrollmentId } = await params;
     const [log, mutations, healing] = await Promise.all([
-        getExecutionLog(enrollmentId),
+        getEnrollmentExecutionLog(enrollmentId),
         getMutationHistory(enrollmentId),
         getHealingLog(enrollmentId),
     ]);

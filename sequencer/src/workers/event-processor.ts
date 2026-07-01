@@ -583,7 +583,10 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             .eq('id', enrollmentId)
             .single();
         enroll = (data as any) ?? null;
-        enrollFetchError = error;
+        // PGRST116 = zero rows: the enrollment is permanently gone (e.g. its
+        // sequence was deleted with cascade). Retrying can never succeed, so
+        // treat it as enroll=null and fall through to the untracked paths.
+        enrollFetchError = error && (error as { code?: string }).code !== 'PGRST116' ? error : null;
     }
 
     // 0. Deterministic STOP/START/HELP keyword handling — MUST run before any
@@ -1024,31 +1027,37 @@ async function maybeTriggerChatbotReply(
                 // mid-conversation. Push whichever clock applies forward by the
                 // hold window; it rolls forward on each reply and lapses after
                 // CHATBOT_CONVERSATION_HOLD_MS of silence, resuming the schedule.
+                // Key the hold off the enrollment's STATE, not generation_mode:
+                // dynamic enrollments sit in 'awaiting_outcome' (gated by
+                // outcome_timeout_at) but ALSO in 'active' while a JIT-generated
+                // step waits on next_step_at — that state needs the same
+                // next_step_at hold as static sequences. Exactly one of the two
+                // updates matches. The next_step_at hold only pushes FORWARD
+                // (.lt guard): a step already scheduled beyond the hold window
+                // must not be pulled earlier.
                 const holdUntil = new Date(Date.now() + CHATBOT_CONVERSATION_HOLD_MS).toISOString();
-                if (sequence?.generation_mode === 'dynamic') {
-                    const { error: timeoutErr } = await supabase
-                        .from('sequence_enrollments')
-                        .update({
-                            outcome_timeout_at: holdUntil,
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', enrollmentId)
-                        .eq('status', 'awaiting_outcome');
-                    if (timeoutErr) {
-                        console.error(`[EVENT] Failed to extend outcome_timeout_at for ${enrollmentId}:`, timeoutErr);
-                    }
-                } else {
-                    const { error: holdErr } = await supabase
-                        .from('sequence_enrollments')
-                        .update({
-                            next_step_at: holdUntil,
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', enrollmentId)
-                        .eq('status', 'active');
-                    if (holdErr) {
-                        console.error(`[EVENT] Failed to hold static sequence ${enrollmentId} during chatbot conversation:`, holdErr);
-                    }
+                const { error: timeoutErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        outcome_timeout_at: holdUntil,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId)
+                    .eq('status', 'awaiting_outcome');
+                if (timeoutErr) {
+                    console.error(`[EVENT] Failed to extend outcome_timeout_at for ${enrollmentId}:`, timeoutErr);
+                }
+                const { error: holdErr } = await supabase
+                    .from('sequence_enrollments')
+                    .update({
+                        next_step_at: holdUntil,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', enrollmentId)
+                    .eq('status', 'active')
+                    .lt('next_step_at', holdUntil);
+                if (holdErr) {
+                    console.error(`[EVENT] Failed to hold sequence ${enrollmentId} during chatbot conversation:`, holdErr);
                 }
 
                 console.log(`[EVENT] Chatbot reply sent for ${enrollmentId} (turn ${turnNumber}): "${result.message.substring(0, 60)}..."`);

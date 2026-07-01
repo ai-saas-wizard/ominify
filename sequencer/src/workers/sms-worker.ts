@@ -272,6 +272,12 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
 
     if (enrollmentError) {
         console.error(`[SMS] Error fetching enrollment ${enrollmentId}:`, enrollmentError);
+        // Chatbot turns are recorded post-send from this enrollment row; a
+        // send without the record corrupts conversation memory and the
+        // MAX_CHATBOT_TURNS cap. Retry the job instead of sending blind.
+        if (metadata?.source === 'chatbot') {
+            throw new Error(`[SMS] Enrollment fetch failed for chatbot reply ${enrollmentId}: ${enrollmentError.message}`);
+        }
     }
 
     if (enrollment?.contact_id) {

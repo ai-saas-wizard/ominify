@@ -567,6 +567,30 @@ export async function getEnrollments(sequenceId: string) {
 // their contact), then pull every log row for those enrollments. Each returned
 // row carries `_contact` so the UI can group entries per lead.
 
+// Per-enrollment variant kept for the admin MCP enrollment route, which drills
+// into ONE lead's history (getExecutionLog above is sequence-scoped).
+export async function getEnrollmentExecutionLog(enrollmentId: string) {
+    try {
+        const { data, error } = await supabase
+            .from("sequence_execution_log")
+            .select(`
+                *,
+                sequence_steps(step_order, channel, content)
+            `)
+            .eq("enrollment_id", enrollmentId)
+            .order("executed_at", { ascending: true });
+
+        if (error) {
+            console.error("getEnrollmentExecutionLog error:", error);
+            return { success: false, error: error.message, data: [] };
+        }
+        return { success: true, data: data || [] };
+    } catch (error) {
+        console.error("getEnrollmentExecutionLog error:", error);
+        return { success: false, error: "Failed to fetch execution log", data: [] };
+    }
+}
+
 export async function getExecutionLog(sequenceId: string) {
     try {
         // 1. All enrollments of this sequence, with the contact behind each.

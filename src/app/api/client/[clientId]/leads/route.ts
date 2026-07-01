@@ -43,6 +43,14 @@ async function evaluateEnrollment(
             enrolledSequenceId = enrollInSequence;
         } else if (enrollError.code === "23505") {
             alreadyEnrolled = true;
+        } else {
+            // A validated, explicitly-requested enrollment failed for some
+            // other reason (transient DB error, constraint). Don't let the
+            // 200 response silently masquerade as a deliberate no-op.
+            console.error(
+                `[LEADS] Enrollment insert failed for contact ${contactId} → sequence ${enrollInSequence}:`,
+                enrollError
+            );
         }
     }
 
