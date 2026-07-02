@@ -1,0 +1,30 @@
+-- AI-first defaults for sequences.
+--
+-- New sequences get the adaptive-mutation master switch ON by default
+-- (sequence-mutator gates per-sequence at runtime; per-step enable_ai_mutation
+-- opt-outs still win, and JIT-generated dynamic steps hardcode it off).
+--
+-- Deliberately NEW ROWS ONLY: no UPDATE of existing sequences — flipping the
+-- flag on running campaigns would silently change their behavior. Operators
+-- keep the per-sequence toggle in the flow toolbar / detail sidebar.
+ALTER TABLE sequences ALTER COLUMN enable_adaptive_mutation SET DEFAULT true;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Operator audit (read-only, run manually): dynamic sequences whose stored
+-- strategy still offers 'email' for tenants that cannot send it. No data
+-- migration is needed — the sequencer now intersects the stored
+-- available_channels with live tenant capability at generation time
+-- (sequencer/src/lib/channel-capabilities.ts), and the scheduler skip-advances
+-- email steps for email-incapable tenants — but this query shows the affected
+-- rows if you want visibility.
+--
+-- SELECT s.id, s.client_id, s.name, s.sequence_strategy->'available_channels' AS offered
+-- FROM sequences s
+-- WHERE s.generation_mode = 'dynamic'
+--   AND s.sequence_strategy->'available_channels' ? 'email'
+--   AND NOT EXISTS (
+--       SELECT 1 FROM tenant_email_accounts t
+--       WHERE t.client_id = s.client_id
+--         AND t.is_active = true
+--         AND t.is_verified = true
+--   );

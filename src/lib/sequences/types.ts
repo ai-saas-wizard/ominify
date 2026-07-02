@@ -15,7 +15,12 @@ export interface CreateSequenceInput {
     urgency_tier?: string;
     /** Already-parsed object (the FormData adapter parses the JSON string). */
     trigger_conditions?: any | null;
-    generation_mode?: string; // "static" | "dynamic"
+    /**
+     * "static" | "dynamic". Defaults to "dynamic" (AI decides channel/content/
+     * timing per lead); dynamic sequences REQUIRE agentId. Pass "static"
+     * explicitly for a manually-authored fixed-step sequence.
+     */
+    generation_mode?: string;
     max_touchpoints?: number;
     agentId?: string | null;
     /**
@@ -24,6 +29,11 @@ export interface CreateSequenceInput {
      * SMS persona drives replies), false otherwise.
      */
     enable_chatbot_mode?: boolean;
+    /**
+     * Sequence-level master switch for AI content mutation on static steps.
+     * Defaults to true (AI-first); per-step enable_ai_mutation still applies.
+     */
+    enable_adaptive_mutation?: boolean;
 }
 
 export interface UpdateSequenceInput {

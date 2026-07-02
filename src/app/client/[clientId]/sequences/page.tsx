@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
 import {
     SequencesListClient,
     type SequenceCardData,
@@ -58,17 +59,21 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
 }
 
 async function getTenantWizardContext(clientId: string) {
-    const [profileResult, agentResult, metaResult, googleAdsResult, metaPagesResult] = await Promise.all([
+    const [profileResult, agentResult, metaResult, googleAdsResult, metaPagesResult, channelReadiness] = await Promise.all([
         supabase
             .from("tenant_profiles")
             .select("industry, emergency_phone, business_name")
             .eq("client_id", clientId)
             .single(),
+        // Outbound agents only — sequences are run BY an agent, so the wizard
+        // needs the pickable list (and gates on zero). vapi_id lets the wizard
+        // scope the voice toggle to the SELECTED agent, not just the tenant.
         supabase
             .from("agents")
-            .select("id")
+            .select("id, name, vapi_id")
             .eq("client_id", clientId)
-            .limit(1),
+            .eq("agent_type", "outbound")
+            .order("created_at", { ascending: false }),
         // Tables may not exist on every environment yet — wrap in maybeSingle so a
         // missing-table error doesn't crash the page during phased rollout.
         supabase
@@ -89,6 +94,7 @@ async function getTenantWizardContext(clientId: string) {
             .eq("client_id", clientId)
             .eq("subscription_active", true)
             .limit(1),
+        getChannelCapabilities(clientId),
     ]);
 
     // Also get the client email from clients table
@@ -103,7 +109,8 @@ async function getTenantWizardContext(clientId: string) {
     const googleAdsConnected = !!googleAdsResult.data;
 
     return {
-        hasAgent: (agentResult.data?.length ?? 0) > 0,
+        outboundAgents: (agentResult.data as { id: string; name: string; vapi_id: string | null }[]) || [],
+        channelReadiness,
         metaAdsConnected,
         googleAdsConnected,
         tenantProfile: {
@@ -130,7 +137,8 @@ export default async function SequencesPage({
         <SequencesListClient
             clientId={clientId}
             sequences={sequences}
-            hasAgent={wizardContext.hasAgent}
+            outboundAgents={wizardContext.outboundAgents}
+            channelReadiness={wizardContext.channelReadiness}
             metaAdsConnected={wizardContext.metaAdsConnected}
             googleAdsConnected={wizardContext.googleAdsConnected}
             tenantProfile={wizardContext.tenantProfile}

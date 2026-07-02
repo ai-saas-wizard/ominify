@@ -12,6 +12,7 @@
 
 import OpenAI from 'openai';
 import { supabase } from './db.js';
+import { getTenantCapableChannels } from './channel-capabilities.js';
 import { optOutContact } from './opt-out.js';
 import { getAgentMessaging } from './agent-messaging.js';
 import type {
@@ -177,10 +178,17 @@ export async function generateNextStep(params: {
         };
     }
 
-    // Build contact validity info
+    // Build contact validity info, then intersect with what the TENANT can
+    // actually send (Twilio subaccount / verified email account / voice agent)
+    // so a stale stored strategy can never pick a dead channel.
     const hasPhone = !!contact.phone;
     const hasEmail = !!contact.email;
+    const tenantChannels = await getTenantCapableChannels(
+        sequence.client_id,
+        sequence.agent_id
+    );
     const availableChannels = strategy.available_channels.filter(ch => {
+        if (!tenantChannels.includes(ch)) return false;
         if (ch === 'sms' || ch === 'voice') return hasPhone;
         if (ch === 'email') return hasEmail;
         return true;

@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { deriveAvailableChannels } from "@/lib/channels/capabilities";
 import OpenAI from "openai";
 import { getAgentTypeDefinition, type SequenceStepTemplate } from "@/lib/agent-catalog";
 import type { TenantProfileData } from "@/lib/prompt-templates";
@@ -191,7 +192,12 @@ export async function createAgentSequence(
         .single();
     const agentConfig = (agentRow?.agent_config as Record<string, any>) || undefined;
 
-    // 1. Create the sequence (dynamic mode by default for auto-created)
+    // 1. Create the sequence (dynamic mode by default for auto-created).
+    // The stored strategy keeps the FULL template channel set as intent — the
+    // sequencer intersects it with live tenant capability at every generation,
+    // so channels provisioned after onboarding (Twilio, email) light up
+    // automatically instead of being frozen out by a deploy-time snapshot.
+    const capableChannels = await deriveAvailableChannels(clientId, agentId);
     const sequenceStrategy = {
         goal: agentConfig?.shared_context?.goal || template.description_template || "Follow up with lead",
         max_steps: template.steps.length,
@@ -228,8 +234,17 @@ export async function createAgentSequence(
         return { success: false, error: seqError?.message || "Failed to create sequence" };
     }
 
-    // 2. Generate content and create steps — only step 1 for dynamic mode
-    const stepsToCreate = template.steps.slice(0, 1);
+    // 2. Generate content and create steps — only step 1 for dynamic mode.
+    // Prefer the first template step whose channel the tenant can send TODAY
+    // (falling back to the template's own first step); the row is always
+    // inserted at step_order 1 because enrollments start at
+    // current_step_order 0 and the scheduler dispatches order 1 — a row at
+    // any other order would instantly complete every enrollment untouched.
+    const firstCapable =
+        template.steps.find((s) =>
+            capableChannels.includes(s.channel as (typeof capableChannels)[number])
+        ) || template.steps[0];
+    const stepsToCreate = firstCapable ? [firstCapable] : [];
     const stepPromises = stepsToCreate.map(async (stepTemplate) => {
         try {
             const contentTemplate = await generateStepContent(
@@ -242,7 +257,8 @@ export async function createAgentSequence(
 
             return supabase.from("sequence_steps").insert({
                 sequence_id: sequence.id,
-                step_order: stepTemplate.step_order,
+                // Always the sequence's first touch, whatever its template slot.
+                step_order: 1,
                 channel: stepTemplate.channel,
                 delay_minutes: stepTemplate.delay_minutes,
                 delay_type: stepTemplate.delay_type,
@@ -308,7 +324,11 @@ export async function createAgentSequenceFromDynamic(
         .single();
     const agentConfig = (agentRow?.agent_config as Record<string, any>) || undefined;
 
-    // 1. Create the sequence (dynamic mode by default)
+    // 1. Create the sequence (dynamic mode by default). The stored strategy
+    // keeps the FULL structure channel set as intent — the sequencer
+    // intersects it with live tenant capability at every generation, so
+    // channels provisioned after onboarding light up automatically.
+    const capableChannels = await deriveAvailableChannels(clientId, agentId);
     const v2Strategy = {
         goal: agentConfig?.shared_context?.goal || "Follow up with lead and book appointment",
         max_steps: sequenceStructure.steps.length,
@@ -343,8 +363,15 @@ export async function createAgentSequenceFromDynamic(
         return { success: false, error: seqError?.message || "Failed to create sequence" };
     }
 
-    // 2. Generate content and create steps — only step 1 for dynamic mode
-    const stepsToCreate = sequenceStructure.steps.slice(0, 1);
+    // 2. Generate content and create steps — only step 1 for dynamic mode.
+    // Prefer the first step whose channel the tenant can send today (falling
+    // back to the structure's first step); always inserted at step_order 1 —
+    // enrollments start at 0 and the scheduler dispatches order 1.
+    const firstCapable =
+        sequenceStructure.steps.find((s) =>
+            capableChannels.includes(s.channel as (typeof capableChannels)[number])
+        ) || sequenceStructure.steps[0];
+    const stepsToCreate = firstCapable ? [firstCapable] : [];
     const stepPromises = stepsToCreate.map(async (step) => {
         try {
             const stepTemplate: SequenceStepTemplate = {
@@ -369,7 +396,8 @@ export async function createAgentSequenceFromDynamic(
 
             return supabase.from("sequence_steps").insert({
                 sequence_id: sequence.id,
-                step_order: step.step_order,
+                // Always the sequence's first touch, whatever its structure slot.
+                step_order: 1,
                 channel: step.channel,
                 delay_minutes: step.delay_minutes,
                 delay_type: "after_previous",

@@ -96,6 +96,8 @@ export interface SimulationScenario {
 export interface WizardState {
     goal: GoalId | null;
     customGoalDescription: string;
+    /** The outbound agent that voices calls and drives the SMS persona. Required to activate. */
+    agentId: string | null;
     channelConfig: ChannelConfig;
     handoffRules: HandoffRulesConfig;
 }
