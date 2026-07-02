@@ -1,5 +1,6 @@
 import "server-only";
 import { supabase } from "@/lib/supabase";
+import { deriveAvailableChannels } from "@/lib/channels/capabilities";
 import type {
     CoreOpts,
     CoreResult,
@@ -19,6 +20,54 @@ import type {
  * caller injects revalidatePath via opts.revalidate when UI cache-busting is
  * wanted. Behavior is intended to be byte-identical to the original actions.
  */
+
+/**
+ * Gate: a bound agent must exist, belong to the client, and be
+ * outbound-capable (an inbound-only receptionist can't run sequences).
+ */
+export async function assertOutboundAgent(
+    clientId: string,
+    agentId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+    const { data: agent } = await supabase
+        .from("agents")
+        .select("agent_type")
+        .eq("id", agentId)
+        .eq("client_id", clientId)
+        .single();
+    if (!agent) return { ok: false, error: "Selected agent not found" };
+    if (agent.agent_type !== "outbound") {
+        return {
+            ok: false,
+            error: "Selected agent is inbound-only. Outbound sequences require an outbound agent.",
+        };
+    }
+    return { ok: true };
+}
+
+/**
+ * Gate: step authoring is only allowed on static sequences. Dynamic sequences'
+ * steps are generated per lead by the AI — hand-editing them would corrupt
+ * per-enrollment histories. Enforced here (not just in the UI) so the MCP
+ * route and stale clients can't write either.
+ */
+export async function assertSequenceEditable(
+    sequenceId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+    const { data: seq } = await supabase
+        .from("sequences")
+        .select("generation_mode")
+        .eq("id", sequenceId)
+        .single();
+    if (!seq) return { ok: false, error: "Sequence not found" };
+    if (seq.generation_mode === "dynamic") {
+        return {
+            ok: false,
+            error: "This sequence is AI-managed; its steps are generated per lead and cannot be edited.",
+        };
+    }
+    return { ok: true };
+}
 
 function defaultMutationInstructions(channel: string): string | null {
     switch (channel) {
@@ -44,34 +93,43 @@ export async function createSequenceCore(
 
         // Gate: if an agent is bound, it must be outbound-capable.
         if (input.agentId) {
-            const { data: agent } = await supabase
-                .from("agents")
-                .select("agent_type")
-                .eq("id", input.agentId)
-                .eq("client_id", clientId)
-                .single();
-            if (!agent) return { success: false, error: "Selected agent not found" };
-            if (agent.agent_type !== "outbound") {
-                return {
-                    success: false,
-                    error: "Selected agent is inbound-only. Outbound sequences require an outbound agent.",
-                };
-            }
+            const gate = await assertOutboundAgent(clientId, input.agentId);
+            if (!gate.ok) return { success: false, error: gate.error };
         }
 
-        const generation_mode = input.generation_mode || "static";
+        // AI-first default: new sequences are dynamic (the AI decides channel/
+        // content/timing per lead) unless the caller explicitly asks for static.
+        const generation_mode = input.generation_mode || "dynamic";
+        if (generation_mode === "dynamic" && !input.agentId) {
+            return {
+                success: false,
+                error: "AI sequences require an outbound agent. Deploy one from the Agents page, or pass generation_mode: \"static\" for a manual sequence.",
+            };
+        }
+
         const max_touchpoints = input.max_touchpoints || 8;
         const description = input.description ?? null;
 
-        const sequence_strategy =
-            generation_mode === "dynamic"
-                ? {
-                      goal: description || "Follow up with lead",
-                      max_steps: max_touchpoints,
-                      available_channels: ["sms", "email", "voice"],
-                      agent_context: name,
-                  }
-                : null;
+        let sequence_strategy: Record<string, any> | null = null;
+        if (generation_mode === "dynamic") {
+            // Offer the AI only channels this tenant can actually send on.
+            const available_channels = await deriveAvailableChannels(
+                clientId,
+                input.agentId
+            );
+            if (available_channels.length === 0) {
+                return {
+                    success: false,
+                    error: "No outreach channels are configured. Set up SMS, email, or a voice agent first.",
+                };
+            }
+            sequence_strategy = {
+                goal: description || "Follow up with lead",
+                max_steps: max_touchpoints,
+                available_channels,
+                agent_context: name,
+            };
+        }
 
         // Default the call-aware SMS auto-reply chatbot ON when an outbound
         // agent is bound (the agent's SMS persona + shared context drive
@@ -92,6 +150,9 @@ export async function createSequenceCore(
                 agent_id: input.agentId || null,
                 generation_mode,
                 enable_chatbot_mode,
+                // AI-first: the adaptive-mutation master switch is on unless the
+                // caller opts out (sequence-mutator honors per-step flags too).
+                enable_adaptive_mutation: input.enable_adaptive_mutation ?? true,
                 sequence_strategy,
             })
             .select("id")
@@ -127,27 +188,25 @@ export async function updateSequenceCore(
             updates.trigger_conditions = input.trigger_conditions;
         // Re-bind / unbind the outbound agent (drives voice + SMS at runtime).
         if (input.agentId !== undefined) {
+            const { data: seqRow } = await supabase
+                .from("sequences")
+                .select("client_id, generation_mode")
+                .eq("id", sequenceId)
+                .single();
             if (input.agentId) {
                 // Gate: a bound agent must be outbound-capable. Scope the lookup
                 // to the sequence's client so you can't bind another tenant's agent.
-                const { data: seqRow } = await supabase
-                    .from("sequences")
-                    .select("client_id")
-                    .eq("id", sequenceId)
-                    .single();
-                const { data: agent } = await supabase
-                    .from("agents")
-                    .select("agent_type")
-                    .eq("id", input.agentId)
-                    .eq("client_id", seqRow?.client_id || "")
-                    .single();
-                if (!agent) return { success: false, error: "Selected agent not found" };
-                if (agent.agent_type !== "outbound") {
-                    return {
-                        success: false,
-                        error: "Selected agent is inbound-only. Outbound sequences require an outbound agent.",
-                    };
-                }
+                const gate = await assertOutboundAgent(
+                    seqRow?.client_id || "",
+                    input.agentId
+                );
+                if (!gate.ok) return { success: false, error: gate.error };
+            } else if (seqRow?.generation_mode === "dynamic") {
+                // Mirror the create-time invariant: AI sequences act as an agent.
+                return {
+                    success: false,
+                    error: "AI sequences require an outbound agent — bind a different agent instead of unassigning.",
+                };
             }
             updates.agent_id = input.agentId || null;
         }
@@ -184,6 +243,9 @@ export async function addSequenceStepCore(
 ): Promise<CoreResult> {
     try {
         if (!input.channel) return { success: false, error: "Channel is required" };
+
+        const editable = await assertSequenceEditable(sequenceId);
+        if (!editable.ok) return { success: false, error: editable.error };
 
         const { data: existingSteps } = await supabase
             .from("sequence_steps")
@@ -241,6 +303,27 @@ export async function updateSequenceStepCore(
     opts?: CoreOpts
 ): Promise<CoreResult> {
     try {
+        // Resolve the step's sequence BEFORE writing so AI-managed sequences
+        // and per-lead generated rows can't be hand-edited.
+        const { data: step } = await supabase
+            .from("sequence_steps")
+            .select("sequence_id, enrollment_id, generated_dynamically, sequences(client_id, generation_mode)")
+            .eq("id", stepId)
+            .single();
+        if (!step) return { success: false, error: "Step not found" };
+        if (step.enrollment_id || step.generated_dynamically) {
+            return {
+                success: false,
+                error: "This step was generated by the AI for a specific lead and cannot be edited.",
+            };
+        }
+        if ((step.sequences as any)?.generation_mode === "dynamic") {
+            return {
+                success: false,
+                error: "This sequence is AI-managed; its steps are generated per lead and cannot be edited.",
+            };
+        }
+
         const updates: Record<string, any> = {};
         if (input.channel) updates.channel = input.channel;
         if (input.delay_minutes !== undefined)
@@ -262,12 +345,7 @@ export async function updateSequenceStepCore(
             return { success: false, error: error.message };
         }
 
-        const { data: step } = await supabase
-            .from("sequence_steps")
-            .select("sequence_id, sequences(client_id)")
-            .eq("id", stepId)
-            .single();
-        if (step?.sequences) {
+        if (step.sequences) {
             const clientId = (step.sequences as any).client_id;
             opts?.revalidate?.(`/client/${clientId}/sequences/${step.sequence_id}`);
         }
@@ -302,6 +380,21 @@ export async function createSequenceWithStepsCore(
     steps: StepInput[] | undefined,
     opts?: CoreOpts
 ): Promise<CoreResult> {
+    // Steps on an explicitly-dynamic sequence are a contradiction — reject
+    // BEFORE the sequence insert so no orphan row is left behind when the
+    // step-authoring gate would refuse them anyway.
+    if (input.generation_mode === "dynamic" && steps && steps.length > 0) {
+        return {
+            success: false,
+            error: "Steps cannot be provided for an AI-managed (dynamic) sequence — its steps are generated per lead. Omit steps, or pass generation_mode: \"static\".",
+        };
+    }
+    // A caller authoring fixed steps is authoring a static sequence — infer it
+    // so the dynamic default doesn't reject step-ful MCP payloads for missing
+    // an agent, then fail the step inserts on the editable gate.
+    if (!input.generation_mode && steps && steps.length > 0) {
+        input = { ...input, generation_mode: "static" };
+    }
     const created = await createSequenceCore(clientId, input, opts);
     if (!created.success) return created;
     const sequenceId = created.sequenceId as string;
@@ -361,6 +454,9 @@ export async function setSequenceActiveCore(
         }
 
         // Deactivate, then halt in-flight enrollments so the scheduler stops.
+        // Dynamic enrollments live in awaiting_outcome/generating_next_step —
+        // without pausing those too, the outcome-timeout poll self-resumes
+        // them and the "kill switch" doesn't kill.
         const { error: deErr } = await supabase
             .from("sequences")
             .update({ is_active: false })
@@ -369,9 +465,9 @@ export async function setSequenceActiveCore(
 
         const { data: paused, error: pErr } = await supabase
             .from("sequence_enrollments")
-            .update({ status: "paused", next_step_at: null })
+            .update({ status: "paused", next_step_at: null, outcome_timeout_at: null })
             .eq("sequence_id", sequenceId)
-            .eq("status", "active")
+            .in("status", ["active", "awaiting_outcome", "generating_next_step"])
             .select("id");
         if (pErr) return { success: false, error: pErr.message };
 

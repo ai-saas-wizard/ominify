@@ -145,6 +145,11 @@ export function FlowToolbar({
                 <h2 className="text-sm font-semibold text-gray-900 max-w-[160px] truncate">
                     {sequence.name}
                 </h2>
+                {/* This canvas is the advanced/legacy editor — only static
+                    sequences reach it (dynamic ones get the observability view). */}
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 text-gray-500">
+                    Manual
+                </Badge>
 
                 <Separator orientation="vertical" className="h-6" />
 

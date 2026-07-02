@@ -26,6 +26,8 @@ import {
     Trash2,
     MoreVertical,
     Power,
+    ChevronDown,
+    Bot,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,12 +39,17 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
-import { AIGenerateSequenceDialog } from "@/components/sequences/ai-generate-sequence-dialog";
 import { TaskDialog } from "@/components/sequences/task-dialog";
 import { SequenceWizard } from "@/components/sequences/wizard";
-import { getChannelReadiness, deleteSequence, toggleSequenceActive, type ChannelReadiness } from "@/app/actions/sequence-actions";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { deleteSequence, toggleSequenceActive, type ChannelReadiness } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,7 +78,10 @@ export interface SequenceCardData {
 interface SequencesListClientProps {
     clientId: string;
     sequences: SequenceCardData[];
-    hasAgent?: boolean;
+    /** Deployed outbound agents (server-fetched) — gates the wizard and empty state. */
+    outboundAgents: { id: string; name: string; vapi_id: string | null }[];
+    /** Server-derived channel capability, passed to the wizard and task dialog. */
+    channelReadiness: ChannelReadiness;
     metaAdsConnected?: boolean;
     googleAdsConnected?: boolean;
     tenantProfile?: {
@@ -343,7 +353,7 @@ function SequenceCard({
                                 )}
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                                {sequence.generation_mode === "dynamic" && (
+                                {sequence.generation_mode === "dynamic" ? (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <div className="p-1 rounded-md bg-emerald-50">
@@ -351,6 +361,17 @@ function SequenceCard({
                                             </div>
                                         </TooltipTrigger>
                                         <TooltipContent>Dynamic (AI-driven) sequence</TooltipContent>
+                                    </Tooltip>
+                                ) : (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 text-gray-500">
+                                                Manual
+                                            </Badge>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            Static sequence — steps are fixed and editable in the advanced builder
+                                        </TooltipContent>
                                     </Tooltip>
                                 )}
                                 {sequence.ai_mutation_steps > 0 && (
@@ -489,7 +510,7 @@ function SequenceCard({
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConnected, googleAdsConnected, tenantProfile }: SequencesListClientProps) {
+export function SequencesListClient({ clientId, sequences, outboundAgents, channelReadiness, metaAdsConnected, googleAdsConnected, tenantProfile }: SequencesListClientProps) {
     const router = useRouter();
     const totalSequences = sequences.length;
     const activeSequences = sequences.filter((s) => s.is_active).length;
@@ -498,15 +519,8 @@ export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConn
 
     const [taskDialogOpen, setTaskDialogOpen] = useState(false);
     const [wizardOpen, setWizardOpen] = useState(false);
-    const [channelReadiness, setChannelReadiness] = useState<ChannelReadiness>({
-        sms: { ready: false },
-        email: { ready: false },
-        voice: { ready: false },
-    });
-
-    useEffect(() => {
-        getChannelReadiness(clientId).then(setChannelReadiness);
-    }, [clientId]);
+    const [advancedCreateOpen, setAdvancedCreateOpen] = useState(false);
+    const hasOutboundAgent = outboundAgents.length > 0;
 
     const handleTaskLaunch = useCallback(
         (sequenceId: string) => {
@@ -589,7 +603,25 @@ export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConn
                             <Rocket className="w-4 h-4" />
                             New Task
                         </button>
-                        <CreateSequenceDialog clientId={clientId} variant="secondary" />
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                                    Advanced
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => setAdvancedCreateOpen(true)}>
+                                    Create manually (static)
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <CreateSequenceDialog
+                            clientId={clientId}
+                            open={advancedCreateOpen}
+                            onOpenChange={setAdvancedCreateOpen}
+                            hideTrigger
+                        />
                     </div>
                     <TaskDialog
                         open={taskDialogOpen}
@@ -602,7 +634,8 @@ export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConn
                     {wizardOpen && (
                         <SequenceWizard
                             clientId={clientId}
-                            hasAgent={hasAgent ?? false}
+                            outboundAgents={outboundAgents}
+                            channelReadiness={channelReadiness}
                             metaAdsConnected={metaAdsConnected ?? false}
                             googleAdsConnected={googleAdsConnected ?? false}
                             tenantProfile={tenantProfile ?? { industry: "general", phone: "", email: "", business_name: "" }}
@@ -664,25 +697,48 @@ export function SequencesListClient({ clientId, sequences, hasAgent, metaAdsConn
                                     }}
                                     className="inline-flex p-4 bg-gradient-to-br from-emerald-100 to-emerald-100 rounded-2xl mb-4"
                                 >
-                                    <Sparkles className="w-8 h-8 text-emerald-600" />
+                                    {hasOutboundAgent ? (
+                                        <Sparkles className="w-8 h-8 text-emerald-600" />
+                                    ) : (
+                                        <Bot className="w-8 h-8 text-emerald-600" />
+                                    )}
                                 </motion.div>
-                                <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                                    Create your first AI sequence
-                                </h3>
-                                <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
-                                    Pick a goal, choose your channels, and watch your AI in action —
-                                    all in under 90 seconds.
-                                </p>
-                                <div className="flex flex-col items-center gap-3">
-                                    <button
-                                        onClick={() => setWizardOpen(true)}
-                                        className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        <Sparkles className="w-4 h-4" />
-                                        Create AI Sequence
-                                    </button>
-                                    <CreateSequenceDialog clientId={clientId} variant="link" />
-                                </div>
+                                {hasOutboundAgent ? (
+                                    <>
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                            Create your first AI sequence
+                                        </h3>
+                                        <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+                                            You set the goal, touchpoints, and contact windows —
+                                            the AI decides the channel, content, and timing of
+                                            every touch.
+                                        </p>
+                                        <button
+                                            onClick={() => setWizardOpen(true)}
+                                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                            <Sparkles className="w-4 h-4" />
+                                            Create AI Sequence
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                            Set up your AI agent first
+                                        </h3>
+                                        <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+                                            Sequences are run by your AI agent — it texts and
+                                            calls leads for you. Deploy an agent to get started.
+                                        </p>
+                                        <Link
+                                            href={`/client/${clientId}/agents/new`}
+                                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
+                                        >
+                                            <Bot className="w-4 h-4" />
+                                            Set up your agent
+                                        </Link>
+                                    </>
+                                )}
                             </CardContent>
                         </Card>
                     </motion.div>

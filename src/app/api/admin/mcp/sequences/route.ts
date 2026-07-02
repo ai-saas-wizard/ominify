@@ -25,6 +25,11 @@ export async function GET(req: NextRequest) {
 // Body: { clientId, name, description?, trigger_type?, urgency_tier?, trigger_conditions?,
 //         generation_mode?, max_touchpoints?, agentId?, steps?: StepInput[] }
 // Sequences are always created inactive — activation is a separate, gated call.
+// This admin surface keeps its original contract: generation_mode defaults to
+// "static" here (the AI-first "dynamic" default applies to the dashboard/wizard
+// paths), so the pre-existing create-then-add-steps automation keeps working.
+// Pass generation_mode: "dynamic" + agentId explicitly for an AI sequence; steps
+// cannot be combined with dynamic (its steps are AI-generated per lead).
 export async function POST(req: NextRequest) {
     const unauth = requireAdmin(req);
     if (unauth) return unauth;
@@ -52,7 +57,7 @@ export async function POST(req: NextRequest) {
             trigger_type: rest.trigger_type,
             urgency_tier: rest.urgency_tier,
             trigger_conditions: rest.trigger_conditions,
-            generation_mode: rest.generation_mode,
+            generation_mode: rest.generation_mode ?? "static",
             max_touchpoints: rest.max_touchpoints,
             agentId: rest.agentId ?? rest.agent_id ?? null,
         },

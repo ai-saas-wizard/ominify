@@ -26,13 +26,16 @@ import { ChannelConfigScreen } from "./channel-config";
 import { HandoffRulesScreen } from "./handoff-rules";
 import { SimulationView } from "./simulation-view";
 import { generateSimulation } from "@/app/actions/simulation-actions";
-import { createSequenceFromWizard } from "@/app/actions/sequence-actions";
+import { createSequenceFromWizard, type ChannelReadiness } from "@/app/actions/sequence-actions";
 
 // ─── Props ───
 
 interface SequenceWizardProps {
     clientId: string;
-    hasAgent: boolean;
+    /** Deployed outbound agents — sequences act as one of these; required to activate. */
+    outboundAgents: { id: string; name: string; vapi_id: string | null }[];
+    /** Which channels this tenant can actually send on (server-derived). */
+    channelReadiness: ChannelReadiness;
     metaAdsConnected: boolean;
     googleAdsConnected: boolean;
     tenantProfile: {
@@ -60,12 +63,24 @@ const stepVariants = {
 
 // ─── Default State ───
 
-function getDefaultState(): WizardState {
+function getDefaultState(
+    readiness: ChannelReadiness,
+    defaultAgent: { id: string; vapi_id: string | null } | undefined
+): WizardState {
     return {
         goal: null,
         customGoalDescription: "",
+        agentId: defaultAgent?.id ?? null,
         channelConfig: {
-            channels: { sms: true, email: true, voice: true },
+            // Only channels the tenant can actually send on start enabled.
+            // Voice is scoped to the SELECTED agent — creation intersects on
+            // that agent's capability, so offering tenant-wide voice for a
+            // vapi-less agent would silently drop it at activation.
+            channels: {
+                sms: readiness.sms.ready,
+                email: readiness.email.ready,
+                voice: readiness.voice.ready && !!defaultAgent?.vapi_id,
+            },
             cadence: 3,
             duration: 3,
         },
@@ -90,7 +105,8 @@ function getDefaultState(): WizardState {
 
 export function SequenceWizard({
     clientId,
-    hasAgent,
+    outboundAgents,
+    channelReadiness,
     metaAdsConnected,
     googleAdsConnected,
     tenantProfile,
@@ -99,7 +115,9 @@ export function SequenceWizard({
     const router = useRouter();
     const [step, setStep] = useState(0);
     const [direction, setDirection] = useState(1);
-    const [state, setState] = useState<WizardState>(getDefaultState);
+    const [state, setState] = useState<WizardState>(() =>
+        getDefaultState(channelReadiness, outboundAgents[0])
+    );
     const [simulation, setSimulation] = useState<SimulationScenario | null>(null);
     const [simLoading, setSimLoading] = useState(false);
     const [activating, setActivating] = useState(false);
@@ -153,7 +171,10 @@ export function SequenceWizard({
             case 0:
                 return state.goal !== null && (state.goal !== "custom" || state.customGoalDescription.trim().length > 5);
             case 1:
-                return Object.values(state.channelConfig.channels).some(Boolean);
+                return (
+                    state.agentId !== null &&
+                    Object.values(state.channelConfig.channels).some(Boolean)
+                );
             case 2:
                 return state.handoffRules.success_conditions.length > 0;
             case 3:
@@ -245,7 +266,7 @@ export function SequenceWizard({
 
     // Activate
     const handleActivate = useCallback(async () => {
-        if (!state.goal || !simulation) return;
+        if (!state.goal || !simulation || !state.agentId) return;
         setActivating(true);
 
         try {
@@ -260,6 +281,7 @@ export function SequenceWizard({
             const result = await createSequenceFromWizard(clientId, {
                 goal: state.goal,
                 customGoalDescription: state.customGoalDescription,
+                agentId: state.agentId,
                 channels: state.channelConfig.channels,
                 cadence: state.channelConfig.cadence,
                 duration: state.channelConfig.duration,
@@ -288,6 +310,52 @@ export function SequenceWizard({
             setActivating(false);
         }
     }, [state, simulation, clientId, router, onClose]);
+
+    // Zero-agent gate: sequences act as an outbound agent — without one the
+    // wizard would dead-end at activation, so block up front with a clear CTA.
+    if (outboundAgents.length === 0) {
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+                <div className="flex-shrink-0 border-b border-gray-200 px-6 py-4">
+                    <div className="flex items-center justify-between max-w-3xl mx-auto">
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                            <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                        <div className="w-9" />
+                    </div>
+                </div>
+                <div className="flex-1 flex items-center justify-center">
+                    <motion.div
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="text-center space-y-4 max-w-md px-6"
+                    >
+                        <div className="inline-flex p-4 bg-emerald-100 rounded-2xl">
+                            <Rocket className="w-10 h-10 text-emerald-600" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900">
+                            Deploy your AI agent first
+                        </h2>
+                        <p className="text-gray-500">
+                            Sequences are run by your AI agent — it texts and calls
+                            leads as your business. Deploy an outbound agent, then
+                            come back to launch a sequence.
+                        </p>
+                        <a
+                            href={`/client/${clientId}/agents/new`}
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm transition-all"
+                        >
+                            Set up your agent
+                            <ArrowRight className="w-4 h-4" />
+                        </a>
+                    </motion.div>
+                </div>
+            </div>
+        );
+    }
 
     // Success screen
     if (activated) {
@@ -413,7 +481,28 @@ export function SequenceWizard({
                             {step === 1 && (
                                 <ChannelConfigScreen
                                     config={state.channelConfig}
-                                    hasAgent={hasAgent}
+                                    readiness={channelReadiness}
+                                    outboundAgents={outboundAgents}
+                                    agentId={state.agentId}
+                                    onAgentChange={(agentId) =>
+                                        setState((s) => {
+                                            // Voice follows the selected agent's capability.
+                                            const voiceCapable =
+                                                channelReadiness.voice.ready &&
+                                                !!outboundAgents.find((a) => a.id === agentId)?.vapi_id;
+                                            return {
+                                                ...s,
+                                                agentId,
+                                                channelConfig: {
+                                                    ...s.channelConfig,
+                                                    channels: {
+                                                        ...s.channelConfig.channels,
+                                                        voice: s.channelConfig.channels.voice && voiceCapable,
+                                                    },
+                                                },
+                                            };
+                                        })
+                                    }
                                     onChange={(channelConfig) =>
                                         setState((s) => ({ ...s, channelConfig }))
                                     }

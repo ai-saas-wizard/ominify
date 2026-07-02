@@ -61,6 +61,7 @@ import {
     type VoiceGeneratedContent,
 } from '../lib/outbound-generator.js';
 import { getAgentMessaging } from '../lib/agent-messaging.js';
+import { isEmailDispatchable } from '../lib/channel-capabilities.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -763,6 +764,31 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         case 'email':
             if (!contact.email) {
                 console.log(`[SCHEDULER] No email for contact, skipping step`);
+                await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
+                return;
+            }
+            // Tenant sendability guard: legacy static sequences (and older
+            // wizard step rows) can carry email steps for tenants with no way
+            // to send at all — skip-advance instead of hard-failing in the
+            // email worker. Uses the email-worker's own send truth (any active
+            // account OR env SMTP fallback), NOT the stricter is_verified
+            // offering check, so nothing that sent yesterday is suppressed.
+            if (!(await isEmailDispatchable(enrollment.tenant_id))) {
+                console.log(`[SCHEDULER] Email not configured for tenant ${enrollment.tenant_id}, skipping step`);
+                const { error: skipLogErr } = await supabase.from('sequence_execution_log').insert({
+                    enrollment_id: enrollment.id,
+                    step_id: step.id,
+                    channel: 'email',
+                    action: 'skipped',
+                    status: 'skipped',
+                    email_status: 'skipped',
+                    provider_id: null,
+                    provider_response: { reason: 'Email not configured for tenant' },
+                    executed_at: new Date().toISOString(),
+                });
+                if (skipLogErr) {
+                    console.error(`[SCHEDULER] Failed to log email capability skip for enrollment ${enrollment.id}:`, skipLogErr);
+                }
                 await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
                 return;
             }

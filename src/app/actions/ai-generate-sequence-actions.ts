@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { deriveAvailableChannels } from "@/lib/channels/capabilities";
 import { revalidatePath } from "next/cache";
 import { getOpenRouterClient, CONVERSATION_MODEL, GENERATION_MODEL } from "@/lib/openrouter";
 import {
@@ -856,11 +857,20 @@ Generate the full sequence. Respond with ONLY the JSON object.`;
             }
         }
 
-        // ── Build sequence strategy for dynamic mode
+        // ── Build sequence strategy for dynamic mode. Only offer channels the
+        // tenant can actually send on (the plan's picks can't widen them).
+        let strategyChannels = plan.channels as ("sms" | "email" | "voice")[];
+        if (generationMode === "dynamic") {
+            const capable = await deriveAvailableChannels(clientId);
+            strategyChannels = strategyChannels.filter((ch) => capable.includes(ch));
+            if (strategyChannels.length === 0) {
+                return { success: false, error: "No outreach channels are configured. Set up SMS, email, or a voice agent first." };
+            }
+        }
         const sequenceStrategy = generationMode === "dynamic" ? {
             goal: plan.goal,
             max_steps: plan.step_count,
-            available_channels: plan.channels as ("sms" | "email" | "voice")[],
+            available_channels: strategyChannels,
             agent_context: plan.summary,
             planned_steps: validation.steps, // informational: full plan
         } : null;
@@ -1006,11 +1016,20 @@ ${STEP_SCHEMA_INSTRUCTIONS}`;
             }
         }
 
-        // ── Build sequence strategy for dynamic mode
+        // ── Build sequence strategy for dynamic mode. Intersect the generated
+        // steps' channels with what the tenant can actually send.
+        let strategyChannels = [...new Set(validation.steps!.map(s => s.channel))] as ("sms" | "email" | "voice")[];
+        if (generationMode === "dynamic") {
+            const capable = await deriveAvailableChannels(clientId);
+            strategyChannels = strategyChannels.filter((ch) => capable.includes(ch));
+            if (strategyChannels.length === 0) {
+                return { success: false, error: "No outreach channels are configured. Set up SMS, email, or a voice agent first." };
+            }
+        }
         const sequenceStrategy = generationMode === "dynamic" ? {
             goal: generated.description || "Follow up with lead",
             max_steps: options?.maxSteps || validation.steps!.length,
-            available_channels: [...new Set(validation.steps!.map(s => s.channel))] as ("sms" | "email" | "voice")[],
+            available_channels: strategyChannels,
             agent_context: userPrompt,
             planned_steps: validation.steps,
         } : null;
@@ -1215,15 +1234,29 @@ export async function createTaskFromDescription(
 
         const p = profile || DEFAULT_PROFILE;
 
-        // ── Determine which channels are actually available
-        const readyChannels: string[] = [];
-        if (availableChannels) {
-            if (availableChannels.sms?.ready) readyChannels.push("sms");
-            if (availableChannels.email?.ready) readyChannels.push("email");
-            if (availableChannels.voice?.ready) readyChannels.push("voice");
-        } else {
-            readyChannels.push("sms", "email", "voice");
+        // ── Soft-require an agent: when the caller didn't pick one and the
+        // client has exactly one outbound agent, bind it (SMS/email-only tasks
+        // stay creatable with zero agents).
+        if (!agentId) {
+            const { data: outboundAgents } = await supabase
+                .from("agents")
+                .select("id")
+                .eq("client_id", clientId)
+                .eq("agent_type", "outbound")
+                .limit(2);
+            if (outboundAgents && outboundAgents.length === 1) {
+                agentId = outboundAgents[0].id;
+            }
         }
+
+        // ── Determine which channels are actually available. Derived
+        // server-side from tenant provisioning — the client's list (a UI hint)
+        // can only narrow it, never widen it.
+        const derivedChannels = await deriveAvailableChannels(clientId, agentId);
+        const readyChannels: string[] = derivedChannels.filter((ch) => {
+            if (!availableChannels) return true;
+            return availableChannels[ch]?.ready !== false;
+        });
 
         if (readyChannels.length === 0) {
             return { success: false, error: "No channels are available. Please configure at least one channel (SMS, email, or voice) before creating a task." };

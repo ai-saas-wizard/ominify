@@ -7,6 +7,10 @@ import { useRouter } from "next/navigation";
 
 const STATUS_COLORS: Record<string, string> = {
     active: "bg-green-100 text-green-700",
+    // Dynamic enrollments spend most of their life in these two states —
+    // without entries they'd misleadingly render as green "active".
+    awaiting_outcome: "bg-sky-100 text-sky-700",
+    generating_next_step: "bg-violet-100 text-violet-700",
     paused: "bg-yellow-100 text-yellow-700",
     completed: "bg-blue-100 text-blue-700",
     replied: "bg-emerald-100 text-emerald-700",

@@ -22,8 +22,23 @@ const URGENCY_OPTIONS = [
     { value: "low", label: "Low" },
 ];
 
-export function CreateSequenceDialog({ clientId, variant }: { clientId: string; variant?: "default" | "secondary" | "link" }) {
-    const [isOpen, setIsOpen] = useState(false);
+export function CreateSequenceDialog({
+    clientId,
+    variant,
+    open,
+    onOpenChange,
+    hideTrigger,
+}: {
+    clientId: string;
+    variant?: "default" | "secondary" | "link";
+    /** Controlled-open mode (used by the Advanced menu); falls back to internal state. */
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    hideTrigger?: boolean;
+}) {
+    const [internalOpen, setInternalOpen] = useState(false);
+    const isOpen = open ?? internalOpen;
+    const setIsOpen = onOpenChange ?? setInternalOpen;
     const [loading, setLoading] = useState(false);
     const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
     const router = useRouter();
@@ -62,6 +77,8 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
     };
 
     if (!isOpen) {
+        if (hideTrigger) return null;
+
         if (variant === "link") {
             return (
                 <button
@@ -99,9 +116,16 @@ export function CreateSequenceDialog({ clientId, variant }: { clientId: string; 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                <div className="px-6 py-4 border-b flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-emerald-600" />
-                    <h3 className="font-semibold text-lg">Create New Sequence</h3>
+                <div className="px-6 py-4 border-b">
+                    <div className="flex items-center gap-2">
+                        <Zap className="w-5 h-5 text-emerald-600" />
+                        <h3 className="font-semibold text-lg">Create Manual Sequence (Advanced)</h3>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                        Fixed steps you author yourself — the AI won&apos;t decide
+                        channels, content, or timing. For AI-driven outreach, use
+                        the sequence wizard instead.
+                    </p>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     {/* Name */}

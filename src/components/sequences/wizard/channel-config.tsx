@@ -6,15 +6,20 @@ import {
     Mail,
     Phone,
     AlertCircle,
+    Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
+import type { ChannelReadiness } from "@/app/actions/sequence-actions";
 import type { ChannelConfig as ChannelConfigType } from "./types";
 import { CADENCE_LABELS, DURATION_OPTIONS } from "./constants";
 
 interface ChannelConfigProps {
     config: ChannelConfigType;
-    hasAgent: boolean;
+    readiness: ChannelReadiness;
+    outboundAgents: { id: string; name: string; vapi_id: string | null }[];
+    agentId: string | null;
+    onAgentChange: (agentId: string) => void;
     onChange: (config: ChannelConfigType) => void;
 }
 
@@ -63,10 +68,18 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; icon
     },
 };
 
-export function ChannelConfigScreen({ config, hasAgent, onChange }: ChannelConfigProps) {
+export function ChannelConfigScreen({
+    config,
+    readiness,
+    outboundAgents,
+    agentId,
+    onAgentChange,
+    onChange,
+}: ChannelConfigProps) {
     const enabledCount = Object.values(config.channels).filter(Boolean).length;
     const totalTouchpoints = config.cadence * config.duration;
     const cadenceLabel = CADENCE_LABELS[config.cadence] || "Moderate";
+    const selectedAgent = outboundAgents.find((a) => a.id === agentId);
 
     function toggleChannel(key: "sms" | "email" | "voice") {
         const updated = { ...config.channels, [key]: !config.channels[key] };
@@ -86,6 +99,34 @@ export function ChannelConfigScreen({ config, hasAgent, onChange }: ChannelConfi
                 </p>
             </div>
 
+            {/* Outbound Agent */}
+            <div className="space-y-3">
+                <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                    <Bot className="w-4 h-4 text-gray-400" />
+                    Your AI agent
+                </label>
+                {outboundAgents.length > 1 ? (
+                    <select
+                        value={agentId ?? ""}
+                        onChange={(e) => onAgentChange(e.target.value)}
+                        className="w-full p-2 border rounded-lg bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                        {outboundAgents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                                {a.name}
+                            </option>
+                        ))}
+                    </select>
+                ) : (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700">
+                        <span className="font-medium">{selectedAgent?.name || "Your agent"}</span>
+                    </div>
+                )}
+                <p className="text-xs text-gray-400">
+                    Drives the voice for calls and the SMS persona for texts.
+                </p>
+            </div>
+
             {/* Channel Toggles */}
             <div className="space-y-3">
                 <label className="text-sm font-medium text-gray-700">Channels</label>
@@ -93,7 +134,14 @@ export function ChannelConfigScreen({ config, hasAgent, onChange }: ChannelConfi
                     {CHANNELS.map((ch, i) => {
                         const isOn = config.channels[ch.key];
                         const colors = COLOR_MAP[ch.color];
-                        const needsAgent = ch.key === "voice" && !hasAgent;
+                        // Voice is scoped to the selected agent — creation
+                        // intersects on the bound agent's capability.
+                        const agentLacksVoice =
+                            ch.key === "voice" && !!selectedAgent && !selectedAgent.vapi_id;
+                        const notReady = !readiness[ch.key].ready || agentLacksVoice;
+                        const notReadyReason = agentLacksVoice
+                            ? "This agent has no voice assistant"
+                            : readiness[ch.key].reason || "Not configured";
 
                         return (
                             <motion.button
@@ -101,11 +149,11 @@ export function ChannelConfigScreen({ config, hasAgent, onChange }: ChannelConfi
                                 initial={{ opacity: 0, y: 12 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: i * 0.05 }}
-                                onClick={() => !needsAgent && toggleChannel(ch.key)}
-                                disabled={needsAgent}
+                                onClick={() => !notReady && toggleChannel(ch.key)}
+                                disabled={notReady}
                                 className={cn(
                                     "relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-150",
-                                    needsAgent && "opacity-50 cursor-not-allowed",
+                                    notReady && "opacity-50 cursor-not-allowed",
                                     isOn
                                         ? `${colors.bg} ${colors.border} shadow-sm`
                                         : "border-gray-200 bg-white hover:border-gray-300"
@@ -135,10 +183,10 @@ export function ChannelConfigScreen({ config, hasAgent, onChange }: ChannelConfi
                                 <span className="text-xs text-gray-400">
                                     {ch.description}
                                 </span>
-                                {needsAgent && (
+                                {notReady && (
                                     <div className="flex items-center gap-1 text-xs text-amber-600 mt-1">
-                                        <AlertCircle className="w-3 h-3" />
-                                        Set up AI agent first
+                                        <AlertCircle className="w-3 h-3 shrink-0" />
+                                        {notReadyReason}
                                     </div>
                                 )}
                             </motion.button>

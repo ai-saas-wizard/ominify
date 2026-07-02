@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 import { SequenceFlowCanvas } from "@/components/sequences/flow/sequence-flow-canvas";
+import { DynamicSequenceView } from "@/components/sequences/observability/dynamic-sequence-view";
 
 async function getSequenceWithDetails(sequenceId: string) {
     const { data: sequence, error } = await supabase
@@ -51,13 +52,32 @@ export default async function SequenceDetailPage({
         notFound();
     }
 
+    // Dynamic sequences get the read-only observability view: their steps are
+    // generated per lead at runtime, so the authoring canvas (which merges
+    // every lead's rows into one graph) never mounts for them.
+    if (sequence.generation_mode === "dynamic") {
+        return (
+            <div className="h-screen w-full">
+                <DynamicSequenceView
+                    clientId={clientId}
+                    sequenceId={sequenceId}
+                    sequence={sequence}
+                    enrollments={sequence.sequence_enrollments || []}
+                    isActive={sequence.is_active}
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="h-screen w-full">
             <SequenceFlowCanvas
                 clientId={clientId}
                 sequenceId={sequenceId}
                 sequence={sequence}
-                steps={sequence.sequence_steps || []}
+                // Defensive: enrollment-scoped (per-lead JIT) rows can never
+                // pollute the authoring graph of a static sequence.
+                steps={(sequence.sequence_steps || []).filter((s: any) => !s.enrollment_id)}
                 enrollments={sequence.sequence_enrollments || []}
                 isActive={sequence.is_active}
             />
