@@ -7,41 +7,41 @@ import {
     Phone,
     ArrowUpRight,
     ArrowDownLeft,
-    Loader2,
     Activity,
     Brain,
     Clock,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
 import { getEnrollmentJourney } from "@/app/actions/sequence-actions";
+import { cn } from "@/lib/utils";
 
-const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string; dot: string; badge: string }> = {
-    sms: { icon: MessageSquare, label: "SMS", dot: "bg-blue-500", badge: "text-blue-600 bg-blue-100" },
-    email: { icon: Mail, label: "Email", dot: "bg-emerald-500", badge: "text-emerald-600 bg-emerald-100" },
-    voice: { icon: Phone, label: "Voice", dot: "bg-violet-500", badge: "text-violet-600 bg-violet-100" },
-    voice_call: { icon: Phone, label: "Voice", dot: "bg-violet-500", badge: "text-violet-600 bg-violet-100" },
+const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string }> = {
+    sms: { icon: MessageSquare, label: "SMS" },
+    email: { icon: Mail, label: "Email" },
+    voice: { icon: Phone, label: "Voice" },
+    voice_call: { icon: Phone, label: "Voice" },
 };
 
+// One hue per meaning: emerald=success, red=failed, amber=confusion/objection,
+// sky=in-flight, neutral for the rest.
 const SENTIMENT_COLORS: Record<string, string> = {
-    positive: "bg-green-100 text-green-700",
-    interested: "bg-emerald-100 text-emerald-700",
+    positive: "bg-emerald-50 text-emerald-700",
+    interested: "bg-emerald-50 text-emerald-700",
     neutral: "bg-gray-100 text-gray-600",
-    confused: "bg-yellow-100 text-yellow-700",
-    objection: "bg-orange-100 text-orange-700",
-    negative: "bg-red-100 text-red-700",
+    confused: "bg-amber-50 text-amber-700",
+    objection: "bg-amber-50 text-amber-700",
+    negative: "bg-red-50 text-red-700",
 };
 
-function statusClasses(status: string): string {
+function statusStyle(status: string): { dot: string; text: string } {
     if (status === "delivered" || status === "success" || status === "completed" || status === "sent")
-        return "bg-green-50 text-green-700 border-green-200";
-    if (status === "failed") return "bg-red-50 text-red-700 border-red-200";
+        return { dot: "bg-emerald-500", text: "text-emerald-700" };
+    if (status === "failed") return { dot: "bg-red-500", text: "text-red-700" };
     if (status === "pending" || status === "executing")
-        return "bg-yellow-50 text-yellow-700 border-yellow-200";
-    if (status === "skipped" || status === "blocked_placeholder")
-        return "bg-gray-50 text-gray-500 border-gray-200";
-    return "bg-gray-50 text-gray-600 border-gray-200";
+        return { dot: "bg-sky-500", text: "text-sky-700" };
+    return { dot: "bg-gray-300", text: "text-gray-500" };
 }
 
 /** Summarize the dispatched content from the joined step row (per channel shape). */
@@ -131,29 +131,43 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-16 text-gray-400">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                <span className="text-sm">Loading journey...</span>
+            <div className="relative" aria-busy="true" aria-label="Loading journey">
+                <div className="absolute bottom-2 left-4 top-2 w-px bg-gray-100" />
+                <div className="space-y-3">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="relative pl-10">
+                            <Skeleton className="absolute left-3 top-4 h-2 w-2 rounded-full" />
+                            <div className="rounded-lg border border-gray-200 bg-white p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <Skeleton className="h-4 w-24" />
+                                    <Skeleton className="h-4 w-16" />
+                                </div>
+                                <Skeleton className="mt-2.5 h-4 w-3/4" />
+                                <Skeleton className="mt-2 h-3 w-40" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         );
     }
 
     if (error) {
         return (
-            <div className="text-center py-16 text-gray-400">
-                <Activity className="w-8 h-8 mx-auto mb-2 text-red-300" />
-                <p className="text-sm text-red-500">{error}</p>
-                <p className="text-xs mt-1">Select the lead again to retry.</p>
+            <div className="py-16 text-center text-gray-400">
+                <Activity className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                <p className="text-sm text-red-600">{error}</p>
+                <p className="mt-1 text-xs">Select the lead again to retry.</p>
             </div>
         );
     }
 
     if (events.length === 0) {
         return (
-            <div className="text-center py-16 text-gray-400">
-                <Activity className="w-8 h-8 mx-auto mb-2" />
+            <div className="py-16 text-center text-gray-400">
+                <Activity className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                 <p className="text-sm">No activity yet for this lead.</p>
-                <p className="text-xs mt-1">
+                <p className="mt-1 text-xs">
                     Touches appear here as the AI dispatches them.
                 </p>
             </div>
@@ -162,7 +176,7 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
 
     return (
         <div className="relative">
-            <div className="absolute left-4 top-2 bottom-2 w-px bg-gray-200" />
+            <div className="absolute bottom-2 left-4 top-2 w-px bg-gray-200" />
             <div className="space-y-3">
                 {events.map((event, idx) => {
                     const key = `${event.kind}-${event.data.id ?? idx}`;
@@ -172,30 +186,40 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                         const log = event.data;
                         const step = log.sequence_steps;
                         const meta = CHANNEL_META[log.channel] || CHANNEL_META.sms;
+                        const Icon = meta.icon;
                         const preview = stepContentPreview(step);
                         const delay = formatDelay(step?.delay_minutes);
+                        const status = statusStyle(log.status);
                         return (
                             <div key={key} className="relative pl-10">
-                                <div className={`absolute left-2.5 top-3 w-3 h-3 rounded-full ${meta.dot} ring-2 ring-white`} />
                                 <div
-                                    className="border rounded-lg p-3 bg-white cursor-pointer hover:shadow-sm transition-shadow"
+                                    className={cn(
+                                        "absolute left-3 top-4 h-2 w-2 rounded-full ring-2 ring-white",
+                                        status.dot
+                                    )}
+                                />
+                                <div
+                                    className="cursor-pointer rounded-lg border border-gray-200 bg-white p-3 transition-colors duration-150 hover:border-gray-300"
                                     onClick={() => setExpandedKey(isExpanded ? null : key)}
                                 >
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            <Badge variant="secondary" className={meta.badge}>
-                                                {meta.label}
-                                            </Badge>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="flex items-center gap-1.5">
+                                                <Icon className="h-3.5 w-3.5 text-gray-400" />
+                                                <span className="text-xs font-medium text-gray-700">
+                                                    {meta.label}
+                                                </span>
+                                            </span>
                                             {step?.step_order != null && (
-                                                <span className="text-xs text-gray-400">
+                                                <span className="text-xs tabular-nums text-gray-400">
                                                     Touch #{step.step_order}
                                                 </span>
                                             )}
                                             {step?.generated_dynamically && (
-                                                <Badge variant="outline" className="gap-1 bg-emerald-50 text-emerald-600 border-emerald-100 text-[10px]">
-                                                    <Brain className="w-3 h-3" />
+                                                <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500">
+                                                    <Brain className="h-3 w-3 text-gray-400" />
                                                     AI-generated
-                                                </Badge>
+                                                </span>
                                             )}
                                             {log.was_mutated && log.mutation && (
                                                 <MutationBadge
@@ -207,22 +231,30 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                                                 />
                                             )}
                                         </div>
-                                        <Badge variant="outline" className={statusClasses(log.status)}>
+                                        <span
+                                            className={cn(
+                                                "inline-flex shrink-0 items-center gap-1.5 text-xs font-medium",
+                                                status.text
+                                            )}
+                                        >
+                                            <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
                                             {log.status}
-                                        </Badge>
+                                        </span>
                                     </div>
 
                                     {preview && (
-                                        <p className="text-sm text-gray-700 line-clamp-2 mt-1.5">
+                                        <p className="mt-1.5 line-clamp-2 text-sm text-gray-700">
                                             {preview}
                                         </p>
                                     )}
 
-                                    <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
-                                        <span>{new Date(log.executed_at).toLocaleString()}</span>
+                                    <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-400">
+                                        <span className="font-mono">
+                                            {new Date(log.executed_at).toLocaleString()}
+                                        </span>
                                         {delay && (
                                             <span className="flex items-center gap-0.5">
-                                                <Clock className="w-3 h-3" />
+                                                <Clock className="h-3 w-3" />
                                                 {delay}
                                             </span>
                                         )}
@@ -240,20 +272,25 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                                     )}
 
                                     {isExpanded && (
-                                        <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                                        <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
                                             {preview && (
                                                 <div>
-                                                    <span className="text-xs font-medium text-gray-500 block mb-1">
+                                                    <span className="mb-1 block text-xs font-medium text-gray-500">
                                                         Dispatched content
                                                     </span>
-                                                    <p className="text-sm text-gray-700 whitespace-pre-line bg-gray-50 rounded p-2">
+                                                    <p className="whitespace-pre-line rounded-md bg-gray-50 p-2 text-sm text-gray-700">
                                                         {preview.substring(0, 1500)}
                                                         {preview.length > 1500 && "..."}
                                                     </p>
                                                 </div>
                                             )}
                                             {(log.provider_id || log.error_message) && (
-                                                <p className="text-[11px] text-gray-400 break-all">
+                                                <p
+                                                    className={cn(
+                                                        "break-all font-mono text-xs",
+                                                        log.provider_id ? "text-gray-400" : "text-red-600"
+                                                    )}
+                                                >
                                                     {log.provider_id || log.error_message}
                                                 </p>
                                             )}
@@ -276,57 +313,71 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                         (interaction.channel === "voice" ? "Voice call" : "No content");
                     return (
                         <div key={key} className="relative pl-10">
-                            <div className={`absolute left-2.5 top-3 w-3 h-3 rounded-full ${meta.dot} ring-2 ring-white`} />
                             <div
-                                className={`border rounded-lg p-3 cursor-pointer hover:shadow-sm transition-shadow ${
-                                    isOutbound ? "bg-gray-50" : "bg-blue-50/60 border-blue-200"
-                                }`}
+                                className={cn(
+                                    "absolute left-3 top-4 h-2 w-2 rounded-full ring-2 ring-white",
+                                    isOutbound ? "bg-gray-300" : "bg-sky-500"
+                                )}
+                            />
+                            <div
+                                className={cn(
+                                    "cursor-pointer rounded-lg border p-3 transition-colors duration-150",
+                                    isOutbound
+                                        ? "border-gray-200 bg-gray-50 hover:border-gray-300"
+                                        : "border-sky-200 bg-sky-50/40 hover:border-sky-300"
+                                )}
                                 onClick={() => setExpandedKey(isExpanded ? null : key)}
                             >
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-1.5">
-                                        <Icon className="w-3.5 h-3.5 text-gray-600" />
+                                        <Icon className="h-3.5 w-3.5 text-gray-400" />
                                         <span className="text-xs font-medium text-gray-700">{meta.label}</span>
                                         {isOutbound ? (
-                                            <ArrowUpRight className="w-3 h-3 text-gray-400" />
+                                            <ArrowUpRight className="h-3 w-3 text-gray-400" />
                                         ) : (
-                                            <ArrowDownLeft className="w-3 h-3 text-blue-500" />
+                                            <ArrowDownLeft className="h-3 w-3 text-sky-600" />
                                         )}
                                         <span className="text-xs text-gray-500">
                                             {isOutbound ? "Sent" : "Lead replied"}
                                         </span>
                                     </div>
-                                    <span className="text-[11px] text-gray-400">
+                                    <span className="font-mono text-xs text-gray-400">
                                         {new Date(interaction.created_at).toLocaleString()}
                                     </span>
                                 </div>
 
-                                <p className="text-sm text-gray-700 line-clamp-2 mt-1.5">{preview}</p>
+                                <p className="mt-1.5 line-clamp-2 text-sm text-gray-700">{preview}</p>
 
-                                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
                                     {interaction.outcome && (
                                         <span className="text-xs text-gray-500">{interaction.outcome}</span>
                                     )}
                                     {interaction.sentiment && (
-                                        <span className={`text-xs px-1.5 py-0.5 rounded ${SENTIMENT_COLORS[interaction.sentiment] || "bg-gray-100 text-gray-600"}`}>
+                                        <span
+                                            className={cn(
+                                                "rounded-md px-1.5 py-0.5 text-xs",
+                                                SENTIMENT_COLORS[interaction.sentiment] ||
+                                                    "bg-gray-100 text-gray-600"
+                                            )}
+                                        >
                                             {interaction.sentiment}
                                         </span>
                                     )}
                                     {interaction.intent && (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">
+                                        <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
                                             {interaction.intent}
                                         </span>
                                     )}
                                     {interaction.appointment_booked && (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+                                        <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">
                                             Booked
                                         </span>
                                     )}
                                 </div>
 
                                 {isExpanded && interaction.content_body && (
-                                    <div className="mt-3 pt-3 border-t border-gray-100">
-                                        <p className="text-sm text-gray-700 whitespace-pre-line bg-white/60 rounded p-2">
+                                    <div className="mt-3 border-t border-gray-100 pt-3">
+                                        <p className="whitespace-pre-line rounded-md bg-white/60 p-2 text-sm text-gray-700">
                                             {interaction.content_body.substring(0, 1500)}
                                             {interaction.content_body.length > 1500 && "..."}
                                         </p>

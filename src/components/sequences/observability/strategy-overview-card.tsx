@@ -1,12 +1,13 @@
 "use client";
 
 import { Target, MessageSquare, Mail, Phone, CalendarClock, Flag } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { seqCardStatic } from "@/components/sequences/theme";
 
-const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string; classes: string }> = {
-    sms: { icon: MessageSquare, label: "SMS", classes: "bg-blue-50 text-blue-700 border-blue-200" },
-    voice: { icon: Phone, label: "Voice", classes: "bg-violet-50 text-violet-700 border-violet-200" },
-    email: { icon: Mail, label: "Email", classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string }> = {
+    sms: { icon: MessageSquare, label: "SMS" },
+    voice: { icon: Phone, label: "Voice" },
+    email: { icon: Mail, label: "Email" },
 };
 
 const GOAL_LABELS: Record<string, string> = {
@@ -44,45 +45,51 @@ export function StrategyOverviewCard({ sequence }: { sequence: any }) {
     const successConditions: string[] = handoff.success_conditions || [];
 
     return (
-        <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
+        <div className={cn(seqCardStatic, "space-y-3 p-4")}>
             <div className="flex items-start gap-2">
-                <div className="p-1.5 bg-emerald-100 rounded-lg shrink-0">
-                    <Target className="w-4 h-4 text-emerald-600" />
-                </div>
+                <Target className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
                 <div className="min-w-0">
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                         AI Strategy
                     </h4>
-                    <p className="text-sm font-medium text-gray-900 mt-0.5">{goalText}</p>
+                    <p className="mt-0.5 text-sm font-medium text-gray-900">{goalText}</p>
                 </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap items-center gap-1.5">
                 {channels.map((ch) => {
                     const meta = CHANNEL_META[ch];
                     if (!meta) return null;
                     const Icon = meta.icon;
                     return (
-                        <Badge key={ch} variant="outline" className={`gap-1 ${meta.classes}`}>
-                            <Icon className="w-3 h-3" />
+                        <span
+                            key={ch}
+                            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600"
+                        >
+                            <Icon className="h-3 w-3 text-gray-400" />
                             {meta.label}
-                        </Badge>
+                        </span>
                     );
                 })}
             </div>
 
-            <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                 {maxSteps != null && (
                     <span className="flex items-center gap-1">
-                        <Flag className="w-3.5 h-3.5 text-gray-400" />
-                        Up to <span className="font-semibold text-gray-700">{maxSteps}</span> touchpoints
+                        <Flag className="h-3.5 w-3.5 text-gray-400" />
+                        Up to{" "}
+                        <span className="font-semibold tabular-nums text-gray-700">{maxSteps}</span>{" "}
+                        touchpoints
                     </span>
                 )}
                 {cadence != null && duration != null && (
                     <span className="flex items-center gap-1">
-                        <CalendarClock className="w-3.5 h-3.5 text-gray-400" />
-                        <span className="font-semibold text-gray-700">{cadence}/week</span> for{" "}
-                        <span className="font-semibold text-gray-700">
+                        <CalendarClock className="h-3.5 w-3.5 text-gray-400" />
+                        <span className="font-semibold tabular-nums text-gray-700">
+                            {cadence}/week
+                        </span>{" "}
+                        for{" "}
+                        <span className="font-semibold tabular-nums text-gray-700">
                             {duration} week{duration !== 1 ? "s" : ""}
                         </span>
                     </span>
@@ -90,13 +97,13 @@ export function StrategyOverviewCard({ sequence }: { sequence: any }) {
             </div>
 
             {successConditions.length > 0 && (
-                <div className="pt-2 border-t border-gray-100">
-                    <p className="text-[11px] text-gray-400 mb-1">Stops when</p>
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="border-t border-gray-100 pt-2">
+                    <p className="mb-1 text-xs text-gray-400">Stops when</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
                         {successConditions.map((c) => (
                             <span
                                 key={c}
-                                className="text-[11px] px-1.5 py-0.5 rounded bg-green-50 text-green-700"
+                                className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600"
                             >
                                 {c.replace(/_/g, " ")}
                             </span>
