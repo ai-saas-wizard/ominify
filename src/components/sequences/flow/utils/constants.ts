@@ -29,47 +29,49 @@ export interface ChannelFlowConfig {
     label: string;
 }
 
+// Send channels are neutral ink (identity comes from icon + label); only
+// wait keeps amber — it's a timing state, matching the section's semantics.
 export const CHANNEL_FLOW_CONFIG: Record<string, ChannelFlowConfig> = {
     sms: {
         icon: MessageSquare,
-        bgColor: "bg-green-50",
-        textColor: "text-green-700",
-        accentColor: "bg-green-500",
+        bgColor: "bg-gray-50",
+        textColor: "text-gray-700",
+        accentColor: "bg-gray-300",
         label: "SMS",
     },
     email: {
         icon: Mail,
-        bgColor: "bg-blue-50",
-        textColor: "text-blue-700",
-        accentColor: "bg-blue-500",
+        bgColor: "bg-gray-50",
+        textColor: "text-gray-700",
+        accentColor: "bg-gray-300",
         label: "Email",
     },
     voice_call: {
         icon: Phone,
-        bgColor: "bg-emerald-50",
-        textColor: "text-emerald-700",
-        accentColor: "bg-emerald-500",
+        bgColor: "bg-gray-50",
+        textColor: "text-gray-700",
+        accentColor: "bg-gray-300",
         label: "Voice Call",
     },
     voice: {
         icon: Phone,
-        bgColor: "bg-emerald-50",
-        textColor: "text-emerald-700",
-        accentColor: "bg-emerald-500",
+        bgColor: "bg-gray-50",
+        textColor: "text-gray-700",
+        accentColor: "bg-gray-300",
         label: "Voice Call",
     },
     wait: {
         icon: Clock,
         bgColor: "bg-amber-50",
         textColor: "text-amber-700",
-        accentColor: "bg-amber-500",
+        accentColor: "bg-amber-400",
         label: "Wait / Delay",
     },
     condition: {
         icon: GitBranch,
-        bgColor: "bg-pink-50",
-        textColor: "text-pink-700",
-        accentColor: "bg-pink-500",
+        bgColor: "bg-gray-50",
+        textColor: "text-gray-700",
+        accentColor: "bg-gray-300",
         label: "Condition",
     },
 };

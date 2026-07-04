@@ -15,16 +15,18 @@ import {
     ChevronUp,
 } from "lucide-react";
 
+// Neutral by default; only terminal/error outcomes carry color (red=ended,
+// amber=invalid). The action icon + label do the differentiating.
 const HEALING_ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-    switch_channel: { icon: ArrowRightLeft, color: "text-blue-600 bg-blue-100", label: "Switched Channel" },
-    override_channel: { icon: ArrowRightLeft, color: "text-emerald-600 bg-emerald-100", label: "Channel Override" },
-    retry_alternative: { icon: RefreshCw, color: "text-amber-600 bg-amber-100", label: "Retry Alternative" },
+    switch_channel: { icon: ArrowRightLeft, color: "text-gray-600 bg-gray-100", label: "Switched Channel" },
+    override_channel: { icon: ArrowRightLeft, color: "text-gray-600 bg-gray-100", label: "Channel Override" },
+    retry_alternative: { icon: RefreshCw, color: "text-gray-600 bg-gray-100", label: "Retry Alternative" },
     skip_and_advance: { icon: SkipForward, color: "text-gray-600 bg-gray-100", label: "Skipped" },
-    inject_fallback_sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "Fallback SMS" },
-    extend_delay: { icon: Timer, color: "text-yellow-600 bg-yellow-100", label: "Extended Delay" },
-    end_sequence: { icon: XCircle, color: "text-red-600 bg-red-100", label: "Ended" },
-    mark_invalid: { icon: AlertTriangle, color: "text-orange-600 bg-orange-100", label: "Marked Invalid" },
-    use_alternative_contact: { icon: Shield, color: "text-teal-600 bg-teal-100", label: "Alt Contact" },
+    inject_fallback_sms: { icon: MessageSquare, color: "text-gray-600 bg-gray-100", label: "Fallback SMS" },
+    extend_delay: { icon: Timer, color: "text-gray-600 bg-gray-100", label: "Extended Delay" },
+    end_sequence: { icon: XCircle, color: "text-red-700 bg-red-50", label: "Ended" },
+    mark_invalid: { icon: AlertTriangle, color: "text-amber-700 bg-amber-50", label: "Marked Invalid" },
+    use_alternative_contact: { icon: Shield, color: "text-gray-600 bg-gray-100", label: "Alt Contact" },
 };
 
 const FAILURE_TYPE_LABELS: Record<string, string> = {
@@ -65,32 +67,32 @@ export function HealingBadge({
         <div className="inline-block">
             <button
                 onClick={() => setExpanded(!expanded)}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${config.color} hover:opacity-80 transition-opacity`}
+                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
             >
-                <HeartPulse className="w-3 h-3" />
+                <HeartPulse className="h-3 w-3 text-gray-400" />
                 Healed
-                {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             </button>
 
             {expanded && (
-                <div className="mt-2 p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs space-y-2 max-w-sm">
+                <div className="mt-2 max-w-sm space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
                     <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
                         <span className="font-medium text-amber-800">
                             {FAILURE_TYPE_LABELS[failureType] || failureType}
                         </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <Icon className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                        <Icon className="h-3.5 w-3.5 flex-shrink-0 text-gray-500" />
                         <span className="text-gray-700">
                             {healingDetails?.reason || config.label}
                         </span>
                     </div>
 
                     {healingDetails?.new_channel && (
-                        <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                            <ArrowRightLeft className="w-3 h-3" />
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                            <ArrowRightLeft className="h-3 w-3" />
                             Switched to: <span className="font-medium">{healingDetails.new_channel.toUpperCase()}</span>
                         </div>
                     )}
@@ -125,21 +127,21 @@ export function HealingHistoryPanel({
                     return (
                         <div
                             key={index}
-                            className="flex items-start gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs"
+                            className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs"
                         >
-                            <Icon className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
+                            <Icon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                            <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${config.color}`}>
+                                    <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium ${config.color}`}>
                                         {config.label}
                                     </span>
-                                    <span className="text-[10px] text-gray-400">
+                                    <span className="text-xs tabular-nums text-gray-400">
                                         Step {action.step_order || "?"}
                                     </span>
                                 </div>
-                                <p className="text-gray-600 mt-0.5">{action.reason}</p>
+                                <p className="mt-0.5 text-gray-600">{action.reason}</p>
                                 {action.timestamp && (
-                                    <p className="text-[10px] text-gray-400 mt-0.5">
+                                    <p className="mt-0.5 font-mono text-xs text-gray-400">
                                         {new Date(action.timestamp).toLocaleString()}
                                     </p>
                                 )}
@@ -167,10 +169,10 @@ export function ChannelOverrideIndicator({
             {Object.entries(overrides).map(([from, to]) => (
                 <span
                     key={from}
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                    className="inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700"
                     title={`${from.toUpperCase()} steps are being sent as ${(to as string).toUpperCase()} for this enrollment`}
                 >
-                    <ArrowRightLeft className="w-2.5 h-2.5" />
+                    <ArrowRightLeft className="h-2.5 w-2.5" />
                     {from.toUpperCase()} → {(to as string).toUpperCase()}
                 </span>
             ))}

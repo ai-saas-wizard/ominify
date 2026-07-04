@@ -4,12 +4,8 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     X,
-    Zap,
-    Pause,
-    CheckCircle2,
     MessageSquare,
     Users,
-    XCircle,
     Activity,
     Mail,
     Phone,
@@ -17,13 +13,13 @@ import {
     Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EnrollmentTable } from "@/components/sequences/enrollment-table";
 import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
 import { getExecutionLog, listOutboundAgents, updateSequence } from "@/app/actions/sequence-actions";
+import { cn } from "@/lib/utils";
 
 const TRIGGER_LABELS: Record<string, string> = {
     new_lead: "New Lead",
@@ -35,25 +31,34 @@ const TRIGGER_LABELS: Record<string, string> = {
     schedule: "Schedule",
 };
 
-const URGENCY_COLORS: Record<string, string> = {
-    critical: "bg-red-100 text-red-700 border-red-200",
-    high: "bg-orange-100 text-orange-700 border-orange-200",
-    medium: "bg-yellow-100 text-yellow-700 border-yellow-200",
-    low: "bg-green-100 text-green-700 border-green-200",
+// Urgency as dot+label — only critical/high carry color.
+const URGENCY_DOTS: Record<string, string> = {
+    critical: "bg-red-500",
+    high: "bg-amber-500",
+    medium: "bg-gray-300",
+    low: "bg-gray-300",
 };
 
-const CHANNEL_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-    sms: { icon: MessageSquare, color: "text-green-600 bg-green-100", label: "SMS" },
-    email: { icon: Mail, color: "text-blue-600 bg-blue-100", label: "Email" },
-    voice: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
-    voice_call: { icon: Phone, color: "text-emerald-600 bg-emerald-100", label: "Voice Call" },
+const CHANNEL_CONFIG: Record<string, { icon: any; label: string }> = {
+    sms: { icon: MessageSquare, label: "SMS" },
+    email: { icon: Mail, label: "Email" },
+    voice: { icon: Phone, label: "Voice Call" },
+    voice_call: { icon: Phone, label: "Voice Call" },
 };
 
 const DEFAULT_CHANNEL_CONFIG = {
     icon: Activity,
-    color: "text-gray-600 bg-gray-100",
     label: "Step",
 };
+
+function logStatusStyle(status: string): { dot: string; text: string } {
+    if (status === "delivered" || status === "success" || status === "completed" || status === "sent")
+        return { dot: "bg-emerald-500", text: "text-emerald-700" };
+    if (status === "failed") return { dot: "bg-red-500", text: "text-red-700" };
+    if (status === "pending" || status === "executing")
+        return { dot: "bg-sky-500", text: "text-sky-700" };
+    return { dot: "bg-gray-300", text: "text-gray-500" };
+}
 
 /**
  * Group a flat, time-sorted list of execution-log rows into per-lead sections.
@@ -158,7 +163,7 @@ export function FlowSidebarPanel({
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: 400, opacity: 0 }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="fixed right-0 top-0 bottom-0 w-[420px] bg-white border-l shadow-2xl z-50 flex flex-col"
+                className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] flex-col border-l border-gray-200 bg-white shadow-lg"
             >
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b">
@@ -184,37 +189,40 @@ export function FlowSidebarPanel({
                         <div className="p-5 space-y-5">
                             {/* Name + Description */}
                             <div>
-                                <h2 className="text-lg font-bold text-gray-900">
+                                <h2 className="text-lg font-semibold tracking-tight text-gray-900">
                                     {sequence.name}
                                 </h2>
                                 {sequence.description && (
-                                    <p className="text-sm text-gray-500 mt-1">
+                                    <p className="mt-1 text-sm text-gray-500">
                                         {sequence.description}
                                     </p>
                                 )}
                             </div>
 
-                            {/* Meta badges */}
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="default" className="bg-emerald-50 text-emerald-600 border-emerald-100">
+                            {/* Meta: trigger chip + urgency/status as dot+label */}
+                            <div className="flex flex-wrap items-center gap-3">
+                                <span className="inline-flex items-center rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">
                                     {TRIGGER_LABELS[sequence.trigger_type] || sequence.trigger_type}
-                                </Badge>
-                                <Badge
-                                    variant="outline"
-                                    className={URGENCY_COLORS[sequence.urgency_tier] || URGENCY_COLORS.medium}
-                                >
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                                    <span
+                                        className={cn(
+                                            "h-1.5 w-1.5 rounded-full",
+                                            URGENCY_DOTS[sequence.urgency_tier] || URGENCY_DOTS.medium
+                                        )}
+                                    />
                                     {sequence.urgency_tier}
-                                </Badge>
+                                </span>
                                 {sequence.is_active ? (
-                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1" />
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                                         Active
-                                    </Badge>
+                                    </span>
                                 ) : (
-                                    <Badge variant="secondary">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 mr-1" />
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />
                                         Inactive
-                                    </Badge>
+                                    </span>
                                 )}
                             </div>
 
@@ -223,13 +231,13 @@ export function FlowSidebarPanel({
                             {/* Bound Agent */}
                             <div>
                                 <div className="flex items-center justify-between mb-1">
-                                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                                        <Bot className="w-3.5 h-3.5" />
+                                    <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                                        <Bot className="h-3.5 w-3.5 text-gray-400" />
                                         Bound Agent
                                     </h4>
                                     {savingAgent && (
-                                        <span className="flex items-center gap-1 text-[11px] text-emerald-600">
-                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                        <span className="flex items-center gap-1 text-xs text-gray-500">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
                                             Saving
                                         </span>
                                     )}
@@ -241,7 +249,7 @@ export function FlowSidebarPanel({
                                     value={boundAgentId}
                                     onChange={(e) => handleAgentChange(e.target.value)}
                                     disabled={savingAgent || !agentsLoaded}
-                                    className="w-full p-2 border rounded-lg bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                                    className="w-full rounded-md border border-gray-200 bg-white p-2 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50 disabled:opacity-60"
                                 >
                                     <option value="">Unassigned</option>
                                     {/* Keep the current binding selectable even if it's not in the fetched list. */}
@@ -256,7 +264,7 @@ export function FlowSidebarPanel({
                                     ))}
                                 </select>
                                 {agentsLoaded && agents.length === 0 && (
-                                    <p className="text-[11px] text-gray-400 mt-1.5">
+                                    <p className="mt-1.5 text-xs text-gray-400">
                                         No outbound agents yet. Create one from the Agents page to bind it here.
                                     </p>
                                 )}
@@ -266,31 +274,28 @@ export function FlowSidebarPanel({
 
                             {/* Enrollment stats grid */}
                             <div>
-                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
                                     Enrollment Stats
                                 </h4>
-                                <div className="grid grid-cols-3 gap-2">
+                                <div className="grid grid-cols-3 gap-x-4 gap-y-3">
                                     {[
-                                        { label: "Active", value: stats.active, icon: Zap, color: "text-green-600", bg: "bg-green-50" },
-                                        { label: "Paused", value: stats.paused, icon: Pause, color: "text-yellow-600", bg: "bg-yellow-50" },
-                                        { label: "Completed", value: stats.completed, icon: CheckCircle2, color: "text-blue-600", bg: "bg-blue-50" },
-                                        { label: "Replied", value: stats.replied, icon: MessageSquare, color: "text-emerald-600", bg: "bg-emerald-50" },
-                                        { label: "Booked", value: stats.booked, icon: Users, color: "text-emerald-600", bg: "bg-emerald-50" },
-                                        { label: "Failed", value: stats.failed, icon: XCircle, color: "text-red-600", bg: "bg-red-50" },
+                                        { label: "Active", value: stats.active, dot: "bg-sky-500" },
+                                        { label: "Paused", value: stats.paused, dot: "bg-amber-500" },
+                                        { label: "Completed", value: stats.completed },
+                                        { label: "Replied", value: stats.replied },
+                                        { label: "Booked", value: stats.booked },
+                                        { label: "Failed", value: stats.failed, dot: "bg-red-500" },
                                     ].map((stat) => (
-                                        <div
-                                            key={stat.label}
-                                            className={`flex items-center gap-2 px-3 py-2.5 ${stat.bg} rounded-lg`}
-                                        >
-                                            <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
-                                            <div>
-                                                <p className={`text-[10px] font-medium ${stat.color}`}>
-                                                    {stat.label}
-                                                </p>
-                                                <p className={`text-base font-bold ${stat.color}`}>
-                                                    {stat.value}
-                                                </p>
-                                            </div>
+                                        <div key={stat.label}>
+                                            <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                                                {stat.dot && (
+                                                    <span className={cn("h-1.5 w-1.5 rounded-full", stat.dot)} />
+                                                )}
+                                                {stat.label}
+                                            </p>
+                                            <p className="mt-0.5 text-base font-semibold tabular-nums text-gray-900">
+                                                {stat.value}
+                                            </p>
                                         </div>
                                     ))}
                                 </div>
@@ -299,14 +304,14 @@ export function FlowSidebarPanel({
                             <Separator />
 
                             {/* Summary */}
-                            <div className="text-xs text-gray-500 space-y-1">
+                            <div className="space-y-1 text-xs text-gray-500">
                                 <p>
                                     <span className="font-medium text-gray-700">Total enrolled:</span>{" "}
-                                    {stats.total}
+                                    <span className="tabular-nums">{stats.total}</span>
                                 </p>
                                 <p>
                                     <span className="font-medium text-gray-700">Steps:</span>{" "}
-                                    {sequence.sequence_steps?.length || 0}
+                                    <span className="tabular-nums">{sequence.sequence_steps?.length || 0}</span>
                                 </p>
                                 {sequence.created_at && (
                                     <p>
@@ -329,13 +334,20 @@ export function FlowSidebarPanel({
                     {activeTab === "log" && (
                         <div className="p-4">
                             {!logLoaded ? (
-                                <div className="text-center py-12 text-gray-400">
-                                    <Activity className="w-8 h-8 mx-auto mb-2 animate-pulse" />
-                                    <p className="text-sm">Loading execution log...</p>
+                                <div className="space-y-2" aria-busy="true" aria-label="Loading execution log">
+                                    {[0, 1, 2, 3].map((i) => (
+                                        <div key={i} className="rounded-lg border border-gray-200 bg-white p-3">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <Skeleton className="h-4 w-20" />
+                                                <Skeleton className="h-4 w-16" />
+                                            </div>
+                                            <Skeleton className="mt-2 h-3 w-36" />
+                                        </div>
+                                    ))}
                                 </div>
                             ) : executionLog.length === 0 ? (
-                                <div className="text-center py-12 text-gray-400">
-                                    <Activity className="w-8 h-8 mx-auto mb-2" />
+                                <div className="py-12 text-center text-gray-400">
+                                    <Activity className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                                     <p className="text-sm">No execution history yet.</p>
                                 </div>
                             ) : (
@@ -352,28 +364,30 @@ export function FlowSidebarPanel({
                                                             `Lead ${group.enrollmentId.substring(0, 8)}`}
                                                     </span>
                                                 </div>
-                                                <span className="text-[10px] text-gray-400 shrink-0">
+                                                <span className="shrink-0 text-xs tabular-nums text-gray-400">
                                                     {group.logs.length} event{group.logs.length === 1 ? "" : "s"}
                                                 </span>
                                             </div>
 
                                             {group.logs.map((log: any) => {
                                                 const config = CHANNEL_CONFIG[log.channel] || DEFAULT_CHANNEL_CONFIG;
+                                                const Icon = config.icon;
+                                                const status = logStatusStyle(log.status);
                                                 return (
                                                     <motion.div
                                                         key={log.id}
-                                                        initial={{ opacity: 0, y: 5 }}
+                                                        initial={{ opacity: 0, y: 4 }}
                                                         animate={{ opacity: 1, y: 0 }}
-                                                        className="bg-gray-50 rounded-lg border p-3 space-y-1.5"
+                                                        className="space-y-1.5 rounded-lg border border-gray-200 bg-white p-3"
                                                     >
                                                         <div className="flex items-center justify-between">
-                                                            <div className="flex items-center gap-1.5">
-                                                                <Badge
-                                                                    variant="secondary"
-                                                                    className={config.color}
-                                                                >
-                                                                    {config.label}
-                                                                </Badge>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="flex items-center gap-1.5">
+                                                                    <Icon className="h-3.5 w-3.5 text-gray-400" />
+                                                                    <span className="text-xs font-medium text-gray-700">
+                                                                        {config.label}
+                                                                    </span>
+                                                                </span>
                                                                 {log.was_mutated && log.mutation && (
                                                                     <MutationBadge
                                                                         originalContent={log.mutation.original_content}
@@ -384,22 +398,17 @@ export function FlowSidebarPanel({
                                                                     />
                                                                 )}
                                                             </div>
-                                                            <Badge
-                                                                variant="outline"
-                                                                className={
-                                                                    log.status === "delivered" || log.status === "success" || log.status === "completed"
-                                                                        ? "bg-green-50 text-green-700 border-green-200"
-                                                                        : log.status === "failed"
-                                                                            ? "bg-red-50 text-red-700 border-red-200"
-                                                                            : log.status === "pending" || log.status === "executing"
-                                                                                ? "bg-yellow-50 text-yellow-700 border-yellow-200"
-                                                                                : "bg-gray-50 text-gray-600 border-gray-200"
-                                                                }
+                                                            <span
+                                                                className={cn(
+                                                                    "inline-flex items-center gap-1.5 text-xs font-medium",
+                                                                    status.text
+                                                                )}
                                                             >
+                                                                <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
                                                                 {log.status}
-                                                            </Badge>
+                                                            </span>
                                                         </div>
-                                                        <div className="text-[11px] text-gray-500">
+                                                        <div className="font-mono text-xs text-gray-400">
                                                             {new Date(log.executed_at).toLocaleString()}
                                                         </div>
                                                         {log.was_healed && log.healing && (
@@ -413,7 +422,12 @@ export function FlowSidebarPanel({
                                                             </div>
                                                         )}
                                                         {(log.provider_id || log.error_message) && (
-                                                            <p className="text-[11px] text-gray-400 truncate">
+                                                            <p
+                                                                className={cn(
+                                                                    "truncate font-mono text-xs",
+                                                                    log.provider_id ? "text-gray-400" : "text-red-600"
+                                                                )}
+                                                            >
                                                                 {log.provider_id || log.error_message}
                                                             </p>
                                                         )}

@@ -9,16 +9,11 @@ import {
     Trash2,
     Zap,
     Users,
-    Pause,
-    CheckCircle2,
-    MessageSquare,
-    XCircle,
     Bot,
     Loader2,
     UserMinus,
     FlaskConical,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -37,20 +32,23 @@ import {
     listOutboundAgents,
     updateSequence,
 } from "@/app/actions/sequence-actions";
+import { cn } from "@/lib/utils";
+import { seqFocusRing, seqBtnSecondary, seqCardStatic } from "@/components/sequences/theme";
 
 // Dynamic enrollments spend most of their life awaiting an outcome or
-// generating the next step — give those states honest colors.
-const STATUS_COLORS: Record<string, string> = {
-    active: "bg-green-100 text-green-700",
-    awaiting_outcome: "bg-sky-100 text-sky-700",
-    generating_next_step: "bg-violet-100 text-violet-700",
-    paused: "bg-yellow-100 text-yellow-700",
-    completed: "bg-blue-100 text-blue-700",
-    replied: "bg-emerald-100 text-emerald-700",
-    booked: "bg-emerald-100 text-emerald-700",
-    failed: "bg-red-100 text-red-700",
-    unenrolled: "bg-gray-100 text-gray-500",
-    manual_stop: "bg-gray-100 text-gray-500",
+// generating the next step — those are in-flight (sky). Terminal outcomes
+// stay neutral ink; only paused/failed carry warning/error color.
+const ENROLLMENT_STATUS: Record<string, { dot: string; text: string }> = {
+    active: { dot: "bg-sky-500", text: "text-sky-700" },
+    awaiting_outcome: { dot: "bg-sky-500", text: "text-sky-700" },
+    generating_next_step: { dot: "bg-sky-500", text: "text-sky-700" },
+    paused: { dot: "bg-amber-500", text: "text-amber-700" },
+    completed: { dot: "bg-gray-900", text: "text-gray-700" },
+    replied: { dot: "bg-gray-900", text: "text-gray-700" },
+    booked: { dot: "bg-gray-900", text: "text-gray-700" },
+    failed: { dot: "bg-red-500", text: "text-red-700" },
+    unenrolled: { dot: "bg-gray-300", text: "text-gray-500" },
+    manual_stop: { dot: "bg-gray-300", text: "text-gray-500" },
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -173,25 +171,28 @@ export function DynamicSequenceView({
 
     return (
         <TooltipProvider delayDuration={200}>
-            <div className="h-full w-full flex flex-col bg-gray-50">
+            <div className="flex h-full w-full flex-col bg-gray-50">
                 {/* Header bar */}
-                <div className="flex-shrink-0 bg-white border-b px-4 py-3">
-                    <div className="flex items-center gap-2">
+                <div className="flex-shrink-0 border-b border-gray-200 bg-white px-4 py-3">
+                    <div className="flex items-center gap-2.5">
                         <Link
                             href={`/client/${clientId}/sequences`}
-                            className="flex items-center gap-1.5 text-gray-500 hover:text-gray-900 transition-colors"
+                            className={cn(
+                                "rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                                seqFocusRing
+                            )}
                         >
-                            <ArrowLeft className="w-4 h-4" />
+                            <ArrowLeft className="h-4 w-4" />
                         </Link>
-                        <h2 className="text-sm font-semibold text-gray-900 max-w-[280px] truncate">
+                        <h2 className="max-w-[280px] truncate text-sm font-semibold text-gray-900">
                             {sequence.name}
                         </h2>
-                        <Badge variant="outline" className="gap-1 bg-emerald-50 text-emerald-600 border-emerald-100">
-                            <Brain className="w-3 h-3" />
-                            AI-Driven
-                        </Badge>
+                        <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-500">
+                            <Brain className="h-3 w-3 text-gray-400" />
+                            AI-driven
+                        </span>
 
-                        <Separator orientation="vertical" className="h-6" />
+                        <Separator orientation="vertical" className="h-5" />
 
                         {/* Active toggle */}
                         <Tooltip>
@@ -199,9 +200,12 @@ export function DynamicSequenceView({
                                 <button
                                     onClick={handleToggleActive}
                                     disabled={toggling}
-                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 hover:bg-gray-100"
+                                    className={cn(
+                                        "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50",
+                                        seqFocusRing
+                                    )}
                                 >
-                                    <div className={`w-2 h-2 rounded-full ${isActive ? "bg-green-500" : "bg-gray-400"}`} />
+                                    <div className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-gray-300"}`} />
                                     {toggling ? "..." : isActive ? "Active" : "Inactive"}
                                 </button>
                             </TooltipTrigger>
@@ -213,9 +217,9 @@ export function DynamicSequenceView({
                             <TooltipTrigger asChild>
                                 <button
                                     onClick={() => setTestOpen(true)}
-                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gradient-to-br from-amber-400 to-amber-500 text-white shadow-sm hover:shadow-md transition-shadow"
+                                    className={cn(seqBtnSecondary, "px-2.5 py-1 text-xs")}
                                 >
-                                    <Zap className="w-3.5 h-3.5" />
+                                    <Zap className="h-3.5 w-3.5 text-gray-400" />
                                     Test now
                                 </button>
                             </TooltipTrigger>
@@ -229,9 +233,12 @@ export function DynamicSequenceView({
                             <TooltipTrigger asChild>
                                 <Link
                                     href={`/client/${clientId}/sequences/${sequenceId}/learning`}
-                                    className="flex items-center justify-center w-8 h-8 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                    className={cn(
+                                        "flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                                        seqFocusRing
+                                    )}
                                 >
-                                    <Brain className="w-4 h-4" />
+                                    <Brain className="h-4 w-4" />
                                 </Link>
                             </TooltipTrigger>
                             <TooltipContent>Learning Dashboard</TooltipContent>
@@ -245,9 +252,9 @@ export function DynamicSequenceView({
                                     size="icon"
                                     onClick={handleDelete}
                                     disabled={deleting}
-                                    className="w-8 h-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                    className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700"
                                 >
-                                    <Trash2 className="w-4 h-4" />
+                                    <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>Delete sequence</TooltipContent>
@@ -256,23 +263,23 @@ export function DynamicSequenceView({
                 </div>
 
                 {/* Info strip: strategy + agent + stats */}
-                <div className="flex-shrink-0 px-4 pt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="grid flex-shrink-0 grid-cols-1 gap-4 px-4 pt-4 lg:grid-cols-3">
                     <StrategyOverviewCard sequence={sequence} />
 
-                    <div className="bg-white rounded-xl border shadow-sm p-4">
-                        <div className="flex items-center justify-between mb-1">
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Bot className="w-3.5 h-3.5" />
+                    <div className={cn(seqCardStatic, "p-4")}>
+                        <div className="mb-1 flex items-center justify-between">
+                            <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                                <Bot className="h-3.5 w-3.5 text-gray-400" />
                                 Bound Agent
                             </h4>
                             {savingAgent && (
-                                <span className="flex items-center gap-1 text-[11px] text-emerald-600">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                <span className="flex items-center gap-1 text-xs text-gray-500">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
                                     Saving
                                 </span>
                             )}
                         </div>
-                        <p className="text-xs text-gray-500 mb-2">
+                        <p className="mb-2 text-xs text-gray-500">
                             Drives voice calls and the SMS persona for this sequence&apos;s texts.
                         </p>
                         {/* AI sequences require an agent — swapping is allowed,
@@ -281,7 +288,9 @@ export function DynamicSequenceView({
                             value={boundAgentId}
                             onChange={(e) => e.target.value && handleAgentChange(e.target.value)}
                             disabled={savingAgent || !agentsLoaded}
-                            className="w-full p-2 border rounded-lg bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                            className={cn(
+                                "w-full rounded-md border border-gray-200 bg-white p-2 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50 disabled:opacity-60"
+                            )}
                         >
                             {!boundAgentId && (
                                 <option value="" disabled>
@@ -299,28 +308,29 @@ export function DynamicSequenceView({
                         </select>
                     </div>
 
-                    <div className="bg-white rounded-xl border shadow-sm p-4">
-                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                    <div className={cn(seqCardStatic, "p-4")}>
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                             Enrollment Stats
                         </h4>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-3">
                             {[
-                                { label: "Active", value: stats.active, icon: Zap, color: "text-green-600", bg: "bg-green-50" },
-                                { label: "Paused", value: stats.paused, icon: Pause, color: "text-yellow-600", bg: "bg-yellow-50" },
-                                { label: "Completed", value: stats.completed, icon: CheckCircle2, color: "text-blue-600", bg: "bg-blue-50" },
-                                { label: "Replied", value: stats.replied, icon: MessageSquare, color: "text-emerald-600", bg: "bg-emerald-50" },
-                                { label: "Booked", value: stats.booked, icon: Users, color: "text-emerald-600", bg: "bg-emerald-50" },
-                                { label: "Failed", value: stats.failed, icon: XCircle, color: "text-red-600", bg: "bg-red-50" },
+                                { label: "Active", value: stats.active, dot: "bg-sky-500" },
+                                { label: "Paused", value: stats.paused, dot: "bg-amber-500" },
+                                { label: "Completed", value: stats.completed },
+                                { label: "Replied", value: stats.replied },
+                                { label: "Booked", value: stats.booked },
+                                { label: "Failed", value: stats.failed, dot: "bg-red-500" },
                             ].map((stat) => (
-                                <div
-                                    key={stat.label}
-                                    className={`flex items-center gap-2 px-3 py-2 ${stat.bg} rounded-lg`}
-                                >
-                                    <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
-                                    <div>
-                                        <p className={`text-[10px] font-medium ${stat.color}`}>{stat.label}</p>
-                                        <p className={`text-sm font-bold ${stat.color}`}>{stat.value}</p>
-                                    </div>
+                                <div key={stat.label}>
+                                    <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                                        {stat.dot && (
+                                            <span className={cn("h-1.5 w-1.5 rounded-full", stat.dot)} />
+                                        )}
+                                        {stat.label}
+                                    </p>
+                                    <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">
+                                        {stat.value}
+                                    </p>
                                 </div>
                             ))}
                         </div>
@@ -328,19 +338,19 @@ export function DynamicSequenceView({
                 </div>
 
                 {/* Master/detail: lead list + journey timeline */}
-                <div className="flex-1 min-h-0 p-4 flex gap-4">
+                <div className="flex min-h-0 flex-1 gap-4 p-4">
                     {/* Lead list */}
-                    <div className="w-80 flex-shrink-0 bg-white rounded-xl border shadow-sm flex flex-col overflow-hidden">
-                        <div className="px-4 py-3 border-b flex items-center justify-between">
+                    <div className={cn(seqCardStatic, "flex w-80 flex-shrink-0 flex-col overflow-hidden")}>
+                        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
                             <h3 className="text-sm font-semibold text-gray-900">Leads</h3>
-                            <span className="text-xs text-gray-400">{enrollments.length}</span>
+                            <span className="text-xs tabular-nums text-gray-400">{enrollments.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+                        <div className="flex-1 divide-y divide-gray-100 overflow-y-auto">
                             {enrollments.length === 0 && (
-                                <div className="text-center py-12 text-gray-400 px-4">
-                                    <Users className="w-8 h-8 mx-auto mb-2" />
+                                <div className="px-4 py-12 text-center text-gray-400">
+                                    <Users className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                                     <p className="text-sm">No leads enrolled yet.</p>
-                                    <p className="text-xs mt-1">
+                                    <p className="mt-1 text-xs">
                                         Each lead&apos;s AI journey will appear here once enrolled.
                                     </p>
                                 </div>
@@ -348,32 +358,38 @@ export function DynamicSequenceView({
                             {enrollments.map((e) => {
                                 const isSelected = e.id === selectedEnrollmentId;
                                 const contact = e.contacts;
+                                const status = ENROLLMENT_STATUS[e.status] || ENROLLMENT_STATUS.active;
                                 return (
                                     <button
                                         key={e.id}
                                         onClick={() => setSelectedEnrollmentId(e.id)}
-                                        className={`w-full text-left px-4 py-3 transition-colors ${
-                                            isSelected ? "bg-emerald-50/70" : "hover:bg-gray-50"
-                                        }`}
+                                        className={cn(
+                                            "w-full border-l-2 px-4 py-3 text-left transition-colors",
+                                            isSelected
+                                                ? "border-l-gray-900 bg-gray-50"
+                                                : "border-l-transparent hover:bg-gray-50"
+                                        )}
                                     >
                                         <div className="flex items-center justify-between gap-2">
-                                            <p className="text-sm font-medium text-gray-900 truncate">
+                                            <p className="truncate text-sm font-medium text-gray-900">
                                                 {contact?.name || contact?.phone || `Lead ${e.id.substring(0, 8)}`}
                                             </p>
                                             <span
-                                                className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                                                    STATUS_COLORS[e.status] || STATUS_COLORS.active
-                                                }`}
+                                                className={cn(
+                                                    "inline-flex shrink-0 items-center gap-1.5 text-xs font-medium",
+                                                    status.text
+                                                )}
                                             >
+                                                <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
                                                 {STATUS_LABELS[e.status] || e.status}
                                             </span>
                                         </div>
-                                        <div className="flex items-center justify-between mt-1">
-                                            <span className="text-[11px] text-gray-400">
+                                        <div className="mt-1 flex items-center justify-between">
+                                            <span className="text-xs tabular-nums text-gray-400">
                                                 Touch #{e.current_step_order || 1}
                                                 {e.is_test && (
-                                                    <span className="inline-flex items-center gap-0.5 ml-1.5 px-1 py-0.5 rounded-full text-[9px] font-semibold bg-amber-100 text-amber-700">
-                                                        <FlaskConical className="w-2 h-2" />
+                                                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1 py-px text-xs font-medium text-amber-700">
+                                                        <FlaskConical className="h-2.5 w-2.5" />
                                                         Test
                                                     </span>
                                                 )}
@@ -387,12 +403,12 @@ export function DynamicSequenceView({
                                                         ev.stopPropagation();
                                                         handleUnenroll(e.id);
                                                     }}
-                                                    className="inline-flex items-center gap-1 text-[11px] text-red-500 hover:text-red-700"
+                                                    className="inline-flex items-center gap-1 text-xs text-red-500 transition-colors hover:text-red-700"
                                                 >
                                                     {unenrollingId === e.id ? (
-                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
                                                     ) : (
-                                                        <UserMinus className="w-3 h-3" />
+                                                        <UserMinus className="h-3 w-3" />
                                                     )}
                                                     Unenroll
                                                 </span>
@@ -405,8 +421,8 @@ export function DynamicSequenceView({
                     </div>
 
                     {/* Journey timeline */}
-                    <div className="flex-1 min-w-0 bg-white rounded-xl border shadow-sm flex flex-col overflow-hidden">
-                        <div className="px-4 py-3 border-b">
+                    <div className={cn(seqCardStatic, "flex min-w-0 flex-1 flex-col overflow-hidden")}>
+                        <div className="border-b border-gray-100 px-4 py-3">
                             <h3 className="text-sm font-semibold text-gray-900">
                                 {selectedEnrollment
                                     ? `Journey — ${
@@ -416,7 +432,7 @@ export function DynamicSequenceView({
                                       }`
                                     : "Journey"}
                             </h3>
-                            <p className="text-xs text-gray-400 mt-0.5">
+                            <p className="mt-0.5 text-xs text-gray-400">
                                 What the AI decided and did for this lead, step by step.
                             </p>
                         </div>
@@ -424,8 +440,8 @@ export function DynamicSequenceView({
                             {selectedEnrollmentId ? (
                                 <LeadJourneyTimeline enrollmentId={selectedEnrollmentId} />
                             ) : (
-                                <div className="text-center py-16 text-gray-400">
-                                    <Brain className="w-8 h-8 mx-auto mb-2" />
+                                <div className="py-16 text-center text-gray-400">
+                                    <Brain className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                                     <p className="text-sm">Select a lead to see its AI journey.</p>
                                 </div>
                             )}

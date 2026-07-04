@@ -206,7 +206,7 @@ export function TestNowDialog({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.15 }}
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
                     onClick={handleClose}
                 >
                     <motion.div
@@ -216,7 +216,7 @@ export function TestNowDialog({
                         exit={{ opacity: 0, scale: 0.94, y: 8 }}
                         transition={SPRING}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden"
+                        className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
                     >
                         {/* Header */}
                         <motion.div
@@ -228,7 +228,7 @@ export function TestNowDialog({
                                     initial={{ rotate: -12, scale: 0.8 }}
                                     animate={{ rotate: 0, scale: 1 }}
                                     transition={{ ...SPRING_FAST, delay: 0.05 }}
-                                    className="p-1.5 bg-amber-100 rounded-lg"
+                                    className="rounded-md border border-amber-200 bg-amber-50 p-1.5"
                                 >
                                     <Zap className="w-4 h-4 text-amber-600" />
                                 </motion.div>
@@ -419,11 +419,11 @@ function ExistingMode({
                     onChange={(e) => onSearchChange(e.target.value)}
                     placeholder="Search by name, phone, or email…"
                     disabled={disabled}
-                    className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50"
+                    className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                 />
             </div>
 
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-100">
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
                 {rows.length === 0 ? (
                     <p className="text-xs text-gray-400 px-3 py-6 text-center">
                         No matching enrollments.
@@ -451,14 +451,14 @@ function ExistingMode({
                                                 disabled={disabled}
                                                 className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
                                                     selected
-                                                        ? "bg-emerald-50 hover:bg-emerald-100"
+                                                        ? "bg-emerald-50/60 hover:bg-emerald-50"
                                                         : "hover:bg-gray-50"
                                                 } disabled:opacity-50`}
                                             >
                                                 <span
                                                     className={`flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0 ${
                                                         selected
-                                                            ? "bg-emerald-500 border-emerald-500"
+                                                            ? "bg-emerald-600 border-emerald-600"
                                                             : "border-gray-300 bg-white"
                                                     }`}
                                                 >
@@ -485,7 +485,7 @@ function ExistingMode({
                                                     </p>
                                                 </div>
                                                 {row.is_test && (
-                                                    <span className="text-[10px] font-mono uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                                                    <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-mono text-xs uppercase text-amber-700">
                                                         test
                                                     </span>
                                                 )}
@@ -547,7 +547,7 @@ function ManualMode({
                                         placeholder="+1 555 123 4567"
                                         disabled={disabled}
                                         autoFocus={idx === 0}
-                                        className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50"
+                                        className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                                     />
                                 </div>
                                 <input
@@ -557,7 +557,7 @@ function ManualMode({
                                     }
                                     placeholder="Name (optional)"
                                     disabled={disabled}
-                                    className="w-32 px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50"
+                                    className="w-32 px-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                                 />
                                 <motion.button
                                     whileHover={{ scale: rows.length === 1 ? 1 : 1.08 }}

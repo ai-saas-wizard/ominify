@@ -1,13 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, MotionConfig } from "framer-motion";
 import Link from "next/link";
 import {
-    Zap,
-    ToggleRight,
-    Users,
-    CheckCircle2,
-    ListOrdered,
     Sparkles,
     Mail,
     MessageSquare,
@@ -15,23 +10,15 @@ import {
     Clock,
     GitBranch,
     Brain,
-    TrendingUp,
-    Calendar,
-    ArrowRight,
-    Activity,
-    Reply,
-    CalendarCheck,
-    XCircle,
     Rocket,
     Trash2,
     MoreVertical,
     Power,
     ChevronDown,
     Bot,
+    Plus,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
     Tooltip,
     TooltipContent,
@@ -50,6 +37,16 @@ import {
 import { deleteSequence, toggleSequenceActive, type ChannelReadiness } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
 import { useState, useCallback } from "react";
+import { cn } from "@/lib/utils";
+import {
+    seqFocusRing,
+    seqBtnPrimary,
+    seqBtnSecondary,
+    seqBtnGhost,
+    seqCardInteractive,
+    seqCardStatic,
+    SEQ_STATUS,
+} from "@/components/sequences/theme";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -94,11 +91,10 @@ interface SequencesListClientProps {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const URGENCY_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
-    critical: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500" },
-    high: { bg: "bg-orange-50", text: "text-orange-700", dot: "bg-orange-500" },
-    medium: { bg: "bg-yellow-50", text: "text-yellow-700", dot: "bg-amber-500" },
-    low: { bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
+/** Only critical/high urgency surfaces on the card; the rest lives in the detail view. */
+const URGENCY_MARKERS: Record<string, { dot: string; label: string } | undefined> = {
+    critical: { dot: "bg-red-500", label: "Critical" },
+    high: { dot: "bg-amber-500", label: "High urgency" },
 };
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -113,12 +109,12 @@ const TRIGGER_LABELS: Record<string, string> = {
     google_ads_lead: "Google Ads Lead",
 };
 
-const CHANNEL_ICONS: Record<string, { icon: typeof MessageSquare; color: string; label: string }> = {
-    sms: { icon: MessageSquare, color: "text-blue-500", label: "SMS" },
-    email: { icon: Mail, color: "text-emerald-500", label: "Email" },
-    voice: { icon: Phone, color: "text-emerald-500", label: "Voice" },
-    wait: { icon: Clock, color: "text-amber-500", label: "Wait" },
-    condition: { icon: GitBranch, color: "text-pink-500", label: "Condition" },
+const CHANNEL_ICONS: Record<string, { icon: typeof MessageSquare; label: string }> = {
+    sms: { icon: MessageSquare, label: "SMS" },
+    email: { icon: Mail, label: "Email" },
+    voice: { icon: Phone, label: "Voice" },
+    wait: { icon: Clock, label: "Wait" },
+    condition: { icon: GitBranch, label: "Condition" },
 };
 
 // ── Animation Variants ───────────────────────────────────────────────────────
@@ -127,36 +123,26 @@ const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
         opacity: 1,
-        transition: { staggerChildren: 0.06, delayChildren: 0.1 },
+        transition: { staggerChildren: 0.04, delayChildren: 0.05 },
     },
 };
 
 const cardVariants = {
-    hidden: { opacity: 0, y: 20, scale: 0.97 },
+    hidden: { opacity: 0, y: 8 },
     visible: {
         opacity: 1,
         y: 0,
-        scale: 1,
-        transition: { type: "spring" as const, stiffness: 300, damping: 24 },
+        transition: { type: "spring" as const, stiffness: 300, damping: 30 },
     },
 };
 
 const statCardVariants = {
-    hidden: { opacity: 0, y: 12 },
+    hidden: { opacity: 0, y: 8 },
     visible: (i: number) => ({
         opacity: 1,
         y: 0,
-        transition: { delay: i * 0.08, type: "spring" as const, stiffness: 400, damping: 25 },
+        transition: { delay: i * 0.05, type: "spring" as const, stiffness: 300, damping: 30 },
     }),
-};
-
-const emptyVariants = {
-    hidden: { opacity: 0, scale: 0.9 },
-    visible: {
-        opacity: 1,
-        scale: 1,
-        transition: { type: "spring" as const, stiffness: 200, damping: 20 },
-    },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -187,9 +173,9 @@ function AnimatedNumber({ value }: { value: number }) {
     return (
         <motion.span
             key={value}
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 20 }}
+            transition={{ type: "spring", stiffness: 300, damping: 24 }}
             className="tabular-nums"
         >
             {value.toLocaleString()}
@@ -197,52 +183,55 @@ function AnimatedNumber({ value }: { value: number }) {
     );
 }
 
+// ── Status Dot ───────────────────────────────────────────────────────────────
+
+function StatusLabel({ active }: { active: boolean }) {
+    const status = active ? SEQ_STATUS.live : SEQ_STATUS.draft;
+    return (
+        <span className={cn("inline-flex shrink-0 items-center gap-1.5 text-xs font-medium", status.text)}>
+            <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
+            {status.label}
+        </span>
+    );
+}
+
 // ── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
-    icon: Icon,
     label,
     value,
-    iconBg,
-    iconColor,
+    dotClass,
     index,
 }: {
-    icon: typeof Zap;
     label: string;
     value: number;
-    iconBg: string;
-    iconColor: string;
+    /** Semantic marker dot — only for live (emerald) and in-flight (sky) stats. */
+    dotClass?: string;
     index: number;
 }) {
     return (
         <motion.div custom={index} variants={statCardVariants} initial="hidden" animate="visible">
-            <Card className="overflow-hidden border-gray-200/60 hover:border-gray-300 transition-colors">
-                <CardContent className="p-5">
-                    <div className="flex items-center gap-3">
-                        <div className={`p-2.5 ${iconBg} rounded-xl`}>
-                            <Icon className={`w-5 h-5 ${iconColor}`} />
-                        </div>
-                        <div>
-                            <p className="text-[13px] font-medium text-gray-500">{label}</p>
-                            <p className="text-2xl font-bold text-gray-900">
-                                <AnimatedNumber value={value} />
-                            </p>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
+            <div className={cn(seqCardStatic, "px-4 py-3.5")}>
+                <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    {dotClass && <span className={cn("h-1.5 w-1.5 rounded-full", dotClass)} />}
+                    {label}
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">
+                    <AnimatedNumber value={value} />
+                </p>
+            </div>
         </motion.div>
     );
 }
 
-// ── Channel Pills ────────────────────────────────────────────────────────────
+// ── Channel Icons ────────────────────────────────────────────────────────────
 
-function ChannelPills({ channels }: { channels: string[] }) {
+function ChannelIcons({ channels }: { channels: string[] }) {
     const unique = [...new Set(channels)];
     if (unique.length === 0) return null;
 
     return (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
             {unique.map((ch) => {
                 const config = CHANNEL_ICONS[ch];
                 if (!config) return null;
@@ -251,10 +240,9 @@ function ChannelPills({ channels }: { channels: string[] }) {
                 return (
                     <Tooltip key={ch}>
                         <TooltipTrigger asChild>
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gray-50 border border-gray-100 hover:bg-gray-100 transition-colors cursor-default">
-                                <Icon className={`w-3 h-3 ${config.color}`} />
-                                <span className="text-[10px] font-semibold text-gray-500">{count}</span>
-                            </div>
+                            <span className="cursor-default text-gray-400 transition-colors hover:text-gray-600">
+                                <Icon className="h-3.5 w-3.5" />
+                            </span>
                         </TooltipTrigger>
                         <TooltipContent>
                             {count} {config.label} step{count !== 1 ? "s" : ""}
@@ -280,230 +268,205 @@ function SequenceCard({
     onToggleActive: (id: string, active: boolean) => void;
 }) {
     const rate = completionRate(sequence.completed_count, sequence.total_enrolled);
-    const urgency = URGENCY_CONFIG[sequence.urgency_tier] || URGENCY_CONFIG.medium;
+    const urgency = URGENCY_MARKERS[sequence.urgency_tier];
     const [menuOpen, setMenuOpen] = useState(false);
 
+    const metrics: { value: number; label: string; className?: string }[] = [
+        { value: sequence.enrolled_count, label: "active" },
+        { value: sequence.replied_count, label: "replied" },
+        { value: sequence.booked_count, label: "booked" },
+    ];
+    if (sequence.failed_count > 0) {
+        metrics.push({ value: sequence.failed_count, label: "failed", className: "text-red-600" });
+    }
+
     return (
-        <motion.div variants={cardVariants} layout>
-            <Link href={`/client/${clientId}/sequences/${sequence.id}`} className="block h-full">
-                <Card className="h-full overflow-hidden border-gray-200/60 hover:border-emerald-300 hover:shadow-lg transition-all duration-200 group cursor-pointer relative">
-                    {/* Active indicator bar */}
-                    <div
-                        className={`h-1 w-full ${
-                            sequence.is_active
-                                ? "bg-gradient-to-r from-green-400 to-emerald-500"
-                                : "bg-gray-200"
-                        }`}
-                    />
-
-                    {/* Context menu */}
-                    <div className="absolute top-3 right-3 z-10">
-                        <button
-                            onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setMenuOpen(!menuOpen);
-                            }}
-                            className="p-1 rounded-md hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                            <MoreVertical className="w-4 h-4 text-gray-400" />
-                        </button>
-                        {menuOpen && (
-                            <div
-                                className="absolute right-0 top-8 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20"
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                            >
-                                <button
-                                    onClick={() => {
-                                        onToggleActive(sequence.id, !sequence.is_active);
-                                        setMenuOpen(false);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                >
-                                    <Power className="w-3.5 h-3.5" />
-                                    {sequence.is_active ? "Deactivate" : "Activate"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (confirm("Delete this sequence? Active enrollments will be stopped and all data removed. This cannot be undone.")) {
-                                            onDelete(sequence.id);
-                                        }
-                                        setMenuOpen(false);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    Delete
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    <CardContent className="p-5 flex flex-col gap-3.5">
-                        {/* Row 1: Title + Status */}
-                        <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                                <h3 className="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors truncate text-[15px]">
+        <motion.div variants={cardVariants} layout className="group relative h-full">
+            <Link
+                href={`/client/${clientId}/sequences/${sequence.id}`}
+                className={cn("block h-full rounded-xl", seqFocusRing)}
+            >
+                <Card className={cn(seqCardInteractive, "h-full cursor-pointer")}>
+                    <CardContent className="flex h-full flex-col gap-4 p-5">
+                        {/* Name + status */}
+                        <div className="flex items-start justify-between gap-3 pr-6">
+                            <div className="min-w-0">
+                                <h3 className="truncate text-base font-semibold text-gray-900">
                                     {sequence.name}
                                 </h3>
                                 {sequence.description && (
-                                    <p className="text-[13px] text-gray-500 mt-0.5 line-clamp-1">
+                                    <p className="mt-0.5 line-clamp-1 text-sm text-gray-500">
                                         {sequence.description}
                                     </p>
                                 )}
                             </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                                {sequence.generation_mode === "dynamic" ? (
+                            <span className="mt-1">
+                                <StatusLabel active={sequence.is_active} />
+                            </span>
+                        </div>
+
+                        {/* Metric row */}
+                        {sequence.total_enrolled > 0 ? (
+                            <div className="space-y-2.5">
+                                <div className="flex items-center gap-4">
+                                    {metrics.map((m) => (
+                                        <span key={m.label} className="flex items-baseline gap-1">
+                                            <span
+                                                className={cn(
+                                                    "text-sm font-semibold tabular-nums text-gray-900",
+                                                    m.className
+                                                )}
+                                            >
+                                                {m.value.toLocaleString()}
+                                            </span>
+                                            <span className={cn("text-xs text-gray-500", m.className && "text-red-600/70")}>
+                                                {m.label}
+                                            </span>
+                                        </span>
+                                    ))}
+                                </div>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <div className="flex cursor-default items-center gap-2">
+                                            <div className="h-1 flex-1 overflow-hidden rounded-full bg-gray-100">
+                                                <div
+                                                    className="h-full rounded-full bg-gray-900 transition-[width] duration-500 ease-out"
+                                                    style={{ width: `${rate}%` }}
+                                                />
+                                            </div>
+                                            <span className="text-xs font-medium tabular-nums text-gray-500">
+                                                {rate}%
+                                            </span>
+                                        </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {sequence.completed_count.toLocaleString()} of{" "}
+                                        {sequence.total_enrolled.toLocaleString()} enrolled contacts completed
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-gray-400">No contacts enrolled yet</p>
+                        )}
+
+                        {/* Footer: markers + channels left, meta right */}
+                        <div className="mt-auto flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                            <div className="flex items-center gap-2">
+                                {sequence.generation_mode === "dynamic" && (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <div className="p-1 rounded-md bg-emerald-50">
-                                                <Brain className="w-3.5 h-3.5 text-emerald-500" />
-                                            </div>
+                                            <span className="cursor-default text-gray-400 transition-colors hover:text-gray-600">
+                                                <Brain className="h-3.5 w-3.5" />
+                                            </span>
                                         </TooltipTrigger>
                                         <TooltipContent>Dynamic (AI-driven) sequence</TooltipContent>
-                                    </Tooltip>
-                                ) : (
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 text-gray-500">
-                                                Manual
-                                            </Badge>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            Static sequence — steps are fixed and editable in the advanced builder
-                                        </TooltipContent>
                                     </Tooltip>
                                 )}
                                 {sequence.ai_mutation_steps > 0 && (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <div className="p-1 rounded-md bg-amber-50">
-                                                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                                            </div>
+                                            <span className="cursor-default text-gray-400 transition-colors hover:text-gray-600">
+                                                <Sparkles className="h-3.5 w-3.5" />
+                                            </span>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                            {sequence.ai_mutation_steps} step{sequence.ai_mutation_steps !== 1 ? "s" : ""} with AI mutation
+                                            {sequence.ai_mutation_steps} step
+                                            {sequence.ai_mutation_steps !== 1 ? "s" : ""} with AI mutation
                                         </TooltipContent>
                                     </Tooltip>
                                 )}
                                 {sequence.is_task && (
-                                    <Badge className="bg-sky-50 text-sky-700 border-sky-200 gap-1">
-                                        <Rocket className="w-3 h-3" />
-                                        Task
-                                    </Badge>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="cursor-default text-gray-400 transition-colors hover:text-gray-600">
+                                                <Rocket className="h-3.5 w-3.5" />
+                                            </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>One-off task</TooltipContent>
+                                    </Tooltip>
                                 )}
-                                {sequence.is_active ? (
-                                    <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
-                                        <span className="relative flex h-1.5 w-1.5">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-                                        </span>
-                                        Live
-                                    </Badge>
-                                ) : (
-                                    <Badge variant="secondary" className="gap-1">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                                        Draft
-                                    </Badge>
+                                {urgency && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span
+                                                className={cn(
+                                                    "h-1.5 w-1.5 cursor-default rounded-full",
+                                                    urgency.dot
+                                                )}
+                                            />
+                                        </TooltipTrigger>
+                                        <TooltipContent>{urgency.label}</TooltipContent>
+                                    </Tooltip>
                                 )}
+                                {(sequence.generation_mode === "dynamic" ||
+                                    sequence.ai_mutation_steps > 0 ||
+                                    sequence.is_task ||
+                                    urgency) && <span className="h-3 w-px bg-gray-200" />}
+                                <ChannelIcons channels={sequence.channels} />
                             </div>
-                        </div>
-
-                        {/* Row 2: Badges (trigger + urgency + channels) */}
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                                <Badge variant="outline" className="text-[11px] px-2 py-0 h-5 bg-emerald-50/50 border-emerald-100 text-emerald-600">
+                            <div className="flex min-w-0 items-center gap-1.5 text-xs text-gray-400">
+                                <span className="truncate">
                                     {TRIGGER_LABELS[sequence.trigger_type] || sequence.trigger_type}
-                                </Badge>
-                                <Badge
-                                    variant="outline"
-                                    className={`text-[11px] px-2 py-0 h-5 ${urgency.bg} border-transparent ${urgency.text}`}
-                                >
-                                    <span className={`w-1.5 h-1.5 rounded-full ${urgency.dot} mr-1`} />
-                                    {sequence.urgency_tier}
-                                </Badge>
-                            </div>
-                            <ChannelPills channels={sequence.channels} />
-                        </div>
-
-                        {/* Row 3: Enrollment funnel stats */}
-                        {sequence.total_enrolled > 0 && (
-                            <div className="grid grid-cols-4 gap-1.5">
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-blue-50/60 border border-blue-100/50">
-                                            <Activity className="w-3 h-3 text-blue-500 mb-0.5" />
-                                            <span className="text-xs font-bold text-gray-900">{sequence.enrolled_count}</span>
-                                            <span className="text-[9px] text-gray-500">Active</span>
-                                        </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Currently enrolled contacts</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-emerald-50/60 border border-emerald-100/50">
-                                            <Reply className="w-3 h-3 text-emerald-500 mb-0.5" />
-                                            <span className="text-xs font-bold text-gray-900">{sequence.replied_count}</span>
-                                            <span className="text-[9px] text-gray-500">Replied</span>
-                                        </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Contacts who replied</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-emerald-50/60 border border-emerald-100/50">
-                                            <CalendarCheck className="w-3 h-3 text-emerald-500 mb-0.5" />
-                                            <span className="text-xs font-bold text-gray-900">{sequence.booked_count}</span>
-                                            <span className="text-[9px] text-gray-500">Booked</span>
-                                        </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Contacts who booked</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <div className="flex flex-col items-center py-1.5 px-1 rounded-lg bg-red-50/60 border border-red-100/50">
-                                            <XCircle className="w-3 h-3 text-red-400 mb-0.5" />
-                                            <span className="text-xs font-bold text-gray-900">{sequence.failed_count}</span>
-                                            <span className="text-[9px] text-gray-500">Failed</span>
-                                        </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Contacts who failed</TooltipContent>
-                                </Tooltip>
-                            </div>
-                        )}
-
-                        {/* Row 4: Completion progress */}
-                        <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-medium text-gray-500">Completion</span>
-                                <span className="text-[11px] font-semibold text-gray-700">{rate}%</span>
-                            </div>
-                            <Progress value={rate} className="h-1.5" />
-                        </div>
-
-                        {/* Row 5: Footer meta */}
-                        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                            <div className="flex items-center gap-3 text-[12px] text-gray-500">
-                                <span className="flex items-center gap-1">
-                                    <ListOrdered className="w-3.5 h-3.5" />
+                                </span>
+                                <span aria-hidden>·</span>
+                                <span className="whitespace-nowrap tabular-nums">
                                     {sequence.step_count} step{sequence.step_count !== 1 ? "s" : ""}
                                 </span>
-                                <span className="flex items-center gap-1">
-                                    <Users className="w-3.5 h-3.5" />
-                                    {sequence.total_enrolled} total
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {relativeTime(sequence.created_at)}
-                                </span>
-                                <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
+                                <span aria-hidden>·</span>
+                                <span className="whitespace-nowrap">{relativeTime(sequence.created_at)}</span>
                             </div>
                         </div>
                     </CardContent>
                 </Card>
             </Link>
+
+            {/* Context menu — sibling of the Link so menu clicks never navigate */}
+            <div className="absolute right-3 top-3 z-10">
+                <button
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMenuOpen(!menuOpen);
+                    }}
+                    aria-label="Sequence actions"
+                    className={cn(
+                        "rounded-md p-1 text-gray-400 opacity-0 transition-opacity duration-150 hover:bg-gray-100 hover:text-gray-600 focus-visible:opacity-100 group-hover:opacity-100",
+                        menuOpen && "opacity-100",
+                        seqFocusRing
+                    )}
+                >
+                    <MoreVertical className="h-4 w-4" />
+                </button>
+                {menuOpen && (
+                    <div
+                        className="absolute right-0 top-8 z-20 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-md"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    >
+                        <button
+                            onClick={() => {
+                                onToggleActive(sequence.id, !sequence.is_active);
+                                setMenuOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                        >
+                            <Power className="h-3.5 w-3.5" />
+                            {sequence.is_active ? "Deactivate" : "Activate"}
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (confirm("Delete this sequence? Active enrollments will be stopped and all data removed. This cannot be undone.")) {
+                                    onDelete(sequence.id);
+                                }
+                                setMenuOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                        >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                        </button>
+                    </div>
+                )}
+            </div>
         </motion.div>
     );
 }
@@ -563,51 +526,35 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
     );
 
     return (
+        <MotionConfig reducedMotion="user">
         <TooltipProvider delayDuration={200}>
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                className="p-4 lg:p-8 space-y-6"
+                transition={{ duration: 0.2 }}
+                className="space-y-8 p-4 lg:p-8"
             >
                 {/* Header */}
                 <motion.div
-                    initial={{ opacity: 0, y: -10 }}
+                    initial={{ opacity: 0, y: -6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className="flex items-center justify-between"
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="flex flex-wrap items-start justify-between gap-4"
                 >
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                            <div className="p-1.5 bg-emerald-100 rounded-lg">
-                                <Zap className="w-5 h-5 text-emerald-600" />
-                            </div>
+                        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
                             Sequences
                         </h1>
-                        <p className="text-gray-500 text-sm mt-1">
+                        <p className="mt-1 text-sm text-gray-500">
                             Automated multi-step outreach workflows
                         </p>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <button
-                            onClick={() => setWizardOpen(true)}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow transition-all"
-                        >
-                            <Sparkles className="w-4 h-4" />
-                            New Sequence
-                        </button>
-                        <button
-                            onClick={() => setTaskDialogOpen(true)}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-sky-600 hover:to-blue-700 shadow-sm hover:shadow transition-all"
-                        >
-                            <Rocket className="w-4 h-4" />
-                            New Task
-                        </button>
+                    <div className="flex items-center gap-2">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <button className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                                <button className={cn(seqBtnGhost, "px-3 py-2")}>
                                     Advanced
-                                    <ChevronDown className="w-3.5 h-3.5" />
+                                    <ChevronDown className="h-3.5 w-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
@@ -616,6 +563,20 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
+                        <button
+                            onClick={() => setTaskDialogOpen(true)}
+                            className={cn(seqBtnSecondary, "px-4 py-2")}
+                        >
+                            <Rocket className="h-4 w-4 text-gray-400" />
+                            New Task
+                        </button>
+                        <button
+                            onClick={() => setWizardOpen(true)}
+                            className={cn(seqBtnPrimary, "px-4 py-2")}
+                        >
+                            <Plus className="h-4 w-4" />
+                            New Sequence
+                        </button>
                         <CreateSequenceDialog
                             clientId={clientId}
                             open={advancedCreateOpen}
@@ -645,96 +606,71 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                 </motion.div>
 
                 {/* Summary Stat Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <StatCard label="Sequences" value={totalSequences} index={0} />
                     <StatCard
-                        icon={ListOrdered}
-                        label="Total Sequences"
-                        value={totalSequences}
-                        iconBg="bg-emerald-100"
-                        iconColor="text-emerald-600"
-                        index={0}
-                    />
-                    <StatCard
-                        icon={ToggleRight}
-                        label="Active Sequences"
+                        label="Active"
                         value={activeSequences}
-                        iconBg="bg-green-100"
-                        iconColor="text-green-600"
+                        dotClass="bg-emerald-500"
                         index={1}
                     />
                     <StatCard
-                        icon={Users}
-                        label="Total Enrolled"
+                        label="Enrolled"
                         value={totalEnrolled}
-                        iconBg="bg-blue-100"
-                        iconColor="text-blue-600"
+                        dotClass="bg-sky-500"
                         index={2}
                     />
-                    <StatCard
-                        icon={TrendingUp}
-                        label="Completed"
-                        value={totalCompleted}
-                        iconBg="bg-emerald-100"
-                        iconColor="text-emerald-600"
-                        index={3}
-                    />
+                    <StatCard label="Completed" value={totalCompleted} index={3} />
                 </div>
 
                 {/* Sequence Cards Grid */}
                 {sequences.length === 0 ? (
-                    <motion.div variants={emptyVariants} initial="hidden" animate="visible">
-                        <Card className="border-dashed border-2 border-gray-200">
-                            <CardContent className="p-12 text-center">
-                                <motion.div
-                                    animate={{
-                                        rotate: [0, 5, -5, 0],
-                                        scale: [1, 1.05, 1],
-                                    }}
-                                    transition={{
-                                        duration: 3,
-                                        repeat: Infinity,
-                                        repeatType: "reverse",
-                                    }}
-                                    className="inline-flex p-4 bg-gradient-to-br from-emerald-100 to-emerald-100 rounded-2xl mb-4"
-                                >
+                    <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    >
+                        <Card className="border-dashed border-gray-200 shadow-none">
+                            <CardContent className="flex flex-col items-center px-6 py-16 text-center">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
                                     {hasOutboundAgent ? (
-                                        <Sparkles className="w-8 h-8 text-emerald-600" />
+                                        <Sparkles className="h-5 w-5 text-gray-400" />
                                     ) : (
-                                        <Bot className="w-8 h-8 text-emerald-600" />
+                                        <Bot className="h-5 w-5 text-gray-400" />
                                     )}
-                                </motion.div>
+                                </div>
                                 {hasOutboundAgent ? (
                                     <>
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                        <h3 className="mt-4 text-base font-semibold text-gray-900">
                                             Create your first AI sequence
                                         </h3>
-                                        <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+                                        <p className="mt-1 max-w-md text-sm text-gray-500">
                                             You set the goal, touchpoints, and contact windows —
                                             the AI decides the channel, content, and timing of
                                             every touch.
                                         </p>
                                         <button
                                             onClick={() => setWizardOpen(true)}
-                                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
+                                            className={cn(seqBtnPrimary, "mt-6 px-5 py-2.5")}
                                         >
-                                            <Sparkles className="w-4 h-4" />
+                                            <Sparkles className="h-4 w-4" />
                                             Create AI Sequence
                                         </button>
                                     </>
                                 ) : (
                                     <>
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                        <h3 className="mt-4 text-base font-semibold text-gray-900">
                                             Set up your AI agent first
                                         </h3>
-                                        <p className="text-gray-500 text-sm mb-6 max-w-md mx-auto">
+                                        <p className="mt-1 max-w-md text-sm text-gray-500">
                                             Sequences are run by your AI agent — it texts and
                                             calls leads for you. Deploy an agent to get started.
                                         </p>
                                         <Link
                                             href={`/client/${clientId}/agents/new`}
-                                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm hover:shadow-md transition-all"
+                                            className={cn(seqBtnPrimary, "mt-6 px-5 py-2.5")}
                                         >
-                                            <Bot className="w-4 h-4" />
+                                            <Bot className="h-4 w-4" />
                                             Set up your agent
                                         </Link>
                                     </>
@@ -747,7 +683,7 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                         variants={containerVariants}
                         initial="hidden"
                         animate="visible"
-                        className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
+                        className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
                     >
                         {sequences.map((sequence) => (
                             <SequenceCard
@@ -762,5 +698,6 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                 )}
             </motion.div>
         </TooltipProvider>
+        </MotionConfig>
     );
 }

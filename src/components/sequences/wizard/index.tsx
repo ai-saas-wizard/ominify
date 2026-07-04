@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
 import {
     ArrowLeft,
     ArrowRight,
@@ -9,8 +9,10 @@ import {
     Rocket,
     X,
     Check,
+    Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { seqBtnPrimary, seqFocusRing } from "@/components/sequences/theme";
 import { useRouter } from "next/navigation";
 
 import type {
@@ -315,28 +317,33 @@ export function SequenceWizard({
     // wizard would dead-end at activation, so block up front with a clear CTA.
     if (outboundAgents.length === 0) {
         return (
-            <div className="fixed inset-0 z-50 bg-white flex flex-col">
+            <MotionConfig reducedMotion="user">
+            <div className="fixed inset-0 z-50 flex flex-col bg-white">
                 <div className="flex-shrink-0 border-b border-gray-200 px-6 py-4">
-                    <div className="flex items-center justify-between max-w-3xl mx-auto">
+                    <div className="mx-auto flex max-w-3xl items-center justify-between">
                         <button
                             onClick={onClose}
-                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            aria-label="Close"
+                            className={cn(
+                                "rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                                seqFocusRing
+                            )}
                         >
-                            <X className="w-5 h-5 text-gray-500" />
+                            <X className="h-5 w-5" />
                         </button>
                         <div className="w-9" />
                     </div>
                 </div>
-                <div className="flex-1 flex items-center justify-center">
+                <div className="flex flex-1 items-center justify-center">
                     <motion.div
-                        initial={{ scale: 0.95, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="text-center space-y-4 max-w-md px-6"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="max-w-md space-y-4 px-6 text-center"
                     >
-                        <div className="inline-flex p-4 bg-emerald-100 rounded-2xl">
-                            <Rocket className="w-10 h-10 text-emerald-600" />
+                        <div className="inline-flex h-14 w-14 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
+                            <Bot className="h-6 w-6 text-gray-400" />
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-900">
+                        <h2 className="text-2xl font-semibold tracking-tight text-gray-900">
                             Deploy your AI agent first
                         </h2>
                         <p className="text-gray-500">
@@ -346,14 +353,15 @@ export function SequenceWizard({
                         </p>
                         <a
                             href={`/client/${clientId}/agents/new`}
-                            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 shadow-sm transition-all"
+                            className={cn(seqBtnPrimary, "px-6 py-3")}
                         >
                             Set up your agent
-                            <ArrowRight className="w-4 h-4" />
+                            <ArrowRight className="h-4 w-4" />
                         </a>
                     </motion.div>
                 </div>
             </div>
+            </MotionConfig>
         );
     }
 
@@ -361,21 +369,22 @@ export function SequenceWizard({
     if (activated) {
         const goalCard = GOAL_CARDS.find((g) => g.id === state.goal);
         return (
-            <div className="fixed inset-0 z-50 bg-white flex items-center justify-center">
+            <MotionConfig reducedMotion="user">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-white">
                 <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-center space-y-4 max-w-md px-6"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="max-w-md space-y-4 px-6 text-center"
                 >
                     <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: "spring", delay: 0.2 }}
-                        className="inline-flex p-4 bg-emerald-100 rounded-2xl"
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 22, delay: 0.15 }}
+                        className="inline-flex h-14 w-14 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50"
                     >
-                        <Check className="w-10 h-10 text-emerald-600" />
+                        <Check className="h-6 w-6 text-emerald-600" />
                     </motion.div>
-                    <h2 className="text-2xl font-bold text-gray-900">
+                    <h2 className="text-2xl font-semibold tracking-tight text-gray-900">
                         Your AI is live
                     </h2>
                     <p className="text-gray-500">
@@ -385,7 +394,7 @@ export function SequenceWizard({
                         You'll be notified when leads engage.
                     </p>
                     {replacedSequenceName && (
-                        <div className="mt-4 mx-auto max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <div className="mx-auto mt-4 max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                             Replaced your previous active sequence{" "}
                             <span className="font-medium">&ldquo;{replacedSequenceName}&rdquo;</span>{" "}
                             — only one ad-platform sequence can be live at a time.
@@ -393,19 +402,25 @@ export function SequenceWizard({
                     )}
                 </motion.div>
             </div>
+            </MotionConfig>
         );
     }
 
     return (
-        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+        <MotionConfig reducedMotion="user">
+        <div className="fixed inset-0 z-50 flex flex-col bg-white">
             {/* Header */}
             <div className="flex-shrink-0 border-b border-gray-200 px-6 py-4">
-                <div className="flex items-center justify-between max-w-3xl mx-auto">
+                <div className="mx-auto flex max-w-3xl items-center justify-between">
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                        aria-label="Close"
+                        className={cn(
+                            "rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                            seqFocusRing
+                        )}
                     >
-                        <X className="w-5 h-5 text-gray-500" />
+                        <X className="h-5 w-5" />
                     </button>
 
                     {/* Step Indicators */}
@@ -421,26 +436,27 @@ export function SequenceWizard({
                                     }}
                                     disabled={i > step}
                                     className={cn(
-                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+                                        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-150",
+                                        seqFocusRing,
                                         i === step
-                                            ? "bg-emerald-100 text-emerald-700"
+                                            ? "bg-gray-900 text-white"
                                             : i < step
-                                            ? "bg-gray-100 text-gray-600 hover:bg-gray-200 cursor-pointer"
+                                            ? "cursor-pointer bg-gray-100 text-gray-600 hover:bg-gray-200"
                                             : "bg-gray-50 text-gray-400"
                                     )}
                                 >
                                     {i < step ? (
-                                        <Check className="w-3 h-3" />
+                                        <Check className="h-3 w-3" />
                                     ) : (
-                                        <span className="w-4 text-center">{i + 1}</span>
+                                        <span className="w-4 text-center tabular-nums">{i + 1}</span>
                                     )}
                                     <span className="hidden sm:inline">{ws.label}</span>
                                 </button>
                                 {i < WIZARD_STEPS.length - 1 && (
                                     <div
                                         className={cn(
-                                            "w-6 h-0.5 rounded-full transition-colors",
-                                            i < step ? "bg-emerald-300" : "bg-gray-200"
+                                            "h-px w-6 transition-colors",
+                                            i < step ? "bg-gray-400" : "bg-gray-200"
                                         )}
                                     />
                                 )}
@@ -535,18 +551,19 @@ export function SequenceWizard({
 
             {/* Footer */}
             <div className="flex-shrink-0 border-t border-gray-200 px-6 py-4">
-                <div className="max-w-2xl mx-auto flex items-center justify-between">
+                <div className="mx-auto flex max-w-2xl items-center justify-between">
                     <button
                         onClick={goBack}
                         disabled={step === 0}
                         className={cn(
-                            "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all",
+                            "flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors duration-150",
+                            seqFocusRing,
                             step === 0
-                                ? "text-gray-300 cursor-not-allowed"
+                                ? "cursor-not-allowed text-gray-300"
                                 : "text-gray-600 hover:bg-gray-100"
                         )}
                     >
-                        <ArrowLeft className="w-4 h-4" />
+                        <ArrowLeft className="h-4 w-4" />
                         Back
                     </button>
 
@@ -555,29 +572,30 @@ export function SequenceWizard({
                             onClick={goNext}
                             disabled={!canProceed}
                             className={cn(
-                                "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all",
+                                "flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors duration-150",
+                                seqFocusRing,
                                 canProceed
-                                    ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
-                                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : "cursor-not-allowed bg-gray-100 text-gray-400"
                             )}
                         >
                             {step === 2 ? "Generate Preview" : "Next"}
-                            <ArrowRight className="w-4 h-4" />
+                            <ArrowRight className="h-4 w-4" />
                         </button>
                     ) : (
                         <button
                             onClick={handleActivate}
                             disabled={activating || !simulation}
-                            className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all disabled:opacity-50"
+                            className={cn(seqBtnPrimary, "px-6 py-2.5")}
                         >
                             {activating ? (
                                 <>
-                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                     Activating...
                                 </>
                             ) : (
                                 <>
-                                    <Rocket className="w-4 h-4" />
+                                    <Rocket className="h-4 w-4" />
                                     Activate
                                 </>
                             )}
@@ -586,5 +604,6 @@ export function SequenceWizard({
                 </div>
             </div>
         </div>
+        </MotionConfig>
     );
 }

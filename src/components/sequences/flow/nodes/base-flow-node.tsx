@@ -41,13 +41,13 @@ export function BaseFlowNode({
 }: BaseFlowNodeProps) {
     return (
         <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.2 }}
             onClick={onClick}
             className={cn(
-                "relative bg-white rounded-xl border shadow-sm cursor-pointer transition-all hover:shadow-md",
-                selected && "ring-2 ring-emerald-500 ring-offset-2",
+                "relative cursor-pointer rounded-xl border border-gray-200 bg-white shadow-none transition-[border-color,box-shadow] duration-150 hover:border-gray-300 hover:shadow-sm",
+                selected && "border-emerald-600 ring-1 ring-emerald-600",
             )}
             style={{ width: FLOW_NODE_WIDTH }}
         >
@@ -72,7 +72,7 @@ export function BaseFlowNode({
                     </div>
                     <span className={cn("text-xs font-semibold", textColor)}>{label}</span>
                     {delay && (
-                        <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
+                        <Badge variant="secondary" className="ml-auto px-1.5 py-0 text-xs font-normal tabular-nums">
                             {delay}
                         </Badge>
                     )}
@@ -80,8 +80,8 @@ export function BaseFlowNode({
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100">
-                                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                                    <div className="flex h-5 w-5 items-center justify-center rounded-md bg-gray-100">
+                                        <Sparkles className="h-3 w-3 text-gray-500" />
                                     </div>
                                 </TooltipTrigger>
                                 <TooltipContent>AI Mutation enabled</TooltipContent>

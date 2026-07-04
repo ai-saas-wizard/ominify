@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Loader2, Zap } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { createSequence, listOutboundAgents } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { seqBtnPrimary, seqBtnSecondary, seqBtnGhost, seqFocusRing } from "@/components/sequences/theme";
 
 const TRIGGER_OPTIONS = [
     { value: "new_lead", label: "New Lead" },
@@ -83,7 +85,10 @@ export function CreateSequenceDialog({
             return (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="text-sm text-gray-500 hover:text-emerald-600 transition-colors underline underline-offset-2"
+                    className={cn(
+                        "rounded-sm text-sm text-gray-500 underline underline-offset-2 transition-colors hover:text-gray-900",
+                        seqFocusRing
+                    )}
                 >
                     or create manually
                 </button>
@@ -94,9 +99,9 @@ export function CreateSequenceDialog({
             return (
                 <button
                     onClick={() => setIsOpen(true)}
-                    className="border border-gray-300 hover:border-emerald-300 hover:text-emerald-700 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
+                    className={cn(seqBtnSecondary, "px-4 py-2")}
                 >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="h-4 w-4 text-gray-400" />
                     Create Manually
                 </button>
             );
@@ -105,9 +110,9 @@ export function CreateSequenceDialog({
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-sm font-medium"
+                className={cn(seqBtnPrimary, "px-4 py-2")}
             >
-                <Plus className="w-4 h-4" />
+                <Plus className="h-4 w-4" />
                 Create Sequence
             </button>
         );
@@ -115,13 +120,12 @@ export function CreateSequenceDialog({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                <div className="px-6 py-4 border-b">
-                    <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-emerald-600" />
-                        <h3 className="font-semibold text-lg">Create Manual Sequence (Advanced)</h3>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
+            <div className="w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                <div className="border-b border-gray-100 px-6 py-4">
+                    <h3 className="text-lg font-semibold tracking-tight text-gray-900">
+                        Create Manual Sequence (Advanced)
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
                         Fixed steps you author yourself — the AI won&apos;t decide
                         channels, content, or timing. For AI-driven outreach, use
                         the sequence wizard instead.
@@ -137,7 +141,7 @@ export function CreateSequenceDialog({
                             name="name"
                             required
                             placeholder="e.g., Missed Call Follow-up"
-                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full rounded-lg border border-gray-200 p-2 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30"
                         />
                     </div>
 
@@ -150,7 +154,7 @@ export function CreateSequenceDialog({
                             name="description"
                             rows={3}
                             placeholder="Describe what this sequence does..."
-                            className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                            className="w-full resize-none rounded-lg border border-gray-200 p-2 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30"
                         />
                     </div>
 
@@ -162,7 +166,7 @@ export function CreateSequenceDialog({
                         <select
                             name="agent_id"
                             defaultValue=""
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full rounded-lg border border-gray-200 bg-white p-2 text-sm outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50"
                         >
                             <option value="">No agent (generic)</option>
                             {agents.map((a) => (
@@ -186,7 +190,7 @@ export function CreateSequenceDialog({
                         <select
                             name="trigger_type"
                             defaultValue="manual"
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full rounded-lg border border-gray-200 bg-white p-2 text-sm outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50"
                         >
                             {TRIGGER_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -204,7 +208,7 @@ export function CreateSequenceDialog({
                         <select
                             name="urgency_tier"
                             defaultValue="medium"
-                            className="w-full p-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full rounded-lg border border-gray-200 bg-white p-2 text-sm outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50"
                         >
                             {URGENCY_OPTIONS.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -219,14 +223,14 @@ export function CreateSequenceDialog({
                         <button
                             type="button"
                             onClick={() => setIsOpen(false)}
-                            className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg"
+                            className={cn(seqBtnGhost, "px-4 py-2")}
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={loading}
-                            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 flex items-center"
+                            className={cn(seqBtnPrimary, "px-4 py-2")}
                         >
                             {loading && <Loader2 className="w-3 h-3 animate-spin mr-2" />}
                             Create Sequence

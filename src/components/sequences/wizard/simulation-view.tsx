@@ -7,11 +7,11 @@ import {
     Pause,
     SkipForward,
     RefreshCw,
-    Loader2,
     User,
-    Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+import { seqOption, seqOptionSelected, seqBtnSecondary, seqBtnPrimary, seqFocusRing } from "@/components/sequences/theme";
 import type { SimulationScenario } from "./types";
 import { SimulationEntryComponent } from "./simulation-entry";
 
@@ -96,28 +96,35 @@ export function SimulationView({
         return (
             <div className="space-y-6">
                 <div>
-                    <h2 className="text-xl font-semibold text-gray-900">
+                    <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                         Watch your AI in action
                     </h2>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-1 text-sm text-gray-500">
                         Generating a simulated lead journey...
                     </p>
                 </div>
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
-                    <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                    >
-                        <Sparkles className="w-8 h-8 text-emerald-500" />
-                    </motion.div>
-                    <div className="text-center">
-                        <p className="text-sm font-medium text-gray-700">
-                            Building your simulation...
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                            Creating a realistic lead journey based on your settings
-                        </p>
+                <div className="space-y-5" aria-busy="true" aria-label="Building your simulation">
+                    <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <Skeleton className="h-9 w-9 rounded-full" />
+                        <div className="space-y-1.5">
+                            <Skeleton className="h-4 w-36" />
+                            <Skeleton className="h-3 w-48" />
+                        </div>
                     </div>
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="relative pl-8">
+                            <Skeleton className="absolute left-0 top-3 h-3 w-3 rounded-full" />
+                            <div className="space-y-2">
+                                <Skeleton className="h-3 w-32" />
+                                <Skeleton
+                                    className={cn("h-16 rounded-xl", i === 1 ? "w-3/5" : "w-4/5")}
+                                />
+                            </div>
+                        </div>
+                    ))}
+                    <p className="text-center text-xs text-gray-400">
+                        Creating a realistic lead journey based on your settings
+                    </p>
                 </div>
             </div>
         );
@@ -127,20 +134,20 @@ export function SimulationView({
         return (
             <div className="space-y-6">
                 <div>
-                    <h2 className="text-xl font-semibold text-gray-900">
+                    <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                         Watch your AI in action
                     </h2>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-1 text-sm text-gray-500">
                         See a simulated lead journey before going live.
                     </p>
                 </div>
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
+                <div className="flex flex-col items-center justify-center gap-4 py-16">
                     {error ? (
                         <>
                             <p className="text-sm text-red-600">{error}</p>
                             <button
                                 onClick={() => onRegenerateScenario("positive")}
-                                className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                                className={cn(seqBtnPrimary, "px-4 py-2")}
                             >
                                 Try again
                             </button>
@@ -158,21 +165,21 @@ export function SimulationView({
     return (
         <div className="space-y-5">
             <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                     Watch your AI in action
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="mt-1 text-sm text-gray-500">
                     This is what your leads will experience. The AI adapts in real-time.
                 </p>
             </div>
 
             {/* Error Banner */}
             {error && scenario && (
-                <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     <span>Failed to generate new scenario. Showing previous result.</span>
                     <button
                         onClick={() => onRegenerateScenario("positive")}
-                        className="ml-auto text-xs font-medium text-red-600 hover:text-red-800 underline"
+                        className="ml-auto text-xs font-medium text-red-600 underline hover:text-red-800"
                     >
                         Retry
                     </button>
@@ -180,15 +187,15 @@ export function SimulationView({
             )}
 
             {/* Scenario Header */}
-            <div className="flex items-center justify-between bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center">
-                        <User className="w-4 h-4 text-blue-600" />
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white">
+                        <User className="h-4 w-4 text-gray-500" />
                     </div>
                     <div>
                         <p className="text-sm font-medium text-gray-900">
                             {scenario.fake_contact.name}
-                            <span className="ml-1.5 text-[10px] font-semibold tracking-wide text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase">
+                            <span className="ml-1.5 rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Lead
                             </span>
                         </p>
@@ -198,13 +205,13 @@ export function SimulationView({
                     </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <span>
+                    <span className="tabular-nums">
                         {visibleCount}/{totalEntries} steps
                     </span>
                     {/* Progress bar */}
-                    <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-1 w-20 overflow-hidden rounded-full bg-gray-200">
                         <motion.div
-                            className="h-full bg-emerald-500 rounded-full"
+                            className="h-full rounded-full bg-gray-900"
                             animate={{
                                 width: `${totalEntries > 0 ? (visibleCount / totalEntries) * 100 : 0}%`,
                             }}
@@ -218,28 +225,28 @@ export function SimulationView({
             <div className="flex items-center gap-2">
                 <button
                     onClick={togglePlay}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm text-gray-700 transition-colors"
+                    className={cn(seqBtnSecondary, "px-3 py-1.5 text-xs")}
                 >
                     {isPlaying ? (
                         <>
-                            <Pause className="w-3.5 h-3.5" /> Pause
+                            <Pause className="h-3.5 w-3.5 text-gray-400" /> Pause
                         </>
                     ) : visibleCount >= totalEntries ? (
                         <>
-                            <RefreshCw className="w-3.5 h-3.5" /> Replay
+                            <RefreshCw className="h-3.5 w-3.5 text-gray-400" /> Replay
                         </>
                     ) : (
                         <>
-                            <Play className="w-3.5 h-3.5" /> Play
+                            <Play className="h-3.5 w-3.5 text-gray-400" /> Play
                         </>
                     )}
                 </button>
                 {visibleCount < totalEntries && (
                     <button
                         onClick={handleShowAll}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm text-gray-700 transition-colors"
+                        className={cn(seqBtnSecondary, "px-3 py-1.5 text-xs")}
                     >
-                        <SkipForward className="w-3.5 h-3.5" /> Show all
+                        <SkipForward className="h-3.5 w-3.5 text-gray-400" /> Show all
                     </button>
                 )}
             </div>
@@ -266,7 +273,7 @@ export function SimulationView({
 
             {/* Scenario Switcher */}
             <div className="border-t border-gray-200 pt-4">
-                <p className="text-xs font-medium text-gray-500 mb-2">
+                <p className="mb-2 text-xs font-medium text-gray-500">
                     Simulate another scenario:
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -276,13 +283,14 @@ export function SimulationView({
                             onClick={() => onRegenerateScenario(st.type)}
                             disabled={isLoading}
                             className={cn(
-                                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50",
+                                seqFocusRing,
                                 scenario.scenario_type === st.type
-                                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                                    ? cn(seqOptionSelected, "text-emerald-800")
+                                    : cn(seqOption, "text-gray-600")
                             )}
                         >
-                            <span className="text-[10px]">{st.emoji}</span>
+                            <span className="font-mono text-xs text-gray-400">{st.emoji}</span>
                             {st.label}
                         </button>
                     ))}
