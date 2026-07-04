@@ -55,9 +55,9 @@ interface TaskDialogProps {
 // ── Channel Config ───────────────────────────────────────────────────────────
 
 const CHANNEL_CONFIG: Record<string, { icon: typeof MessageSquare; label: string; color: string; bg: string }> = {
-    sms: { icon: MessageSquare, label: "SMS", color: "text-blue-600", bg: "bg-blue-50" },
-    email: { icon: Mail, label: "Email", color: "text-emerald-600", bg: "bg-emerald-50" },
-    voice: { icon: Phone, label: "Voice", color: "text-emerald-600", bg: "bg-emerald-50" },
+    sms: { icon: MessageSquare, label: "SMS", color: "text-gray-500", bg: "bg-gray-50" },
+    email: { icon: Mail, label: "Email", color: "text-gray-500", bg: "bg-gray-50" },
+    voice: { icon: Phone, label: "Voice", color: "text-gray-500", bg: "bg-gray-50" },
 };
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -553,13 +553,13 @@ export function TaskDialog({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className={`bg-white rounded-xl shadow-xl w-full ${phase === "mapping" ? "max-w-2xl" : "max-w-lg"} flex flex-col overflow-hidden`}
+                        className={`w-full rounded-xl border border-gray-200 bg-white shadow-lg ${phase === "mapping" ? "max-w-2xl" : "max-w-lg"} flex flex-col overflow-hidden`}
                     >
                         {/* ── Header ─────────────────────────────────────── */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
                             <div className="flex items-center gap-2">
-                                <div className="p-1.5 bg-emerald-100 rounded-lg">
-                                    <Rocket className="w-4 h-4 text-emerald-600" />
+                                <div className="rounded-md border border-gray-200 bg-gray-50 p-1.5">
+                                    <Rocket className="h-4 w-4 text-gray-500" />
                                 </div>
                                 <h2 className="text-lg font-semibold text-gray-900">
                                     {phase === "mapping"
@@ -601,11 +601,11 @@ export function TaskDialog({
                                 <div className="grid grid-cols-3 gap-2 text-center">
                                     <div className="rounded-lg border border-gray-200 px-3 py-3">
                                         <p className="text-xs text-gray-500 uppercase tracking-wide">Queued</p>
-                                        <p className="text-lg font-semibold text-gray-900 mt-0.5">{enrolledCount}</p>
+                                        <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{enrolledCount}</p>
                                     </div>
                                     <div className="rounded-lg border border-gray-200 px-3 py-3">
                                         <p className="text-xs text-gray-500 uppercase tracking-wide">Skipped</p>
-                                        <p className="text-lg font-semibold text-gray-900 mt-0.5">{enrollmentErrors.length}</p>
+                                        <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{enrollmentErrors.length}</p>
                                     </div>
                                     <div className="rounded-lg border border-gray-200 px-3 py-3">
                                         <p className="text-xs text-gray-500 uppercase tracking-wide">Mode</p>
@@ -755,7 +755,7 @@ export function TaskDialog({
                                             type="button"
                                             onClick={() => insertVariableIntoTaskContext(v)}
                                             disabled={loadingAction !== null}
-                                            className="text-xs font-mono bg-gray-100 hover:bg-emerald-50 hover:text-emerald-700 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:border-emerald-300 transition-colors disabled:opacity-50"
+                                            className="rounded-md border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-xs text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50"
                                             title={`Insert {{${v}}} at cursor`}
                                         >
                                             {`{{${v}}}`}
@@ -785,7 +785,7 @@ export function TaskDialog({
                                         onChange={(e) => setPacingPerMinute(e.target.value)}
                                         placeholder="e.g. 20"
                                         disabled={loadingAction !== null}
-                                        className="w-28 rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50"
+                                        className="w-28 rounded-md border border-gray-200 px-3 py-2 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                                     />
                                     <span className="text-sm text-gray-500">calls per minute</span>
                                 </div>
@@ -806,12 +806,12 @@ export function TaskDialog({
                                             onDrop={handleDrop}
                                             onDragOver={handleDragOver}
                                             onClick={() => fileInputRef.current?.click()}
-                                            className="border-2 border-dashed border-gray-200 hover:border-indigo-300 rounded-lg p-6 text-center cursor-pointer transition-colors group"
+                                            className="cursor-pointer rounded-lg border border-dashed border-gray-300 p-6 text-center transition-colors hover:border-gray-400 group"
                                         >
-                                            <Upload className="w-6 h-6 text-gray-300 group-hover:text-indigo-400 mx-auto mb-2 transition-colors" />
+                                            <Upload className="w-6 h-6 text-gray-300 group-hover:text-gray-400 mx-auto mb-2 transition-colors" />
                                             <p className="text-sm text-gray-500">
                                                 Drop a CSV file here or{" "}
-                                                <span className="text-indigo-600 font-medium">browse</span>
+                                                <span className="font-medium text-emerald-600">browse</span>
                                             </p>
                                             <p className="text-xs text-gray-400 mt-1">
                                                 Column headers will be available as template variables
@@ -832,8 +832,8 @@ export function TaskDialog({
                                         >
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-2.5">
-                                                    <div className="p-1.5 bg-indigo-50 rounded-md">
-                                                        <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+                                                    <div className="rounded-md bg-gray-50 p-1.5">
+                                                        <FileSpreadsheet className="h-4 w-4 text-gray-500" />
                                                     </div>
                                                     <div>
                                                         <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">
@@ -863,7 +863,7 @@ export function TaskDialog({
                                                         {csvColumns.map((col) => (
                                                             <span
                                                                 key={col}
-                                                                className="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-xs font-mono text-indigo-700"
+                                                                className="inline-flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-600"
                                                             >
                                                                 {`{{${col}}}`}
                                                             </span>
@@ -877,7 +877,7 @@ export function TaskDialog({
                             />
                             {selectedListId && selectedListCount > 0 && (
                                 <p className="text-xs text-gray-500 flex items-center gap-1.5">
-                                    <Zap className="w-3 h-3 text-indigo-500" />
+                                    <Zap className="h-3 w-3 text-gray-400" />
                                     {selectedListCount.toLocaleString()} contact{selectedListCount !== 1 ? "s" : ""} from <strong>{selectedListName}</strong> will be enrolled when you continue.
                                 </p>
                             )}
@@ -909,7 +909,7 @@ export function TaskDialog({
                                             value={selectedAgentId}
                                             onChange={(e) => setSelectedAgentId(e.target.value)}
                                             disabled={loadingAction !== null}
-                                            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 disabled:opacity-50 bg-white"
+                                            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50 bg-white"
                                         >
                                             {agents.map((a) => (
                                                 <option key={a.id} value={a.id}>

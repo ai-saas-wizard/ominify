@@ -119,17 +119,17 @@ export function ConditionNode({ data, selected }: NodeProps) {
 
     return (
         <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.2 }}
             className={cn(
-                "relative bg-white rounded-xl border shadow-sm cursor-pointer transition-all hover:shadow-md",
-                selected && "ring-2 ring-emerald-500 ring-offset-2",
+                "relative cursor-pointer rounded-xl border border-gray-200 bg-white shadow-none transition-[border-color,box-shadow] duration-150 hover:border-gray-300 hover:shadow-sm",
+                selected && "border-emerald-600 ring-1 ring-emerald-600",
             )}
             style={{ width: FLOW_NODE_WIDTH }}
         >
-            {/* Pink accent */}
-            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl bg-pink-500" />
+            {/* Neutral accent */}
+            <div className="absolute bottom-0 left-0 top-0 w-1 rounded-l-xl bg-gray-300" />
 
             {/* Target handle */}
             <Handle
@@ -139,25 +139,25 @@ export function ConditionNode({ data, selected }: NodeProps) {
             />
 
             {/* Content */}
-            <div className="pl-4 pr-3 py-3">
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="flex items-center justify-center w-6 h-6 rounded-md bg-pink-50">
-                        <GitBranch className="w-3.5 h-3.5 text-pink-700" />
+            <div className="py-3 pl-4 pr-3">
+                <div className="mb-1 flex items-center gap-2">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gray-50">
+                        <GitBranch className="h-3.5 w-3.5 text-gray-500" />
                     </div>
-                    <span className="text-xs font-semibold text-pink-700">{config.label}</span>
+                    <span className="text-xs font-semibold text-gray-700">{config.label}</span>
                 </div>
                 {step.content && (
-                    <p className="text-xs text-gray-600 line-clamp-2">
+                    <p className="line-clamp-2 text-xs text-gray-600">
                         {typeof step.content === "string" ? step.content : "Condition check"}
                     </p>
                 )}
 
                 {/* Branch labels */}
-                <div className="flex items-center justify-between mt-2 px-1">
-                    <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                <div className="mt-2 flex items-center justify-between px-1">
+                    <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
                         True
                     </span>
-                    <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                    <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                         False
                     </span>
                 </div>
@@ -168,14 +168,14 @@ export function ConditionNode({ data, selected }: NodeProps) {
                 type="source"
                 position={Position.Bottom}
                 id="true"
-                className="!w-3 !h-3 !bg-green-400 !border-2 !border-white !-bottom-1.5"
+                className="!w-3 !h-3 !bg-emerald-500 !border-2 !border-white !-bottom-1.5"
                 style={{ left: "30%" }}
             />
             <Handle
                 type="source"
                 position={Position.Bottom}
                 id="false"
-                className="!w-3 !h-3 !bg-red-400 !border-2 !border-white !-bottom-1.5"
+                className="!w-3 !h-3 !bg-gray-400 !border-2 !border-white !-bottom-1.5"
                 style={{ left: "70%" }}
             />
         </motion.div>

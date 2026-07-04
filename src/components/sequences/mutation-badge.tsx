@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, ChevronDown, ChevronUp, ArrowRight } from "lucide-react";
+import { Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 
 /**
  * Small inline badge indicating this execution was AI-mutated.
@@ -26,22 +26,22 @@ export function MutationBadge({
         <div className="inline-block">
             <button
                 onClick={() => setExpanded(!expanded)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
             >
-                <Sparkles className="w-3 h-3" />
+                <Sparkles className="h-3 w-3 text-gray-400" />
                 AI Adapted
                 {expanded ? (
-                    <ChevronUp className="w-3 h-3" />
+                    <ChevronUp className="h-3 w-3" />
                 ) : (
-                    <ChevronDown className="w-3 h-3" />
+                    <ChevronDown className="h-3 w-3" />
                 )}
             </button>
 
             {expanded && (
-                <div className="mt-2 p-3 bg-emerald-50 rounded-lg border border-emerald-200 text-xs space-y-3 max-w-md">
+                <div className="mt-2 max-w-md space-y-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
                     {mutationReason && (
                         <div>
-                            <span className="font-medium text-emerald-700">Why:</span>{" "}
+                            <span className="font-medium text-gray-700">Why:</span>{" "}
                             <span className="text-gray-600">{mutationReason}</span>
                         </div>
                     )}
@@ -49,28 +49,28 @@ export function MutationBadge({
                     <div className="grid grid-cols-2 gap-2">
                         {/* Original */}
                         <div className="space-y-1">
-                            <span className="font-medium text-gray-500 uppercase tracking-wide text-[10px]">
+                            <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
                                 Original
                             </span>
-                            <div className="p-2 bg-white rounded border text-gray-600 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                            <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-gray-50 p-2 text-gray-600">
                                 {formatContent(originalContent)}
                             </div>
                         </div>
 
                         {/* Mutated */}
                         <div className="space-y-1">
-                            <span className="font-medium text-emerald-600 uppercase tracking-wide text-[10px]">
+                            <span className="text-xs font-medium uppercase tracking-wide text-emerald-600">
                                 AI Version
                             </span>
-                            <div className="p-2 bg-emerald-50 rounded border border-emerald-200 text-emerald-800 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                            <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-emerald-200 bg-emerald-50/40 p-2 text-gray-800">
                                 {formatContent(mutatedContent)}
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                    <div className="flex items-center gap-3 font-mono text-xs text-gray-400">
                         {confidence != null && (
-                            <span>
+                            <span className="tabular-nums">
                                 Confidence: {Math.round(confidence * 100)}%
                             </span>
                         )}
@@ -88,10 +88,10 @@ export function MutationBadge({
 export function MutationEnabledDot() {
     return (
         <span
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-100"
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs font-medium text-gray-600"
             title="AI Adaptive Mutation enabled for this step"
         >
-            <Sparkles className="w-3 h-3" />
+            <Sparkles className="h-3 w-3 text-gray-400" />
             AI
         </span>
     );

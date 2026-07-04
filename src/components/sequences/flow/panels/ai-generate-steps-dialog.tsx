@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2, X, Wand2, MessageSquare, Phone, Mail } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateAIStepsForSequence } from "@/app/actions/ai-generate-sequence-actions";
+import { cn } from "@/lib/utils";
+import { seqBtnPrimary, seqBtnGhost, seqFocusRing } from "@/components/sequences/theme";
 
 interface AIGenerateStepsDialogProps {
   clientId: string;
@@ -60,26 +62,30 @@ export function AIGenerateStepsDialog({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden"
+            className="w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-emerald-600" />
-                <h2 className="text-lg font-semibold text-gray-900">
+                <Sparkles className="h-5 w-5 text-gray-400" />
+                <h2 className="text-lg font-semibold tracking-tight text-gray-900">
                   Generate Steps with AI
                 </h2>
               </div>
               <button
                 onClick={handleClose}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+                className={cn(
+                  "rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600",
+                  seqFocusRing
+                )}
               >
-                <X className="w-5 h-5" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Suggestion Chips */}
-            <div className="px-6 pt-4 pb-1 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 px-6 pb-1 pt-4">
               {[
                 { label: "Add a follow-up SMS", icon: MessageSquare },
                 { label: "Add a voicemail fallback", icon: Phone },
@@ -88,9 +94,12 @@ export function AIGenerateStepsDialog({
                 <button
                   key={chip.label}
                   onClick={() => setPrompt(chip.label)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full transition-colors"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50",
+                    seqFocusRing
+                  )}
                 >
-                  <chip.icon className="w-3 h-3" />
+                  <chip.icon className="h-3 w-3 text-gray-400" />
                   {chip.label}
                 </button>
               ))}
@@ -107,7 +116,7 @@ export function AIGenerateStepsDialog({
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="e.g., Add a follow-up SMS after 2 hours, then an email the next day with a special offer"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30"
                 />
               </div>
 
@@ -120,14 +129,14 @@ export function AIGenerateStepsDialog({
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
               <button
                 onClick={handleClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                className={cn(seqBtnGhost, "px-4 py-2")}
               >
                 Cancel
               </button>
               <button
                 onClick={handleGenerate}
                 disabled={!prompt.trim() || loading}
-                className="bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all text-sm font-medium shadow-sm"
+                className={cn(seqBtnPrimary, "px-4 py-2")}
               >
                 {loading ? (
                   <>

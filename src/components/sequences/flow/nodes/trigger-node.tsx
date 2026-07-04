@@ -18,13 +18,13 @@ export function TriggerNode({ data }: NodeProps) {
             className="relative"
             style={{ width: FLOW_NODE_WIDTH }}
         >
-            <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl shadow-lg px-4 py-3.5 text-white">
+            <div className="rounded-xl bg-gray-900 px-4 py-3.5 text-white shadow-sm">
                 <div className="flex items-center gap-2.5">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
                         <Icon className="w-4.5 h-4.5 text-white" />
                     </div>
                     <div>
-                        <p className="text-[10px] font-medium text-emerald-200 uppercase tracking-wider">
+                        <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
                             Trigger
                         </p>
                         <p className="text-sm font-semibold">{config.label}</p>
@@ -36,7 +36,7 @@ export function TriggerNode({ data }: NodeProps) {
             <Handle
                 type="source"
                 position={Position.Bottom}
-                className="!w-3 !h-3 !bg-emerald-400 !border-2 !border-white !-bottom-1.5"
+                className="!w-3 !h-3 !bg-gray-400 !border-2 !border-white !-bottom-1.5"
             />
         </motion.div>
     );
@@ -50,9 +50,9 @@ export function EndNode({ data }: NodeProps) {
             animate={{ opacity: 1, scale: 1 }}
             className="relative"
         >
-            <div className="bg-gray-100 rounded-full px-5 py-2 border border-gray-200 shadow-sm">
+            <div className="rounded-full border border-gray-200 bg-gray-50 px-5 py-2">
                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-400" />
+                    <div className="h-1.5 w-1.5 rounded-full bg-gray-400" />
                     <span className="text-xs font-medium text-gray-500">End</span>
                 </div>
             </div>

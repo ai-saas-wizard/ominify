@@ -44,7 +44,7 @@ export function FlowEdge({
             <BaseEdge
                 path={edgePath}
                 style={{
-                    strokeWidth: 2,
+                    strokeWidth: 1.5,
                     stroke: "#d1d5db",
                     ...style,
                 }}
@@ -91,7 +91,7 @@ export function FlowEdge({
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.8 }}
                                 transition={{ duration: 0.15 }}
-                                className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white shadow-lg cursor-pointer hover:bg-emerald-600 transition-colors"
+                                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
                                 data-add-index={data.insertIndex}
                             >
                                 <Plus className="w-3.5 h-3.5" />

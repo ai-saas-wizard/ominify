@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, UserMinus, Phone, Users, FlaskConical } from "lucide-react";
+import { Loader2, UserMinus, Users, FlaskConical } from "lucide-react";
 import { unenrollContact } from "@/app/actions/sequence-actions";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { seqCardStatic, seqFocusRing } from "@/components/sequences/theme";
 
-const STATUS_COLORS: Record<string, string> = {
-    active: "bg-green-100 text-green-700",
-    // Dynamic enrollments spend most of their life in these two states —
-    // without entries they'd misleadingly render as green "active".
-    awaiting_outcome: "bg-sky-100 text-sky-700",
-    generating_next_step: "bg-violet-100 text-violet-700",
-    paused: "bg-yellow-100 text-yellow-700",
-    completed: "bg-blue-100 text-blue-700",
-    replied: "bg-emerald-100 text-emerald-700",
-    booked: "bg-emerald-100 text-emerald-700",
-    failed: "bg-red-100 text-red-700",
-    unenrolled: "bg-gray-100 text-gray-500",
+// Status as dot+label: sky=in-flight, amber=paused, red=failed, ink=terminal
+// outcomes, gray=inactive. Dynamic enrollments spend most of their life in
+// awaiting_outcome / generating_next_step — without entries they'd
+// misleadingly render as plain "active".
+const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
+    active: { dot: "bg-sky-500", text: "text-sky-700" },
+    awaiting_outcome: { dot: "bg-sky-500", text: "text-sky-700" },
+    generating_next_step: { dot: "bg-sky-500", text: "text-sky-700" },
+    paused: { dot: "bg-amber-500", text: "text-amber-700" },
+    completed: { dot: "bg-gray-900", text: "text-gray-700" },
+    replied: { dot: "bg-gray-900", text: "text-gray-700" },
+    booked: { dot: "bg-gray-900", text: "text-gray-700" },
+    failed: { dot: "bg-red-500", text: "text-red-700" },
+    unenrolled: { dot: "bg-gray-300", text: "text-gray-500" },
 };
 
 interface Enrollment {
@@ -73,12 +77,14 @@ export function EnrollmentTable({
 
     if (enrollments.length === 0) {
         return (
-            <div className="bg-white rounded-xl border shadow-sm p-12 text-center">
-                <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <h4 className="text-lg font-medium text-gray-900 mb-1">
+            <div className={cn(seqCardStatic, "p-12 text-center")}>
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
+                    <Users className="h-5 w-5 text-gray-400" />
+                </div>
+                <h4 className="mb-1 text-base font-semibold text-gray-900">
                     No enrollments yet
                 </h4>
-                <p className="text-gray-500 text-sm">
+                <p className="text-sm text-gray-500">
                     Contacts will appear here when they are enrolled in this sequence.
                 </p>
             </div>
@@ -86,93 +92,99 @@ export function EnrollmentTable({
     }
 
     return (
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b">
-                <h3 className="font-semibold text-gray-900">
-                    Enrollments ({enrollments.length})
-                </h3>
+        <div className={cn(seqCardStatic, "overflow-hidden")}>
+            <div className="flex items-baseline gap-2 border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-900">Enrollments</h3>
+                <span className="text-xs tabular-nums text-gray-400">
+                    {enrollments.length}
+                </span>
             </div>
             <div className="overflow-x-auto">
                 <table className="w-full">
                     <thead>
-                        <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
-                            <th className="px-6 py-3 text-left font-medium">Contact</th>
-                            <th className="px-6 py-3 text-left font-medium">Phone</th>
-                            <th className="px-6 py-3 text-center font-medium">Status</th>
-                            <th className="px-6 py-3 text-center font-medium">
-                                Current Step
-                            </th>
-                            <th className="px-6 py-3 text-left font-medium">Enrolled</th>
-                            <th className="px-6 py-3 text-right font-medium">Actions</th>
+                        <tr className="border-b border-gray-100 text-xs uppercase tracking-wider text-gray-400">
+                            <th className="px-4 py-2.5 text-left font-medium">Contact</th>
+                            <th className="px-4 py-2.5 text-left font-medium">Phone</th>
+                            <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                            <th className="px-4 py-2.5 text-right font-medium">Step</th>
+                            <th className="px-4 py-2.5 text-left font-medium">Enrolled</th>
+                            <th className="px-4 py-2.5 text-right font-medium">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                        {enrollments.map((enrollment) => (
-                            <tr
-                                key={enrollment.id}
-                                className="hover:bg-gray-50 transition-colors"
-                            >
-                                <td className="px-6 py-4">
-                                    <p className="font-medium text-gray-900">
-                                        {enrollment.contacts?.name || "Unknown"}
-                                    </p>
-                                    {enrollment.contacts?.email && (
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            {enrollment.contacts.email}
+                        {enrollments.map((enrollment) => {
+                            const status =
+                                STATUS_STYLES[enrollment.status] || STATUS_STYLES.active;
+                            return (
+                                <tr
+                                    key={enrollment.id}
+                                    className="transition-colors hover:bg-gray-50"
+                                >
+                                    <td className="px-4 py-2.5">
+                                        <p className="text-sm font-medium text-gray-900">
+                                            {enrollment.contacts?.name || "Unknown"}
                                         </p>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className="text-sm text-gray-600 font-mono flex items-center gap-1.5">
-                                        <Phone className="w-3.5 h-3.5 text-gray-400" />
-                                        {enrollment.contacts?.phone || "-"}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    <span
-                                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                            STATUS_COLORS[enrollment.status] ||
-                                            STATUS_COLORS.active
-                                        }`}
-                                    >
-                                        {enrollment.status}
-                                    </span>
-                                    {enrollment.is_test && (
-                                        <span className="inline-flex items-center gap-0.5 ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
-                                            <FlaskConical className="w-2.5 h-2.5" />
-                                            Test
+                                        {enrollment.contacts?.email && (
+                                            <p className="mt-0.5 text-xs text-gray-500">
+                                                {enrollment.contacts.email}
+                                            </p>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2.5">
+                                        <span className="font-mono text-xs text-gray-600">
+                                            {enrollment.contacts?.phone || "-"}
                                         </span>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
-                                        #{enrollment.current_step_order}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className="text-sm text-gray-500">
-                                        {formatDate(enrollment.enrolled_at)}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    {(enrollment.status === "active" ||
-                                        enrollment.status === "paused") && (
-                                        <button
-                                            onClick={() => handleUnenroll(enrollment.id)}
-                                            disabled={unenrollingId === enrollment.id}
-                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                                        >
-                                            {unenrollingId === enrollment.id ? (
-                                                <Loader2 className="w-3 h-3 animate-spin" />
-                                            ) : (
-                                                <UserMinus className="w-3 h-3" />
+                                    </td>
+                                    <td className="px-4 py-2.5">
+                                        <span
+                                            className={cn(
+                                                "inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium",
+                                                status.text
                                             )}
-                                            Unenroll
-                                        </button>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
+                                        >
+                                            <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
+                                            {enrollment.status}
+                                        </span>
+                                        {enrollment.is_test && (
+                                            <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1 py-px text-xs font-medium text-amber-700">
+                                                <FlaskConical className="h-2.5 w-2.5" />
+                                                Test
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right">
+                                        <span className="text-sm tabular-nums text-gray-700">
+                                            #{enrollment.current_step_order}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-2.5">
+                                        <span className="whitespace-nowrap text-xs text-gray-500">
+                                            {formatDate(enrollment.enrolled_at)}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right">
+                                        {(enrollment.status === "active" ||
+                                            enrollment.status === "paused") && (
+                                            <button
+                                                onClick={() => handleUnenroll(enrollment.id)}
+                                                disabled={unenrollingId === enrollment.id}
+                                                className={cn(
+                                                    "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50",
+                                                    seqFocusRing
+                                                )}
+                                            >
+                                                {unenrollingId === enrollment.id ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <UserMinus className="h-3 w-3" />
+                                                )}
+                                                Unenroll
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>

@@ -19,7 +19,6 @@ import { AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
 import { stepsToFlow, type FlowStep } from "./utils/steps-to-flow";
-import { CHANNEL_FLOW_CONFIG } from "./utils/constants";
 import { TriggerNode, EndNode } from "./nodes/trigger-node";
 import { SmsNode, EmailNode, VoiceNode, WaitNode, ConditionNode } from "./nodes/channel-nodes";
 import { AddNodeButton } from "./nodes/add-node-button";
@@ -29,6 +28,8 @@ import { FlowSidebarPanel } from "./panels/flow-sidebar-panel";
 import { SequenceStepEditor } from "@/components/sequences/step-editor";
 import { AIGenerateStepsDialog } from "./panels/ai-generate-steps-dialog";
 import { Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { seqBtnPrimary, seqFocusRing } from "@/components/sequences/theme";
 
 const nodeTypes: NodeTypes = {
     trigger: TriggerNode,
@@ -149,19 +150,15 @@ export function SequenceFlowCanvas({
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [showStepEditor, sidebarTab, handleStepEditorClose]);
 
-    // MiniMap node color
+    // MiniMap node color — ink for the trigger, amber for waits, neutral grays
+    // for everything else (channel identity lives on the nodes, not the map).
     const nodeColor = useCallback((node: Node) => {
         const channel = (node.data as any)?.channel;
-        if (node.type === "trigger") return "#10b981";
-        if (node.type === "addNode") return "#d1d5db";
-        if (node.type === "end") return "#ef4444";
-        const config = CHANNEL_FLOW_CONFIG[channel];
-        if (channel === "sms") return "#22c55e";
-        if (channel === "email") return "#3b82f6";
-        if (channel === "voice_call" || channel === "voice") return "#10b981";
+        if (node.type === "trigger") return "#111827";
+        if (node.type === "addNode") return "#e5e7eb";
+        if (node.type === "end") return "#9ca3af";
         if (channel === "wait") return "#f59e0b";
-        if (channel === "condition") return "#ec4899";
-        return "#9ca3af";
+        return "#d1d5db";
     }, []);
 
     return (
@@ -190,13 +187,13 @@ export function SequenceFlowCanvas({
                     color="#e5e7eb"
                 />
                 <Controls
-                    className="!bg-white !border !shadow-lg !rounded-xl"
+                    className="!rounded-xl !border !border-gray-200 !bg-white !shadow-sm"
                     showInteractive={false}
                 />
                 <MiniMap
                     nodeColor={nodeColor}
                     maskColor="rgba(255,255,255,0.8)"
-                    className="!bg-white !border !shadow-lg !rounded-xl"
+                    className="!rounded-xl !border !border-gray-200 !bg-white !shadow-sm"
                     pannable
                     zoomable
                 />
@@ -234,11 +231,11 @@ export function SequenceFlowCanvas({
                     <div className="fixed inset-0 z-50 flex items-center justify-center">
                         {/* Backdrop */}
                         <div
-                            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                            className="absolute inset-0 bg-black/40"
                             onClick={handleStepEditorClose}
                         />
                         {/* Editor */}
-                        <div className="relative z-10 w-full max-w-2xl mx-4 max-h-[85vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border p-6">
+                        <div className="relative z-10 mx-4 max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white p-6 shadow-lg">
                             <SequenceStepEditor
                                 sequenceId={sequenceId}
                                 existingStep={editingStep}
@@ -264,23 +261,23 @@ export function SequenceFlowCanvas({
 
             {/* Empty state CTA */}
             {steps.length === 0 && !showStepEditor && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl border shadow-xl p-8 text-center max-w-sm pointer-events-auto">
-                        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-                            <Sparkles className="w-6 h-6 text-emerald-600" />
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                    <div className="pointer-events-auto max-w-sm rounded-xl border border-gray-200 bg-white p-8 text-center shadow-md">
+                        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
+                            <Sparkles className="h-5 w-5 text-gray-400" />
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Describe Your Sequence</h3>
-                        <p className="text-sm text-gray-500 mb-4">Let AI build your follow-up steps, or add them manually.</p>
+                        <h3 className="mb-2 text-lg font-semibold text-gray-900">Describe Your Sequence</h3>
+                        <p className="mb-4 text-sm text-gray-500">Let AI build your follow-up steps, or add them manually.</p>
                         <button
                             onClick={() => setShowAIDialog(true)}
-                            className="w-full bg-gradient-to-r from-emerald-600 to-emerald-600 hover:from-emerald-700 hover:to-emerald-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all mb-3"
+                            className={cn(seqBtnPrimary, "mb-3 w-full px-4 py-2.5")}
                         >
-                            <Sparkles className="w-4 h-4" />
+                            <Sparkles className="h-4 w-4" />
                             Generate with AI
                         </button>
                         <button
                             onClick={() => { setEditingStep(null); setShowStepEditor(true); }}
-                            className="text-sm text-emerald-600 hover:text-emerald-800 font-medium transition-colors"
+                            className={cn("rounded-sm text-sm font-medium text-emerald-600 transition-colors hover:text-emerald-700", seqFocusRing)}
                         >
                             or add steps manually
                         </button>

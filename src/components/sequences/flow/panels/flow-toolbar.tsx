@@ -39,6 +39,8 @@ import {
     updateSequenceMutationSettings,
 } from "@/app/actions/sequence-actions";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { seqFocusRing, seqBtnSecondary } from "@/components/sequences/theme";
 
 interface FlowToolbarProps {
     clientId: string;
@@ -131,23 +133,26 @@ export function FlowToolbar({
     return (
         <Panel position="top-left" className="!m-0">
             <motion.div
-                initial={{ opacity: 0, y: -10 }}
+                initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 bg-white/95 backdrop-blur-sm rounded-xl border shadow-lg px-3 py-2 m-4"
+                className="m-4 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm"
             >
                 {/* Back + name */}
                 <Link
                     href={`/client/${clientId}/sequences`}
-                    className="flex items-center gap-1.5 text-gray-500 hover:text-gray-900 transition-colors"
+                    className={cn(
+                        "rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                        seqFocusRing
+                    )}
                 >
-                    <ArrowLeft className="w-4 h-4" />
+                    <ArrowLeft className="h-4 w-4" />
                 </Link>
-                <h2 className="text-sm font-semibold text-gray-900 max-w-[160px] truncate">
+                <h2 className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
                     {sequence.name}
                 </h2>
                 {/* This canvas is the advanced/legacy editor — only static
                     sequences reach it (dynamic ones get the observability view). */}
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 text-gray-500">
+                <Badge variant="secondary" className="h-5 px-1.5 py-0 text-xs font-normal text-gray-500">
                     Manual
                 </Badge>
 
@@ -160,9 +165,12 @@ export function FlowToolbar({
                             <button
                                 onClick={handleToggleActive}
                                 disabled={toggling}
-                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                                className={cn(
+                                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50",
+                                    seqFocusRing
+                                )}
                             >
-                                <div className={`w-2 h-2 rounded-full ${isActive ? "bg-green-500" : "bg-gray-400"}`} />
+                                <div className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-gray-300"}`} />
                                 {toggling ? "..." : isActive ? "Active" : "Inactive"}
                             </button>
                         </TooltipTrigger>
@@ -174,16 +182,13 @@ export function FlowToolbar({
                 <TooltipProvider>
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <motion.button
-                                whileHover={{ scale: 1.04 }}
-                                whileTap={{ scale: 0.96 }}
-                                transition={{ type: "spring", stiffness: 600, damping: 38 }}
+                            <button
                                 onClick={() => setTestOpen(true)}
-                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gradient-to-br from-amber-400 to-amber-500 text-white shadow-sm hover:shadow-md transition-shadow"
+                                className={cn(seqBtnSecondary, "px-2.5 py-1 text-xs")}
                             >
-                                <Zap className="w-3.5 h-3.5" />
+                                <Zap className="h-3.5 w-3.5 text-gray-400" />
                                 Test now
-                            </motion.button>
+                            </button>
                         </TooltipTrigger>
                         <TooltipContent>Fire a test call to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
                     </Tooltip>
@@ -193,13 +198,13 @@ export function FlowToolbar({
 
                 {/* AI Mutation */}
                 <div className="flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="text-xs font-medium text-emerald-700">AI</span>
+                    <Sparkles className="h-3.5 w-3.5 text-gray-400" />
+                    <span className="text-xs font-medium text-gray-600">AI</span>
                     <Switch
                         checked={mutationEnabled}
                         onCheckedChange={handleMutationToggle}
                         disabled={savingMutation}
-                        className="data-[state=checked]:bg-emerald-600 h-5 w-9"
+                        className="h-5 w-9 data-[state=checked]:bg-emerald-600"
                     />
                     {mutationEnabled && (
                         <Select
@@ -207,7 +212,7 @@ export function FlowToolbar({
                             onValueChange={handleAggressivenessChange}
                             disabled={savingMutation}
                         >
-                            <SelectTrigger className="h-7 w-[110px] text-xs border-emerald-200">
+                            <SelectTrigger className="h-7 w-[110px] border-gray-200 text-xs">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -227,9 +232,12 @@ export function FlowToolbar({
                         <TooltipTrigger asChild>
                             <Link
                                 href={`/client/${clientId}/sequences/${sequenceId}/learning`}
-                                className="flex items-center justify-center w-8 h-8 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                className={cn(
+                                    "flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                                    seqFocusRing
+                                )}
                             >
-                                <Brain className="w-4 h-4" />
+                                <Brain className="h-4 w-4" />
                             </Link>
                         </TooltipTrigger>
                         <TooltipContent>Learning Dashboard</TooltipContent>
@@ -244,9 +252,9 @@ export function FlowToolbar({
                                 variant="ghost"
                                 size="icon"
                                 onClick={onOpenAIDialog}
-                                className="w-8 h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                className="h-8 w-8 text-gray-400 hover:bg-gray-100 hover:text-gray-900"
                             >
-                                <Sparkles className="w-4 h-4" />
+                                <Sparkles className="h-4 w-4" />
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent>Generate steps with AI</TooltipContent>
@@ -289,9 +297,9 @@ export function FlowToolbar({
                                         onClick={() =>
                                             onSidebarToggle(sidebarTab === item.key ? null : item.key)
                                         }
-                                        className={`w-8 h-8 ${
+                                        className={`h-8 w-8 ${
                                             sidebarTab === item.key
-                                                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                                ? "bg-gray-900 text-white hover:bg-gray-800"
                                                 : "text-gray-500 hover:text-gray-900"
                                         }`}
                                     >
