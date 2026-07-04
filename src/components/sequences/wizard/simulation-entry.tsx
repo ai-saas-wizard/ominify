@@ -14,39 +14,9 @@ import { cn } from "@/lib/utils";
 import type { SimulationEntry as SimEntryType } from "./types";
 
 const CHANNEL_CONFIG = {
-    sms: {
-        icon: MessageSquare,
-        label: "SMS",
-        outboundBg: "bg-emerald-50",
-        outboundBorder: "border-emerald-200",
-        outboundText: "text-emerald-700",
-        inboundBg: "bg-gray-50",
-        inboundBorder: "border-gray-200",
-        badgeBg: "bg-emerald-100",
-        badgeText: "text-emerald-600",
-    },
-    email: {
-        icon: Mail,
-        label: "Email",
-        outboundBg: "bg-blue-50",
-        outboundBorder: "border-blue-200",
-        outboundText: "text-blue-700",
-        inboundBg: "bg-gray-50",
-        inboundBorder: "border-gray-200",
-        badgeBg: "bg-blue-100",
-        badgeText: "text-blue-600",
-    },
-    voice: {
-        icon: Phone,
-        label: "Voice Call",
-        outboundBg: "bg-violet-50",
-        outboundBorder: "border-violet-200",
-        outboundText: "text-violet-700",
-        inboundBg: "bg-gray-50",
-        inboundBorder: "border-gray-200",
-        badgeBg: "bg-violet-100",
-        badgeText: "text-violet-600",
-    },
+    sms: { icon: MessageSquare, label: "SMS" },
+    email: { icon: Mail, label: "Email" },
+    voice: { icon: Phone, label: "Voice Call" },
 };
 
 interface SimulationEntryProps {
@@ -73,47 +43,39 @@ export function SimulationEntryComponent({
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{
                 type: "spring",
                 stiffness: 300,
-                damping: 25,
-                delay: index * 0.08,
+                damping: 28,
+                delay: index * 0.06,
             }}
             className="relative pl-8"
         >
-            {/* Timeline dot */}
-            <div className="absolute left-0 top-3 w-4 h-4 rounded-full border-2 border-white shadow-sm flex items-center justify-center">
-                <div
-                    className={cn(
-                        "w-4 h-4 rounded-full",
-                        isOutbound ? channelCfg.badgeBg : "bg-gray-200"
-                    )}
-                />
-            </div>
+            {/* Timeline dot — neutral for the AI's sends, sky for the lead's side */}
+            <div
+                className={cn(
+                    "absolute left-1 top-3.5 h-2 w-2 rounded-full ring-2 ring-white",
+                    isOutbound ? "bg-gray-300" : "bg-sky-500"
+                )}
+            />
 
             {/* Timeline line */}
-            <div className="absolute left-[7px] top-7 bottom-0 w-0.5 bg-gray-200" />
+            <div className="absolute bottom-0 left-[7px] top-7 w-px bg-gray-200" />
 
             <div className="pb-6">
-                {/* Timestamp + Channel Badge */}
-                <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-medium text-gray-400">
+                {/* Timestamp + Channel */}
+                <div className="mb-2 flex items-center gap-2">
+                    <span className="font-mono text-xs text-gray-400">
                         Day {entry.day}, {entry.time}
                     </span>
-                    <span
-                        className={cn(
-                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium",
-                            channelCfg.badgeBg,
-                            channelCfg.badgeText
-                        )}
-                    >
-                        <Icon className="w-3 h-3" />
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500">
+                        <Icon className="h-3 w-3 text-gray-400" />
                         {channelCfg.label}
                     </span>
                     {!isOutbound && (
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-sky-700">
                             {firstName} replies
                         </span>
                     )}
@@ -122,18 +84,18 @@ export function SimulationEntryComponent({
                 {/* Message Bubble */}
                 <div
                     className={cn(
-                        "rounded-xl px-4 py-3 border max-w-lg",
+                        "max-w-lg rounded-xl border px-4 py-3",
                         isOutbound
-                            ? `${channelCfg.outboundBg} ${channelCfg.outboundBorder}`
-                            : `${channelCfg.inboundBg} ${channelCfg.inboundBorder}`
+                            ? "border-gray-200 bg-white"
+                            : "border-sky-200 bg-sky-50/40"
                     )}
                 >
                     {isOutbound && entry.channel === "voice" && (
-                        <p className="text-xs text-gray-400 mb-1">
+                        <p className="mb-1 text-xs text-gray-400">
                             {agentName} (AI Agent):
                         </p>
                     )}
-                    <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
                         {entry.content}
                     </p>
                 </div>
@@ -144,10 +106,10 @@ export function SimulationEntryComponent({
                         initial={{ opacity: 0, x: -8 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="mt-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-50/60 border border-emerald-100 max-w-lg"
+                        className="mt-2 flex max-w-lg items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
                     >
-                        <Brain className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                        <p className="text-xs text-emerald-700">{entry.ai_reasoning}</p>
+                        <Brain className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                        <p className="text-xs text-gray-600">{entry.ai_reasoning}</p>
                     </motion.div>
                 )}
 
@@ -157,23 +119,23 @@ export function SimulationEntryComponent({
                         initial={{ opacity: 0, x: -8 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="mt-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50/60 border border-blue-100 max-w-lg"
+                        className="mt-2 flex max-w-lg items-start gap-2 rounded-lg border border-sky-100 bg-sky-50/40 px-3 py-2"
                     >
-                        <Zap className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <p className="text-xs text-blue-700">{entry.ai_analysis}</p>
+                        <Zap className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-sky-600" />
+                        <p className="text-xs text-sky-700">{entry.ai_analysis}</p>
                     </motion.div>
                 )}
 
                 {/* Adaptation Callout */}
                 {entry.adaptation && (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
+                        initial={{ opacity: 0, scale: 0.97 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: 0.5 }}
-                        className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 max-w-lg"
+                        className="mt-2 flex max-w-lg items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
                     >
-                        <ArrowRight className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                        <p className="text-xs text-amber-700 font-medium">
+                        <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
+                        <p className="text-xs font-medium text-amber-700">
                             AI adapts: {entry.adaptation}
                         </p>
                     </motion.div>
@@ -182,25 +144,25 @@ export function SimulationEntryComponent({
                 {/* Handoff Notification */}
                 {entry.handoff?.triggered && (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.9 }}
+                        initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.4, type: "spring" }}
+                        transition={{ delay: 0.4, type: "spring", stiffness: 300, damping: 25 }}
                         className="mt-3 space-y-2"
                     >
-                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 border-2 border-red-200 max-w-lg">
-                            <Bell className="w-4 h-4 text-red-500 flex-shrink-0" />
+                        <div className="flex max-w-lg items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+                            <Bell className="h-4 w-4 flex-shrink-0 text-red-500" />
                             <div>
                                 <p className="text-xs font-semibold text-red-700">
                                     HANDOFF — You get notified
                                 </p>
-                                <p className="text-xs text-red-600 mt-0.5">
+                                <p className="mt-0.5 text-xs text-red-600">
                                     {entry.handoff.reason}
                                 </p>
                             </div>
                         </div>
-                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-gray-900 max-w-lg">
-                            <Bell className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
-                            <p className="text-xs text-gray-300 leading-relaxed">
+                        <div className="flex max-w-lg items-start gap-2 rounded-lg bg-gray-900 px-3 py-2.5">
+                            <Bell className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                            <p className="text-xs leading-relaxed text-gray-300">
                                 {entry.handoff.notification}
                             </p>
                         </div>

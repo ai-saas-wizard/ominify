@@ -16,6 +16,7 @@ import {
     ArrowUpRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { seqOption, seqOptionSelected, seqFocusRing } from "@/components/sequences/theme";
 import type { GoalId, GoalCard as GoalCardType } from "./types";
 import { GOAL_CARDS } from "./constants";
 
@@ -28,17 +29,6 @@ const ICON_MAP: Record<string, typeof PhoneMissed> = {
     megaphone: Megaphone,
     target: Target,
     "pencil-line": PencilLine,
-};
-
-const ICON_COLORS: Record<string, { bg: string; text: string }> = {
-    "phone-missed": { bg: "bg-red-50", text: "text-red-500" },
-    "user-round-search": { bg: "bg-amber-50", text: "text-amber-500" },
-    sprout: { bg: "bg-emerald-50", text: "text-emerald-500" },
-    "calendar-check": { bg: "bg-blue-50", text: "text-blue-500" },
-    receipt: { bg: "bg-violet-50", text: "text-violet-500" },
-    megaphone: { bg: "bg-rose-50", text: "text-rose-500" },
-    target: { bg: "bg-sky-50", text: "text-sky-500" },
-    "pencil-line": { bg: "bg-gray-50", text: "text-gray-500" },
 };
 
 interface GoalSelectorProps {
@@ -55,17 +45,16 @@ const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
         opacity: 1,
-        transition: { staggerChildren: 0.05, delayChildren: 0.1 },
+        transition: { staggerChildren: 0.04, delayChildren: 0.05 },
     },
 };
 
 const cardVariants = {
-    hidden: { opacity: 0, y: 16, scale: 0.97 },
+    hidden: { opacity: 0, y: 8 },
     visible: {
         opacity: 1,
         y: 0,
-        scale: 1,
-        transition: { type: "spring" as const, stiffness: 300, damping: 24 },
+        transition: { type: "spring" as const, stiffness: 300, damping: 30 },
     },
 };
 
@@ -99,10 +88,10 @@ export function GoalSelector({
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                     What do you want to achieve?
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="mt-1 text-sm text-gray-500">
                     Pick a goal and we'll set up everything for you.
                 </p>
             </div>
@@ -111,11 +100,10 @@ export function GoalSelector({
                 variants={containerVariants}
                 initial="hidden"
                 animate="visible"
-                className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
                 {GOAL_CARDS.map((goal) => {
                     const Icon = ICON_MAP[goal.icon] || PencilLine;
-                    const colors = ICON_COLORS[goal.icon] || ICON_COLORS["pencil-line"];
                     const isSelected = selectedGoal === goal.id;
                     const isComingSoon = goal.comingSoon === true;
                     const isLocked =
@@ -127,22 +115,22 @@ export function GoalSelector({
                                 key={goal.id}
                                 variants={cardVariants}
                                 aria-disabled="true"
-                                className="relative flex items-start gap-3.5 p-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/40 text-left opacity-80 cursor-not-allowed"
+                                className="relative flex cursor-not-allowed items-start gap-3.5 rounded-xl border border-dashed border-gray-200 bg-gray-50/40 p-4 text-left opacity-80"
                             >
-                                <div className={cn("flex-shrink-0 p-2.5 rounded-xl", colors.bg)}>
-                                    <Icon className={cn("w-5 h-5", colors.text)} />
+                                <div className="flex-shrink-0 rounded-lg bg-gray-100 p-2.5">
+                                    <Icon className="h-5 w-5 text-gray-400" />
                                 </div>
-                                <div className="flex-1 min-w-0">
+                                <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-1.5">
-                                        <p className="font-medium text-gray-700 text-sm">
+                                        <p className="text-sm font-medium text-gray-700">
                                             {goal.title}
                                         </p>
-                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                                            <Clock className="w-2.5 h-2.5" />
+                                        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700">
+                                            <Clock className="h-2.5 w-2.5" />
                                             Coming soon
                                         </span>
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-0.5">
+                                    <p className="mt-0.5 text-xs text-gray-500">
                                         {goal.description}
                                     </p>
                                     <p className="mt-2 text-xs text-gray-500">
@@ -159,27 +147,30 @@ export function GoalSelector({
                             <motion.div
                                 key={goal.id}
                                 variants={cardVariants}
-                                className="relative flex items-start gap-3.5 p-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/40 text-left opacity-80"
+                                className="relative flex items-start gap-3.5 rounded-xl border border-dashed border-gray-200 bg-gray-50/40 p-4 text-left opacity-80"
                             >
-                                <div className={cn("flex-shrink-0 p-2.5 rounded-xl", colors.bg)}>
-                                    <Icon className={cn("w-5 h-5", colors.text)} />
+                                <div className="flex-shrink-0 rounded-lg bg-gray-100 p-2.5">
+                                    <Icon className="h-5 w-5 text-gray-400" />
                                 </div>
-                                <div className="flex-1 min-w-0">
+                                <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-1.5">
-                                        <p className="font-medium text-gray-700 text-sm">
+                                        <p className="text-sm font-medium text-gray-700">
                                             {goal.title}
                                         </p>
-                                        <Lock className="w-3 h-3 text-gray-400" />
+                                        <Lock className="h-3 w-3 text-gray-400" />
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-0.5">
+                                    <p className="mt-0.5 text-xs text-gray-500">
                                         {goal.description}
                                     </p>
                                     <a
                                         href={integrationsHref}
-                                        className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                                        className={cn(
+                                            "mt-2 inline-flex items-center gap-1 rounded-sm text-xs font-medium text-emerald-600 hover:text-emerald-700",
+                                            seqFocusRing
+                                        )}
                                     >
                                         {lockedLabel(goal.requires)}
-                                        <ArrowUpRight className="w-3 h-3" />
+                                        <ArrowUpRight className="h-3 w-3" />
                                     </a>
                                 </div>
                             </motion.div>
@@ -192,40 +183,40 @@ export function GoalSelector({
                             variants={cardVariants}
                             onClick={() => onSelectGoal(goal.id)}
                             className={cn(
-                                "relative flex items-start gap-3.5 p-4 rounded-xl border-2 text-left transition-all duration-150",
-                                isSelected
-                                    ? "border-emerald-500 bg-emerald-50/40 shadow-sm"
-                                    : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
+                                "relative flex items-start gap-3.5 rounded-xl p-4 text-left",
+                                seqFocusRing,
+                                isSelected ? seqOptionSelected : seqOption
                             )}
                         >
                             <div
                                 className={cn(
-                                    "flex-shrink-0 p-2.5 rounded-xl transition-colors",
-                                    isSelected ? "bg-emerald-100" : colors.bg
+                                    "flex-shrink-0 rounded-lg p-2.5 transition-colors",
+                                    isSelected ? "bg-emerald-100" : "bg-gray-50"
                                 )}
                             >
                                 <Icon
                                     className={cn(
-                                        "w-5 h-5 transition-colors",
-                                        isSelected ? "text-emerald-600" : colors.text
+                                        "h-5 w-5 transition-colors",
+                                        isSelected ? "text-emerald-600" : "text-gray-500"
                                     )}
                                 />
                             </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="font-medium text-gray-900 text-sm">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-gray-900">
                                     {goal.title}
                                 </p>
-                                <p className="text-xs text-gray-500 mt-0.5">
+                                <p className="mt-0.5 text-xs text-gray-500">
                                     {goal.description}
                                 </p>
                             </div>
                             {isSelected && (
                                 <motion.div
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                    className="absolute top-3 right-3 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center"
+                                    initial={{ scale: 0.6, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                                    className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600"
                                 >
-                                    <Check className="w-3 h-3 text-white" />
+                                    <Check className="h-3 w-3 text-white" />
                                 </motion.div>
                             )}
                         </motion.button>
@@ -249,7 +240,7 @@ export function GoalSelector({
                         onChange={(e) => onCustomDescriptionChange(e.target.value)}
                         placeholder="e.g., Follow up with leads who attended our open house event but haven't scheduled a showing yet..."
                         rows={3}
-                        className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none text-sm"
+                        className="w-full resize-none rounded-lg border border-gray-200 p-3 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30"
                     />
                 </motion.div>
             )}

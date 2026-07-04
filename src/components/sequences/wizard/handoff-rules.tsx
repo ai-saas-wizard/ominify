@@ -12,6 +12,7 @@ import {
     ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { seqOption, seqOptionSelected, seqFocusRing, seqBtnSecondary } from "@/components/sequences/theme";
 import { normalizeToE164 } from "@/lib/phone-utils";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -113,10 +114,10 @@ export function HandoffRulesScreen({
     return (
         <div className="space-y-8">
             <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                     When should we hand it to you?
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="mt-1 text-sm text-gray-500">
                     Define when your AI should step aside and let you take over.
                 </p>
             </div>
@@ -137,25 +138,24 @@ export function HandoffRulesScreen({
                                 key={cond.id}
                                 onClick={() => toggleSuccessCondition(cond.id)}
                                 className={cn(
-                                    "w-full flex items-center gap-3 p-3 rounded-lg border-2 text-left transition-all",
-                                    isSelected
-                                        ? "border-emerald-500 bg-emerald-50/40"
-                                        : "border-gray-200 hover:border-gray-300"
+                                    "flex w-full items-center gap-3 rounded-lg p-3 text-left",
+                                    seqFocusRing,
+                                    isSelected ? seqOptionSelected : seqOption
                                 )}
                             >
                                 <div
                                     className={cn(
-                                        "w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                                        "flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border transition-colors",
                                         isSelected
-                                            ? "border-emerald-500 bg-emerald-500"
+                                            ? "border-emerald-600 bg-emerald-600"
                                             : "border-gray-300"
                                     )}
                                 >
-                                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                                    {isSelected && <Check className="h-3 w-3 text-white" />}
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-sm font-medium text-gray-900">{cond.label}</p>
-                                    <p className="text-xs text-gray-400 mt-0.5">{cond.example}</p>
+                                    <p className="mt-0.5 text-xs text-gray-400">{cond.example}</p>
                                 </div>
                             </button>
                         );
@@ -183,21 +183,22 @@ export function HandoffRulesScreen({
                                 key={preset.id}
                                 onClick={() => togglePresetTrigger(preset)}
                                 className={cn(
-                                    "w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all",
+                                    "flex w-full items-center gap-3 rounded-lg p-3 text-left",
+                                    seqFocusRing,
                                     isSelected
-                                        ? "border-amber-400 bg-amber-50/40"
-                                        : "border-gray-200 hover:border-gray-300"
+                                        ? "border border-amber-500 bg-amber-50/40 ring-1 ring-amber-500"
+                                        : seqOption
                                 )}
                             >
                                 <div
                                     className={cn(
-                                        "w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                                        "flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border transition-colors",
                                         isSelected
                                             ? "border-amber-500 bg-amber-500"
                                             : "border-gray-300"
                                     )}
                                 >
-                                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                                    {isSelected && <Check className="h-3 w-3 text-white" />}
                                 </div>
                                 <p className="text-sm text-gray-700">{preset.label}</p>
                             </button>
@@ -215,12 +216,12 @@ export function HandoffRulesScreen({
                                 initial={{ opacity: 0, height: 0 }}
                                 animate={{ opacity: 1, height: "auto" }}
                                 exit={{ opacity: 0, height: 0 }}
-                                className="flex items-center gap-2 p-3 rounded-lg border border-blue-200 bg-blue-50/30"
+                                className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3"
                             >
-                                <div className="w-5 h-5 rounded-md bg-blue-500 flex items-center justify-center flex-shrink-0">
-                                    <Check className="w-3 h-3 text-white" />
+                                <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gray-900">
+                                    <Check className="h-3 w-3 text-white" />
                                 </div>
-                                <p className="text-sm text-gray-700 flex-1">
+                                <p className="flex-1 text-sm text-gray-700">
                                     {trigger.label}
                                 </p>
                                 <button
@@ -230,9 +231,13 @@ export function HandoffRulesScreen({
                                         );
                                         if (customIdx >= 0) removeCustomTrigger(customIdx);
                                     }}
-                                    className="p-1 hover:bg-blue-100 rounded transition-colors"
+                                    aria-label="Remove trigger"
+                                    className={cn(
+                                        "rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600",
+                                        seqFocusRing
+                                    )}
                                 >
-                                    <X className="w-3.5 h-3.5 text-blue-500" />
+                                    <X className="h-3.5 w-3.5" />
                                 </button>
                             </motion.div>
                         ))}
@@ -246,15 +251,16 @@ export function HandoffRulesScreen({
                             onChange={(e) => setCustomTriggerText(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && addCustomTrigger()}
                             placeholder="Describe the trigger (e.g. asks about financing options, mentions a competitor)..."
-                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30"
                         />
                     </div>
                     <button
                         onClick={addCustomTrigger}
                         disabled={!customTriggerText.trim()}
-                        className="px-3 py-2.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 rounded-lg transition-colors"
+                        aria-label="Add trigger"
+                        className={cn(seqBtnSecondary, "px-3 py-2.5")}
                     >
-                        <Plus className="w-4 h-4 text-gray-600" />
+                        <Plus className="h-4 w-4 text-gray-500" />
                     </button>
                 </div>
             </div>
@@ -270,7 +276,7 @@ export function HandoffRulesScreen({
                         <span className="text-sm text-gray-600">
                             Stop after how many unanswered touchpoints?
                         </span>
-                        <span className="text-sm font-semibold text-gray-900">
+                        <span className="text-sm font-semibold tabular-nums text-gray-900">
                             {config.no_response.max_touchpoints}
                         </span>
                     </div>
@@ -306,10 +312,11 @@ export function HandoffRulesScreen({
                                     })
                                 }
                                 className={cn(
-                                    "px-3 py-2.5 rounded-lg border text-sm font-medium transition-all text-center",
+                                    "rounded-lg px-3 py-2.5 text-center text-sm font-medium",
+                                    seqFocusRing,
                                     config.no_response.after_sequence === opt.value
-                                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                                        : "border-gray-200 text-gray-600 hover:border-gray-300"
+                                        ? cn(seqOptionSelected, "text-emerald-800")
+                                        : cn(seqOption, "text-gray-600")
                                 )}
                             >
                                 {opt.label}
@@ -432,7 +439,7 @@ export function HandoffRulesScreen({
                                     },
                                 })
                             }
-                            className="data-[state=checked]:bg-emerald-500"
+                            className="data-[state=checked]:bg-emerald-600"
                         />
                     </div>
                 </div>
@@ -479,7 +486,10 @@ function WeeksSelect({
             <button
                 type="button"
                 onClick={() => setOpen((o) => !o)}
-                className="flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-lg text-sm bg-white hover:border-gray-300 transition-colors"
+                className={cn(
+                    "flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-sm transition-colors hover:border-gray-300",
+                    seqFocusRing
+                )}
             >
                 <span>{value} weeks</span>
                 <ChevronDown
@@ -496,7 +506,7 @@ function WeeksSelect({
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.12 }}
-                        className="absolute z-20 mt-1 left-0 min-w-full bg-white border border-gray-200 rounded-lg shadow-lg py-1 overflow-hidden"
+                        className="absolute left-0 z-20 mt-1 min-w-full overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-md"
                     >
                         {WEEK_OPTIONS.map((w) => {
                             const selected = w === value;

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
+import { seqOption, seqOptionSelected, seqFocusRing } from "@/components/sequences/theme";
 import type { ChannelReadiness } from "@/app/actions/sequence-actions";
 import type { ChannelConfig as ChannelConfigType } from "./types";
 import { CADENCE_LABELS, DURATION_OPTIONS } from "./constants";
@@ -28,45 +29,21 @@ const CHANNELS = [
         key: "sms" as const,
         label: "SMS",
         icon: MessageSquare,
-        color: "emerald",
         description: "Text messages to their phone",
     },
     {
         key: "email" as const,
         label: "Email",
         icon: Mail,
-        color: "blue",
         description: "Emails to their inbox",
     },
     {
         key: "voice" as const,
         label: "Voice Calls",
         icon: Phone,
-        color: "violet",
         description: "AI-powered phone calls",
     },
 ];
-
-const COLOR_MAP: Record<string, { bg: string; border: string; text: string; iconBg: string }> = {
-    emerald: {
-        bg: "bg-emerald-50/50",
-        border: "border-emerald-500",
-        text: "text-emerald-700",
-        iconBg: "bg-emerald-100",
-    },
-    blue: {
-        bg: "bg-blue-50/50",
-        border: "border-blue-500",
-        text: "text-blue-700",
-        iconBg: "bg-blue-100",
-    },
-    violet: {
-        bg: "bg-violet-50/50",
-        border: "border-violet-500",
-        text: "text-violet-700",
-        iconBg: "bg-violet-100",
-    },
-};
 
 export function ChannelConfigScreen({
     config,
@@ -91,25 +68,25 @@ export function ChannelConfigScreen({
     return (
         <div className="space-y-8">
             <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold tracking-tight text-gray-900">
                     How should we reach them?
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="mt-1 text-sm text-gray-500">
                     Pick your channels, frequency, and duration.
                 </p>
             </div>
 
             {/* Outbound Agent */}
             <div className="space-y-3">
-                <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-                    <Bot className="w-4 h-4 text-gray-400" />
+                <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                    <Bot className="h-4 w-4 text-gray-400" />
                     Your AI agent
                 </label>
                 {outboundAgents.length > 1 ? (
                     <select
                         value={agentId ?? ""}
                         onChange={(e) => onAgentChange(e.target.value)}
-                        className="w-full p-2 border rounded-lg bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full rounded-md border border-gray-200 bg-white p-2 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50"
                     >
                         {outboundAgents.map((a) => (
                             <option key={a.id} value={a.id}>
@@ -118,7 +95,7 @@ export function ChannelConfigScreen({
                         ))}
                     </select>
                 ) : (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700">
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                         <span className="font-medium">{selectedAgent?.name || "Your agent"}</span>
                     </div>
                 )}
@@ -130,10 +107,9 @@ export function ChannelConfigScreen({
             {/* Channel Toggles */}
             <div className="space-y-3">
                 <label className="text-sm font-medium text-gray-700">Channels</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {CHANNELS.map((ch, i) => {
                         const isOn = config.channels[ch.key];
-                        const colors = COLOR_MAP[ch.color];
                         // Voice is scoped to the selected agent — creation
                         // intersects on the bound agent's capability.
                         const agentLacksVoice =
@@ -146,36 +122,35 @@ export function ChannelConfigScreen({
                         return (
                             <motion.button
                                 key={ch.key}
-                                initial={{ opacity: 0, y: 12 }}
+                                initial={{ opacity: 0, y: 8 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: i * 0.05 }}
+                                transition={{ delay: i * 0.04 }}
                                 onClick={() => !notReady && toggleChannel(ch.key)}
                                 disabled={notReady}
                                 className={cn(
-                                    "relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-150",
-                                    notReady && "opacity-50 cursor-not-allowed",
-                                    isOn
-                                        ? `${colors.bg} ${colors.border} shadow-sm`
-                                        : "border-gray-200 bg-white hover:border-gray-300"
+                                    "relative flex flex-col items-center gap-2 rounded-xl p-4",
+                                    seqFocusRing,
+                                    notReady && "cursor-not-allowed opacity-50",
+                                    isOn ? seqOptionSelected : seqOption
                                 )}
                             >
                                 <div
                                     className={cn(
-                                        "p-2.5 rounded-xl transition-colors",
-                                        isOn ? colors.iconBg : "bg-gray-100"
+                                        "rounded-lg p-2.5 transition-colors",
+                                        isOn ? "bg-emerald-100" : "bg-gray-50"
                                     )}
                                 >
                                     <ch.icon
                                         className={cn(
-                                            "w-5 h-5 transition-colors",
-                                            isOn ? colors.text : "text-gray-400"
+                                            "h-5 w-5 transition-colors",
+                                            isOn ? "text-emerald-600" : "text-gray-400"
                                         )}
                                     />
                                 </div>
                                 <span
                                     className={cn(
                                         "text-sm font-medium",
-                                        isOn ? colors.text : "text-gray-500"
+                                        isOn ? "text-gray-900" : "text-gray-500"
                                     )}
                                 >
                                     {ch.label}
@@ -184,8 +159,8 @@ export function ChannelConfigScreen({
                                     {ch.description}
                                 </span>
                                 {notReady && (
-                                    <div className="flex items-center gap-1 text-xs text-amber-600 mt-1">
-                                        <AlertCircle className="w-3 h-3 shrink-0" />
+                                    <div className="mt-1 flex items-center gap-1 text-xs text-amber-600">
+                                        <AlertCircle className="h-3 w-3 shrink-0" />
                                         {notReadyReason}
                                     </div>
                                 )}
@@ -201,9 +176,9 @@ export function ChannelConfigScreen({
                     <label className="text-sm font-medium text-gray-700">
                         Touchpoints per week
                     </label>
-                    <span className="text-sm font-semibold text-emerald-600">
+                    <span className="text-sm font-semibold tabular-nums text-gray-900">
                         {config.cadence}/week
-                        <span className="text-xs font-normal text-gray-400 ml-1.5">
+                        <span className="ml-1.5 text-xs font-normal text-gray-400">
                             {cadenceLabel}
                         </span>
                     </span>
@@ -216,7 +191,7 @@ export function ChannelConfigScreen({
                     onValueChange={([val]) => onChange({ ...config, cadence: val })}
                     className="w-full"
                 />
-                <div className="flex justify-between text-xs text-gray-400 px-0.5">
+                <div className="flex justify-between px-0.5 text-xs text-gray-400">
                     <span>1 - Gentle</span>
                     <span>5 - Persistent</span>
                 </div>
@@ -225,16 +200,17 @@ export function ChannelConfigScreen({
             {/* Duration Select */}
             <div className="space-y-3">
                 <label className="text-sm font-medium text-gray-700">Run for</label>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                     {DURATION_OPTIONS.map((opt) => (
                         <button
                             key={opt.value}
                             onClick={() => onChange({ ...config, duration: opt.value })}
                             className={cn(
-                                "px-3 py-2 rounded-lg border text-sm font-medium transition-all",
+                                "rounded-lg px-3 py-2 text-sm font-medium",
+                                seqFocusRing,
                                 config.duration === opt.value
-                                    ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                                    ? cn(seqOptionSelected, "text-emerald-800")
+                                    : cn(seqOption, "text-gray-600")
                             )}
                         >
                             {opt.label}
@@ -247,19 +223,19 @@ export function ChannelConfigScreen({
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="bg-gray-50 rounded-xl p-4 border border-gray-200"
+                className="rounded-xl border border-gray-200 bg-gray-50 p-4"
             >
                 <p className="text-sm text-gray-600">
                     Your AI will make roughly{" "}
-                    <span className="font-semibold text-gray-900">
+                    <span className="font-semibold tabular-nums text-gray-900">
                         {totalTouchpoints} touchpoints
                     </span>{" "}
                     over{" "}
-                    <span className="font-semibold text-gray-900">
+                    <span className="font-semibold tabular-nums text-gray-900">
                         {config.duration} week{config.duration !== 1 ? "s" : ""}
                     </span>{" "}
                     across{" "}
-                    <span className="font-semibold text-gray-900">
+                    <span className="font-semibold tabular-nums text-gray-900">
                         {enabledCount} channel{enabledCount !== 1 ? "s" : ""}
                     </span>
                     , with intelligent timing and channel distribution.

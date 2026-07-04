@@ -29,6 +29,13 @@ export const seqCardInteractive =
 /** Static card: hairline border, no shadow, no hover response. */
 export const seqCardStatic = "rounded-xl border border-gray-200 bg-white shadow-none";
 
+/** Selectable option (wizard cards, pills, condition rows) — unselected. */
+export const seqOption =
+    "border border-gray-200 bg-white transition-colors duration-150 hover:border-gray-300";
+
+/** Selectable option — selected. ring-1 doubles the hairline without layout shift. */
+export const seqOptionSelected = "border border-emerald-600 ring-1 ring-emerald-600 bg-emerald-50/40";
+
 /** Status → dot + label styling. Dot color is the only non-ink element. */
 export const SEQ_STATUS = {
     live: { dot: "bg-emerald-500", text: "text-emerald-700", label: "Live" },
