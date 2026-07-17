@@ -161,6 +161,25 @@ You will be given variables describing this lead:
 ${pricingRule}`;
 }
 
+function crossChannelMemoryBlock(): string {
+    return `## [Prior Conversation — cross-channel memory, READ FIRST]
+
+This lead may have already heard from us on other channels. Everything below is context — read it silently, never aloud.
+
+**Conversation so far — every call, text, and email with this lead, both directions (this is empty only if it's the very first touch):**
+{{conversation_history}}
+
+**What this specific outreach is about:** {{task_context}}
+
+**Tone to strike on this call:** {{tone_directive}}
+
+**Continuity rules:**
+- If the conversation above is non-empty, you have ALREADY been in contact. Do NOT reintroduce yourself as if it's the first time, and do NOT re-ask anything they've already answered.
+- Treat texts and past calls as one continuous relationship — reference what they told you before ("When we texted, you mentioned...", "Last time we talked, you were weighing...").
+- If they raised an objection earlier, address it head-on instead of waiting for it to come up again.
+- Let this shape your opener: a lead who's been texting with us is warmer than a cold dial — match that energy.`;
+}
+
 function styleBlock(): string {
     return `## [Style]
 
@@ -303,6 +322,8 @@ ${identityBlock(
 
 ${dataIntegrityBlock(c)}
 
+${crossChannelMemoryBlock()}
+
 ${valuePropsBlock(c)}
 
 ${styleBlock()}
@@ -388,6 +409,8 @@ ${identityBlock(
 
 ${dataIntegrityBlock(c)}
 
+${crossChannelMemoryBlock()}
+
 ${valuePropsBlock(c)}
 
 ${styleBlock()}
@@ -464,6 +487,8 @@ ${identityBlock(
 
 ${dataIntegrityBlock(c)}
 
+${crossChannelMemoryBlock()}
+
 ${valuePropsBlock(c)}
 
 ${styleBlock()}
@@ -528,6 +553,8 @@ ${identityBlock(
 )}
 
 ${dataIntegrityBlock(c)}
+
+${crossChannelMemoryBlock()}
 
 ${valuePropsBlock(c)}
 
