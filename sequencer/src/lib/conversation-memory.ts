@@ -88,7 +88,12 @@ export async function recordInteraction(params: RecordInteractionParams): Promis
             .single();
 
         if (error) {
-            console.error('[MEMORY] Error recording interaction:', error.message);
+            // Distinct prefix so a recording failure is never invisible again —
+            // the missing `metadata` column silently emptied contact_interactions
+            // (and thus cross-channel memory) for weeks. Non-throwing by design.
+            console.error(
+                `[RECORDING-FAILURE] contact_interactions insert failed for contact ${params.contactId} (channel=${params.channel}): ${error.message}${error.code ? ` [${error.code}]` : ''}`
+            );
             return null;
         }
 

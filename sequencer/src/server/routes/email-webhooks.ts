@@ -135,7 +135,7 @@ export async function emailWebhooks(fastify: FastifyInstance) {
             type: 'email-opened' as const,
             tenantId: '',
             executionLogId,
-        }, { jobId: `open:${executionLogId}` }).catch(err => console.error('[EMAIL-WEBHOOK] Failed to queue open event:', err));
+        }, { jobId: `open-${executionLogId}` }).catch(err => console.error('[EMAIL-WEBHOOK] Failed to queue open event:', err));
 
         return reply
             .header('Content-Type', 'image/gif')
@@ -186,7 +186,7 @@ export async function emailWebhooks(fastify: FastifyInstance) {
             tenantId: '',
             executionLogId,
             url: decodedUrl,
-        }, { jobId: `click:${executionLogId}` }).catch(err => console.error('[EMAIL-WEBHOOK] Failed to queue click event:', err));
+        }, { jobId: `click-${executionLogId}` }).catch(err => console.error('[EMAIL-WEBHOOK] Failed to queue click event:', err));
 
         return reply.redirect(302, decodedUrl);
     });
@@ -261,7 +261,7 @@ export async function emailWebhooks(fastify: FastifyInstance) {
             providerId: provider_id,
             executionLogId: execution_log_id,
             bounceType: bounce_type,
-        }, { jobId: `bounce:${provider_id || execution_log_id}` });
+        }, { jobId: `bounce-${provider_id || execution_log_id}` });
 
         console.log(`[EMAIL-WEBHOOK] Queued email-bounced event (${provider_id || execution_log_id})`);
         return reply.status(200).send({ status: 'queued' });

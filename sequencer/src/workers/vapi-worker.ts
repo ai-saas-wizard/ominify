@@ -56,7 +56,11 @@ async function logExecution(params: {
     });
 
     if (error) {
-        console.error('[VAPI] Error logging execution:', error);
+        // Non-throwing (see sms-worker). Distinct prefix so recording failures
+        // (e.g. the call_status column drift) surface instead of hiding.
+        console.error(
+            `[RECORDING-FAILURE] sequence_execution_log insert failed for enrollment ${params.enrollmentId} (action=${params.action}): ${error.message}${error.code ? ` [${error.code}]` : ''}`
+        );
     }
 }
 

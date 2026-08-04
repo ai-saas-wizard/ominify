@@ -124,7 +124,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
 
             // Deterministic jobId — Twilio retries/replays of the same
             // MessageSid dedupe at the queue.
-            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in:${messageSid}` });
+            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in-${messageSid}` });
 
             // Return TwiML response (empty = no auto-reply)
             reply.type('text/xml');
@@ -166,7 +166,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 providerId: messageSid,
             };
 
-            await eventQueue.add('event:sms-delivery', event, { jobId: `sms-status:${messageSid}:${status}` });
+            await eventQueue.add('event:sms-delivery', event, { jobId: `sms-status-${messageSid}-${status}` });
 
             reply.status(200).send({ ok: true });
         }
@@ -209,7 +209,7 @@ export async function twilioWebhooks(fastify: FastifyInstance) {
                 messageSid,
             };
 
-            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in:${messageSid}` });
+            await eventQueue.add('event:sms-reply', event, { jobId: `sms-in-${messageSid}` });
 
             reply.type('text/xml');
             return '<Response></Response>';
