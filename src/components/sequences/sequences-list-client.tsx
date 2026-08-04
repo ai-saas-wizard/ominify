@@ -17,6 +17,7 @@ import {
     ChevronDown,
     Bot,
     Plus,
+    Zap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { CreateSequenceDialog } from "@/components/sequences/create-sequence-dialog";
 import { TaskDialog } from "@/components/sequences/task-dialog";
+import { TestNowDialog } from "@/components/sequences/flow/panels/test-now-dialog";
 import { SequenceWizard } from "@/components/sequences/wizard";
 import {
     DropdownMenu,
@@ -261,11 +263,13 @@ function SequenceCard({
     clientId,
     onDelete,
     onToggleActive,
+    onTest,
 }: {
     sequence: SequenceCardData;
     clientId: string;
     onDelete: (id: string) => void;
     onToggleActive: (id: string, active: boolean) => void;
+    onTest: (id: string) => void;
 }) {
     const rate = completionRate(sequence.completed_count, sequence.total_enrolled);
     const urgency = URGENCY_MARKERS[sequence.urgency_tier];
@@ -444,6 +448,16 @@ function SequenceCard({
                     >
                         <button
                             onClick={() => {
+                                onTest(sequence.id);
+                                setMenuOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                        >
+                            <Zap className="h-3.5 w-3.5" />
+                            Test
+                        </button>
+                        <button
+                            onClick={() => {
                                 onToggleActive(sequence.id, !sequence.is_active);
                                 setMenuOpen(false);
                             }}
@@ -481,6 +495,9 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
     const totalCompleted = sequences.reduce((sum, s) => sum + s.completed_count, 0);
 
     const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+    // Which sequence the Test dialog is open for. One dialog at the root, not
+    // one per card.
+    const [testSequenceId, setTestSequenceId] = useState<string | null>(null);
     const [wizardOpen, setWizardOpen] = useState(false);
     const [advancedCreateOpen, setAdvancedCreateOpen] = useState(false);
     const hasOutboundAgent = outboundAgents.length > 0;
@@ -592,6 +609,23 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                         onLaunch={handleTaskLaunch}
                         onTestMode={handleTestMode}
                     />
+                    {/* enrollments={[]} is intentional: the dialog's mode
+                        initializer already falls back to manual entry and hides
+                        the switcher when there's nothing to pick from, so the
+                        list page gets "test on my own phone" with no extra
+                        fetch. The enrollment picker stays on the detail page,
+                        which already loads those rows. */}
+                    {testSequenceId && (
+                        <TestNowDialog
+                            open
+                            onOpenChange={(o) => {
+                                if (!o) setTestSequenceId(null);
+                            }}
+                            sequenceId={testSequenceId}
+                            clientId={clientId}
+                            enrollments={[]}
+                        />
+                    )}
                     {wizardOpen && (
                         <SequenceWizard
                             clientId={clientId}
@@ -692,6 +726,7 @@ export function SequencesListClient({ clientId, sequences, outboundAgents, chann
                                 clientId={clientId}
                                 onDelete={handleDeleteSequence}
                                 onToggleActive={handleToggleActive}
+                                onTest={setTestSequenceId}
                             />
                         ))}
                     </motion.div>

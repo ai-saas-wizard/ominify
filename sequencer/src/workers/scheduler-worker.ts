@@ -62,6 +62,7 @@ import {
 } from '../lib/outbound-generator.js';
 import { getAgentMessaging } from '../lib/agent-messaging.js';
 import { isEmailDispatchable } from '../lib/channel-capabilities.js';
+import { TEST_MODE_DELAY_SECONDS, clampTestDelayMs } from '../lib/test-mode.js';
 import type {
     SequenceEnrollment,
     SequenceStep,
@@ -92,7 +93,8 @@ import {
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
-const TEST_MODE_DELAY_SECONDS = 30; // Compressed delay for test enrollments
+// TEST_MODE_DELAY_SECONDS now lives in lib/test-mode.ts — the JIT path in
+// dynamic-step-generator.ts needs the same policy.
 // Lease window pushed onto next_step_at when claiming a row. Concurrent ticks
 // (or a second scheduler process) will skip rows whose next_step_at is now
 // in the future, preventing duplicate dispatch. If processStep crashes, the
@@ -747,6 +749,33 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
+    // 7d. Empty-SMS-body guard. A JIT step whose generated content had no
+    // usable text normalizes to { body: '' } (see normalizeGeneratedStepContent).
+    // Never ship an empty body to Twilio — it rejects with error 21602 and the
+    // worker fails silently. Log a visible failure and skip-advance; for dynamic
+    // enrollments skip-advance sets an immediate outcome timeout, so the JIT
+    // generator produces a fresh step (which, post-normalization, has a real body).
+    if (dispatchChannel === 'sms' && !(renderedContent as SmsContent).body?.trim()) {
+        console.error(
+            `[SCHEDULER] Step ${step.id} (enrollment ${enrollment.id}) has an empty SMS body — withholding send and skip-advancing`
+        );
+        const { error: emptyLogErr } = await supabase.from('sequence_execution_log').insert({
+            enrollment_id: enrollment.id,
+            step_id: step.id,
+            channel: 'sms',
+            action: 'blocked_empty_body',
+            provider_id: null,
+            provider_response: { reason: 'empty_sms_body', generated_dynamically: !!step.generated_dynamically },
+            call_status: 'skipped',
+            executed_at: new Date().toISOString(),
+        });
+        if (emptyLogErr) {
+            console.error(`[SCHEDULER] Failed to log empty-body block for enrollment ${enrollment.id}:`, emptyLogErr);
+        }
+        await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
+        return;
+    }
+
     // 8. Dispatch to channel queue
     switch (dispatchChannel) {
         case 'sms':
@@ -1303,7 +1332,11 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
                     .from('sequence_enrollments')
                     .update({
                         status: 'awaiting_outcome',
-                        outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                        // Clamped for test enrollments — a 15min park on a
+                        // transient LLM failure makes a test look dead.
+                        outcome_timeout_at: new Date(
+                            Date.now() + clampTestDelayMs(15 * 60 * 1000, enrollment.is_test === true)
+                        ).toISOString(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq('id', enrollment.id);
@@ -1316,7 +1349,8 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
             await activateEnrollmentForNextStep(
                 enrollment.id,
                 result.step.delay_seconds || 0,
-                enrollment.current_step_order // current_step_order stays — scheduler will pick up newStepOrder
+                enrollment.current_step_order, // current_step_order stays — scheduler will pick up newStepOrder
+                enrollment.is_test === true
             );
         } else {
             if (result.end_reason === 'generation_failed') {
@@ -1327,7 +1361,11 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
                     .from('sequence_enrollments')
                     .update({
                         status: 'awaiting_outcome',
-                        outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                        // Clamped for test enrollments — a 15min park on a
+                        // transient LLM failure makes a test look dead.
+                        outcome_timeout_at: new Date(
+                            Date.now() + clampTestDelayMs(15 * 60 * 1000, enrollment.is_test === true)
+                        ).toISOString(),
                         updated_at: new Date().toISOString(),
                     })
                     .eq('id', enrollment.id);

@@ -185,6 +185,79 @@ export async function createAssistant(
     }
 }
 
+// ─── PLACE OUTBOUND CALL ───
+
+export interface CreatePhoneCallPayload {
+    assistantId: string;
+    /**
+     * VAPI requires `phoneNumberId` OR a top-level `phoneNumber`. Sending
+     * `phoneNumberId: null` is rejected as MISSING, so createPhoneCall only
+     * attaches the field when it's non-empty (same rule the sequencer's
+     * vapi-worker follows).
+     */
+    phoneNumberId?: string | null;
+    customer: { number: string; name?: string };
+    assistantOverrides?: { variableValues?: Record<string, string> };
+    metadata?: Record<string, unknown>;
+}
+
+export interface CreatePhoneCallResult {
+    data: { id: string } | null;
+    // Same shape as CreateAssistantResult so formatVapiError() renders it.
+    error?: { status: number; body: string };
+}
+
+/**
+ * Place a real outbound phone call from an existing assistant.
+ *
+ * NOTE: VAPI's /call/phone endpoint does NOT accept serverUrl /
+ * serverUrlSecret at the top level — those live on the assistant's own config
+ * and are set at agent-creation time. Don't add them here.
+ */
+export async function createPhoneCall(
+    payload: CreatePhoneCallPayload,
+    apiKey?: string
+): Promise<CreatePhoneCallResult> {
+    const token = apiKey;
+    if (!token) {
+        return {
+            data: null,
+            error: { status: 0, body: "No VAPI API key available" },
+        };
+    }
+
+    const { phoneNumberId, ...rest } = payload;
+    const body: Record<string, unknown> = {
+        ...rest,
+        ...(phoneNumberId ? { phoneNumberId } : {}),
+    };
+
+    try {
+        const res = await fetch(`${VAPI_BASE_URL}/call/phone`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+            const errBody = await res.text();
+            console.error("Failed to create phone call:", res.status, errBody);
+            return { data: null, error: { status: res.status, body: errBody } };
+        }
+
+        return { data: await res.json() };
+    } catch (error: any) {
+        console.error("Vapi Client Error (createPhoneCall):", error);
+        return {
+            data: null,
+            error: { status: 0, body: error?.message ?? "network error" },
+        };
+    }
+}
+
 // ─── LIST AGENTS ───
 
 export async function listAgents(apiKey?: string): Promise<VapiAgent[]> {

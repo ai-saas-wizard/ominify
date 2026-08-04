@@ -16,11 +16,13 @@ import { handleFailure } from '../lib/self-healer.js';
 import { claimOnce, releaseClaim } from '../lib/idempotency.js';
 import { isContactOptedOut } from '../lib/opt-out.js';
 import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
+import { resolveTwilioAccountSid } from '../lib/twilio-account.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 
 interface TenantTwilioConfig {
-    subaccountSid: string;
+    /** Resolved per account_type — see lib/twilio-account.ts. */
+    accountSid: string;
     authToken: string;
     messagingServiceSid: string | null;
     primaryPhoneNumber: string | null;
@@ -45,8 +47,18 @@ async function getTenantTwilioConfig(tenantId: string): Promise<TenantTwilioConf
 
     const account = data as TenantTwilioAccount;
 
-    if (!account.subaccount_sid || !account.auth_token_encrypted) {
-        console.error(`[SMS] Incomplete Twilio config for tenant ${tenantId}`);
+    // BYOA (type_a_byoa) tenants keep their SID in external_account_sid and
+    // leave subaccount_sid NULL. Reading only subaccount_sid made SMS silently
+    // impossible for them — this returned null and the caller threw before it
+    // could log anything, so nothing appeared in sequence_execution_log.
+    const accountSid = resolveTwilioAccountSid(account);
+
+    if (!accountSid || !account.auth_token_encrypted) {
+        console.error(
+            `[SMS] Incomplete Twilio config for tenant ${tenantId} ` +
+            `(account_type=${account.account_type}, subaccount_sid=${!!account.subaccount_sid}, ` +
+            `external_account_sid=${!!account.external_account_sid}, token=${!!account.auth_token_encrypted})`
+        );
         return null;
     }
 
@@ -65,7 +77,7 @@ async function getTenantTwilioConfig(tenantId: string): Promise<TenantTwilioConf
     }
 
     return {
-        subaccountSid: account.subaccount_sid,
+        accountSid,
         authToken: decrypt(account.auth_token_encrypted),
         messagingServiceSid: account.messaging_service_sid,
         primaryPhoneNumber: phoneData?.phone_number || null,
@@ -119,7 +131,12 @@ async function logExecution(params: {
     });
 
     if (error) {
-        console.error('[SMS] Error logging execution:', error);
+        // Non-throwing after a confirmed send (throwing would fail the BullMQ job
+        // → retry → double-send). Distinct prefix so a recording failure is never
+        // invisible again (this is how the call_status column drift hid for weeks).
+        console.error(
+            `[RECORDING-FAILURE] sequence_execution_log insert failed for enrollment ${params.enrollmentId} (action=${params.action}): ${error.message}${error.code ? ` [${error.code}]` : ''}`
+        );
     }
 }
 
@@ -311,7 +328,9 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
     }
 
     // Create Twilio client with subaccount credentials
-    const client = Twilio(config.subaccountSid, config.authToken);
+    // Standard main-account constructor — correct for both a Type B subaccount
+    // SID and a BYOA tenant's own account SID, each paired with its own token.
+    const client = Twilio(config.accountSid, config.authToken);
 
     // Phase 4: Phone type detection — check if the number is a landline on first SMS
     await detectAndCachePhoneType(client, contactPhone, enrollmentId, tenantId);

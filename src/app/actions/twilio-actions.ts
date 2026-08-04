@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { encrypt, decrypt } from "@/lib/encryption";
+import { resolveTwilioAccountSid } from "@/lib/twilio-account";
 import {
     createSubaccount,
     purchasePhoneNumber,
@@ -52,14 +53,8 @@ function getAccountCredentials(account: any): { sid: string; authToken: string }
         }
     }
 
-    if (account.account_type === "type_a_byoa") {
-        return {
-            sid: account.external_account_sid,
-            authToken,
-        };
-    }
     return {
-        sid: account.subaccount_sid,
+        sid: resolveTwilioAccountSid(account) ?? "",
         authToken,
     };
 }

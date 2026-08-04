@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useId, useMemo } from "react";
+import { useState, useCallback, useId, useMemo, useEffect } from "react";
 import {
     motion,
     AnimatePresence,
@@ -18,12 +18,17 @@ import {
     Trash2,
     UserCheck,
     Search,
+    Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     enrollTestPhones,
     convertEnrollmentsToTest,
+    getSequenceTestPreflight,
 } from "@/app/actions/sequence-actions";
+import type { TestPreflight } from "@/lib/sequences/test-run-types";
+import { TestPreflightPanel } from "./test-preflight";
+import { TestRunPanel } from "./test-run-panel";
 
 interface EnrollmentRow {
     id: string;
@@ -49,6 +54,8 @@ interface TestRow {
     id: string;
     phone: string;
     name: string;
+    /** Optional — without it, email steps are silently skipped at dispatch. */
+    email: string;
 }
 
 type Mode = "existing" | "manual";
@@ -84,19 +91,23 @@ export function TestNowDialog({
     const [search, setSearch] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [rows, setRows] = useState<TestRow[]>([
-        { id: `${reactId}-0`, phone: "", name: "" },
+        { id: `${reactId}-0`, phone: "", name: "", email: "" },
     ]);
     const [submitting, setSubmitting] = useState(false);
     const [result, setResult] = useState<{
         fired: number;
         errors: string[];
+        /** Enrollments to poll in the post-flight panel. */
+        enrollmentIds: string[];
     } | null>(null);
+    const [preflight, setPreflight] = useState<TestPreflight | null>(null);
+    const [preflightLoading, setPreflightLoading] = useState(false);
 
     const reset = useCallback(() => {
         setMode(eligibleEnrollments.length > 0 ? "existing" : "manual");
         setSearch("");
         setSelectedIds(new Set());
-        setRows([{ id: `${reactId}-0`, phone: "", name: "" }]);
+        setRows([{ id: `${reactId}-0`, phone: "", name: "", email: "" }]);
         setResult(null);
         setSubmitting(false);
     }, [reactId, eligibleEnrollments.length]);
@@ -107,6 +118,29 @@ export function TestNowDialog({
         setTimeout(reset, 200);
     }, [submitting, onOpenChange, reset]);
 
+    // Pre-flight: what will actually happen if they fire. Fetched on open so a
+    // dead channel (no Twilio, no minutes, no verified email) is visible BEFORE
+    // they wait 90s for nothing to arrive.
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        setPreflightLoading(true);
+        getSequenceTestPreflight(sequenceId, clientId)
+            .then((res) => {
+                if (cancelled) return;
+                setPreflight(res.success && res.data ? res.data : null);
+            })
+            .catch(() => {
+                if (!cancelled) setPreflight(null);
+            })
+            .finally(() => {
+                if (!cancelled) setPreflightLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, sequenceId, clientId]);
+
     // ── Manual mode helpers ────────────────────────────────────────────────
     const addRow = useCallback(() => {
         setRows((prev) => [
@@ -115,6 +149,7 @@ export function TestNowDialog({
                 id: `${reactId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 phone: "",
                 name: "",
+                email: "",
             },
         ]);
     }, [reactId]);
@@ -167,14 +202,20 @@ export function TestNowDialog({
                     validRows.map((r) => ({
                         phone: r.phone.trim(),
                         name: r.name.trim() || undefined,
+                        email: r.email.trim() || undefined,
                     }))
                 );
                 if (!res.success) {
-                    setResult({ fired: 0, errors: [res.error || "Failed to enroll"] });
+                    setResult({
+                        fired: 0,
+                        errors: [res.error || "Failed to enroll"],
+                        enrollmentIds: [],
+                    });
                 } else {
                     setResult({
                         fired: res.data!.enrolled,
                         errors: res.data!.errors,
+                        enrollmentIds: res.data!.enrollments.map((e) => e.enrollmentId),
                     });
                 }
             } else {
@@ -183,13 +224,18 @@ export function TestNowDialog({
                     clientId
                 );
                 if (!res.success) {
-                    setResult({ fired: 0, errors: [res.error || "Failed to convert"] });
+                    setResult({
+                        fired: 0,
+                        errors: [res.error || "Failed to convert"],
+                        enrollmentIds: [],
+                    });
                 } else {
                     setResult({
                         fired: res.data!.converted,
                         errors: res.data!.skipped.map(
                             (s) => `enrollment ${s.id.slice(0, 8)}…: ${s.reason}`
                         ),
+                        enrollmentIds: res.data!.enrollmentIds,
                     });
                 }
             }
@@ -216,7 +262,7 @@ export function TestNowDialog({
                         exit={{ opacity: 0, scale: 0.94, y: 8 }}
                         transition={SPRING}
                         onClick={(e) => e.stopPropagation()}
-                        className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
+                        className="flex w-full max-w-lg flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
                     >
                         {/* Header */}
                         <motion.div
@@ -250,6 +296,7 @@ export function TestNowDialog({
                                     key="result"
                                     result={result}
                                     mode={mode}
+                                    clientId={clientId}
                                     onReset={reset}
                                     onClose={handleClose}
                                 />
@@ -279,6 +326,15 @@ export function TestNowDialog({
                                             ? "Pick contacts already enrolled in this sequence — they'll flip to test mode and dispatch in ~30s, bypassing pacing and quiet-hours."
                                             : "Drop one or more phone numbers — they enroll instantly, bypass pacing and quiet-hours, and the first call dispatches in ~30 seconds."}
                                     </p>
+
+                                    <TestPreflightPanel
+                                        preflight={preflight}
+                                        loading={preflightLoading}
+                                        missingEmailWarning={
+                                            mode === "manual" &&
+                                            !rows.some((r) => r.email.trim())
+                                        }
+                                    />
 
                                     <AnimatePresence mode="popLayout" initial={false}>
                                         {mode === "existing" ? (
@@ -535,40 +591,57 @@ function ManualMode({
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.94, x: 20 }}
                                 transition={SPRING_FAST}
-                                className="flex items-center gap-2"
+                                className="space-y-1.5"
                             >
-                                <div className="flex-1 relative">
-                                    <Phone className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                <div className="flex items-center gap-2">
+                                    <div className="flex-1 relative">
+                                        <Phone className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                        <input
+                                            value={row.phone}
+                                            onChange={(e) =>
+                                                onUpdate(row.id, { phone: e.target.value })
+                                            }
+                                            placeholder="+1 555 123 4567"
+                                            disabled={disabled}
+                                            autoFocus={idx === 0}
+                                            className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
+                                        />
+                                    </div>
                                     <input
-                                        value={row.phone}
+                                        value={row.name}
                                         onChange={(e) =>
-                                            onUpdate(row.id, { phone: e.target.value })
+                                            onUpdate(row.id, { name: e.target.value })
                                         }
-                                        placeholder="+1 555 123 4567"
+                                        placeholder="Name (optional)"
                                         disabled={disabled}
-                                        autoFocus={idx === 0}
+                                        className="w-32 px-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
+                                    />
+                                    <motion.button
+                                        whileHover={{ scale: rows.length === 1 ? 1 : 1.08 }}
+                                        whileTap={{ scale: 0.92 }}
+                                        onClick={() => onRemove(row.id)}
+                                        disabled={disabled || rows.length === 1}
+                                        aria-label="Remove row"
+                                        className="p-1.5 text-gray-300 hover:text-red-500 disabled:hover:text-gray-200 disabled:opacity-40 transition-colors"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </motion.button>
+                                </div>
+                                {/* Email steps are skipped at dispatch when the
+                                    contact has no email — and nothing is logged. */}
+                                <div className="relative pr-8">
+                                    <Mail className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                                    <input
+                                        type="email"
+                                        value={row.email}
+                                        onChange={(e) =>
+                                            onUpdate(row.id, { email: e.target.value })
+                                        }
+                                        placeholder="Email (optional — needed for email steps)"
+                                        disabled={disabled}
                                         className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                                     />
                                 </div>
-                                <input
-                                    value={row.name}
-                                    onChange={(e) =>
-                                        onUpdate(row.id, { name: e.target.value })
-                                    }
-                                    placeholder="Name (optional)"
-                                    disabled={disabled}
-                                    className="w-32 px-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
-                                />
-                                <motion.button
-                                    whileHover={{ scale: rows.length === 1 ? 1 : 1.08 }}
-                                    whileTap={{ scale: 0.92 }}
-                                    onClick={() => onRemove(row.id)}
-                                    disabled={disabled || rows.length === 1}
-                                    aria-label="Remove row"
-                                    className="p-1.5 text-gray-300 hover:text-red-500 disabled:hover:text-gray-200 disabled:opacity-40 transition-colors"
-                                >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                </motion.button>
                             </motion.div>
                         ))}
                     </AnimatePresence>
@@ -596,11 +669,13 @@ function ManualMode({
 function ResultView({
     result,
     mode,
+    clientId,
     onReset,
     onClose,
 }: {
-    result: { fired: number; errors: string[] };
+    result: { fired: number; errors: string[]; enrollmentIds: string[] };
     mode: Mode;
+    clientId: string;
     onReset: () => void;
     onClose: () => void;
 }) {
@@ -670,6 +745,16 @@ function ResultView({
                         ))}
                     </ul>
                 </motion.div>
+            )}
+
+            {/* What the sequencer ACTUALLY did — polls the execution log so a
+                silent failure (no Twilio config, no minutes, no VAPI slot) is
+                visible instead of the dialog just saying "enrolled". */}
+            {result.enrollmentIds.length > 0 && (
+                <TestRunPanel
+                    enrollmentIds={result.enrollmentIds}
+                    clientId={clientId}
+                />
             )}
 
             <div className="flex gap-2 pt-1">

@@ -2,6 +2,7 @@ import { getAgent } from "@/lib/vapi";
 import { AgentEditor } from "@/components/agents/agent-editor";
 import { PhoneNumberAssignment } from "@/components/agents/phone-number-assignment";
 import { AgentDetailHeader } from "@/components/agents/agent-detail-header";
+import { TestCallCard } from "@/components/agents/test-call-card";
 import { ArrowLeft, Calendar, FileSpreadsheet, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -149,29 +150,12 @@ export default async function AgentEditorPage(props: {
                         {/* Sidebar */}
                         <div className="space-y-5">
                             {/* Test Agent Card */}
-                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="p-5 space-y-4">
-                                    <div>
-                                        <h3 className="font-semibold text-gray-900">
-                                            Test Agent
-                                        </h3>
-                                        <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                                            Talk to your agent from the browser to test
-                                            latency and response quality.
-                                        </p>
-                                    </div>
-                                    <button className="w-full py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-emerald-600 to-emerald-600 text-white hover:from-emerald-700 hover:to-emerald-700 shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/25 transition-all">
-                                        Start Test Call
-                                    </button>
-                                    <Link
-                                        href={`/client/${params.clientId}/logs?assistantId=${agent.id}`}
-                                        className="flex items-center justify-center gap-1.5 w-full py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                                    >
-                                        View Call Logs
-                                        <ExternalLink className="w-3.5 h-3.5" />
-                                    </Link>
-                                </div>
-                            </div>
+                            <TestCallCard
+                                clientId={params.clientId}
+                                vapiAssistantId={agent.id}
+                                isSynced={!!agentRecord}
+                                callerId={assignedNumber}
+                            />
 
                             {/* Deployment Card */}
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

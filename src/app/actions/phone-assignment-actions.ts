@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase";
 import { importPhoneNumber, updatePhoneNumber } from "@/lib/vapi";
 import { decrypt } from "@/lib/encryption";
+import { resolveTwilioAccountSid } from "@/lib/twilio-account";
 import { getClientVapiKey } from "@/lib/client-secrets";
 import { revalidatePath } from "next/cache";
 
@@ -40,10 +41,16 @@ export async function importPhoneNumberToVapi(clientId: string, phoneNumberDbId:
             return { success: false, error: "Twilio account not found" };
         }
 
-        // Resolve correct SID based on account type
-        const resolvedSid = twilioAccount.account_type === "type_a_byoa"
-            ? twilioAccount.external_account_sid
-            : twilioAccount.subaccount_sid;
+        // Resolve correct SID based on account type — see lib/twilio-account.ts
+        const resolvedSid = resolveTwilioAccountSid(twilioAccount);
+        if (!resolvedSid) {
+            // Previously this was an untyped ternary, so a row with neither SID
+            // populated would pass `null` straight through to VAPI's import.
+            return {
+                success: false,
+                error: "No Twilio account SID on file for this client.",
+            };
+        }
 
         // Resolve VAPI key (decrypted)
         const vapiKey = (await getClientVapiKey(clientId)) || undefined;

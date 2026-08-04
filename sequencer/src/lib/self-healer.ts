@@ -40,6 +40,7 @@ import { isTCPACompliant, getNextBusinessHoursStart } from './compliance.js';
 import { isContactOptedOut } from './opt-out.js';
 import { claimOnce } from './idempotency.js';
 import { createNotification } from './emotional-intelligence.js';
+import { clampTestDelaySeconds } from './test-mode.js';
 import type {
     FailureType,
     HealingAction,
@@ -433,7 +434,12 @@ export async function executeHealingAction(
             // Reschedule the current step with an extended delay. Combine the
             // next_step_at bump and the step decrement into a single UPDATE so
             // the scheduler can't observe a half-applied state in between.
-            const delaySeconds = action.details.delay_seconds || 300;
+            // Clamped for test enrollments — healing a test (landline detected,
+            // sms_undelivered, no_answer) would otherwise park it 5min-2h.
+            const delaySeconds = clampTestDelaySeconds(
+                action.details.delay_seconds || 300,
+                (enrollment as any).is_test === true
+            );
             const nextTime = new Date(Date.now() + delaySeconds * 1000);
 
             // Guarded CAS: only roll back if current_step_order is still the

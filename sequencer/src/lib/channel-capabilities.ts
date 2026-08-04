@@ -17,6 +17,7 @@
 
 import { supabase } from './db.js';
 import type { ChannelType } from './types.js';
+import { resolveTwilioAccountSid } from './twilio-account.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -35,13 +36,14 @@ const cache = new Map<string, CacheEntry>();
 async function checkSmsCapable(clientId: string): Promise<boolean> {
     const { data: twilioAccount, error } = await supabase
         .from('tenant_twilio_accounts')
-        .select('subaccount_sid, auth_token_encrypted, messaging_service_sid')
+        .select('account_type, subaccount_sid, external_account_sid, auth_token_encrypted, messaging_service_sid')
         .eq('client_id', clientId)
         .eq('status', 'active')
         .maybeSingle();
     if (error) throw new Error(`tenant_twilio_accounts query failed: ${error.message}`);
 
-    if (!twilioAccount?.subaccount_sid || !twilioAccount?.auth_token_encrypted) return false;
+    // BYOA tenants keep their SID in external_account_sid — see lib/twilio-account.ts.
+    if (!resolveTwilioAccountSid(twilioAccount) || !twilioAccount?.auth_token_encrypted) return false;
     if (twilioAccount.messaging_service_sid) return true;
 
     const { data: phoneNumbers, error: phoneError } = await supabase

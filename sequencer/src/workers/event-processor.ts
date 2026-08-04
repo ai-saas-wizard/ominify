@@ -56,6 +56,7 @@ import { handleInboundSMS } from '../lib/sms-responder.js';
 import { handleInboundEmail } from '../lib/email-responder.js';
 import { autoAdvancePipelineStage } from '../lib/pipeline-advance.js';
 import { smsQueue, emailQueue } from '../lib/redis.js';
+import { clampTestDelayMs } from '../lib/test-mode.js';
 import type {
     EventJobPayload,
     EnrollmentStatus,
@@ -272,7 +273,8 @@ async function maybeTriggerDynamicGeneration(
             await activateEnrollmentForNextStep(
                 enrollmentId,
                 result.step.delay_seconds || 0,
-                enrollment.current_step_order
+                enrollment.current_step_order,
+                (enrollment as any).is_test === true
             );
         } else if (result.end_reason === 'generation_failed') {
             // Transient LLM failure (empty/invalid response) — retry via the
@@ -282,7 +284,11 @@ async function maybeTriggerDynamicGeneration(
                 .from('sequence_enrollments')
                 .update({
                     status: 'awaiting_outcome',
-                    outcome_timeout_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                    // Clamped for test enrollments — a 15min park on a
+                    // transient LLM failure makes a test look dead.
+                    outcome_timeout_at: new Date(
+                        Date.now() + clampTestDelayMs(15 * 60 * 1000, (enrollment as any).is_test === true)
+                    ).toISOString(),
                     updated_at: new Date().toISOString(),
                 })
                 .eq('id', enrollmentId);
@@ -1035,7 +1041,12 @@ async function maybeTriggerChatbotReply(
                 // updates matches. The next_step_at hold only pushes FORWARD
                 // (.lt guard): a step already scheduled beyond the hold window
                 // must not be pulled earlier.
-                const holdUntil = new Date(Date.now() + CHATBOT_CONVERSATION_HOLD_MS).toISOString();
+                // Clamped for test enrollments: a 24h hold the moment the test
+                // lead replies would make the test look dead. The .lt()
+                // forward-only guard below still behaves with a 30s hold.
+                const holdUntil = new Date(
+                    Date.now() + clampTestDelayMs(CHATBOT_CONVERSATION_HOLD_MS, (enrollment as any).is_test === true)
+                ).toISOString();
                 const { error: timeoutErr } = await supabase
                     .from('sequence_enrollments')
                     .update({

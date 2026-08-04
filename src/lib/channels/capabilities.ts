@@ -1,5 +1,6 @@
 import "server-only";
 import { supabase } from "@/lib/supabase";
+import { resolveTwilioAccountSid } from "@/lib/twilio-account";
 
 /**
  * Tenant channel capability — the single source of truth for which outreach
@@ -31,13 +32,25 @@ async function checkSmsCapability(
 ): Promise<{ ready: boolean; reason?: string }> {
     const { data: twilioAccount } = await supabase
         .from("tenant_twilio_accounts")
-        .select("subaccount_sid, auth_token_encrypted, messaging_service_sid")
+        .select(
+            "account_type, subaccount_sid, external_account_sid, auth_token_encrypted, messaging_service_sid"
+        )
         .eq("client_id", clientId)
         .eq("status", "active")
         .maybeSingle();
 
-    if (!twilioAccount || !twilioAccount.subaccount_sid || !twilioAccount.auth_token_encrypted) {
-        return { ready: false, reason: "No active Twilio subaccount provisioned" };
+    // BYOA tenants keep their SID in external_account_sid — see lib/twilio-account.ts.
+    // Split the two failures: "no account SID" and "no token" are different fixes,
+    // and the old single message ("No active Twilio subaccount provisioned") was
+    // actively wrong for BYOA.
+    if (!twilioAccount) {
+        return { ready: false, reason: "No active Twilio account connected" };
+    }
+    if (!resolveTwilioAccountSid(twilioAccount)) {
+        return { ready: false, reason: "No Twilio account SID on file" };
+    }
+    if (!twilioAccount.auth_token_encrypted) {
+        return { ready: false, reason: "No Twilio auth token on file" };
     }
 
     // The sms-worker sends via messagingServiceSid OR a sequencer phone number.

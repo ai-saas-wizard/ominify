@@ -2,7 +2,9 @@
 
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
-import { currentUser } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { canAccessClient } from "@/lib/auth";
+import { canPlaceCall } from "@/lib/access";
 import { autoAdvanceContactStage } from "@/app/actions/pipeline-actions";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
@@ -31,6 +33,31 @@ function toE164(raw: string, defaultCountry: "US" = "US"): string | null {
     if (!raw) return null;
     const parsed = parsePhoneNumberFromString(raw.trim(), defaultCountry);
     return parsed && parsed.isValid() ? parsed.number : null;
+}
+
+// Trim + lowercase an email, or null if it doesn't look like one. There's no
+// shared email validator in the repo; test enrollment only needs enough of a
+// check to keep obvious typos out of `contacts.email`.
+function normalizeEmail(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const trimmed = raw.trim().toLowerCase();
+    if (!trimmed) return null;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+}
+
+// Shared guard for the test-enrollment actions. These take clientId straight
+// from the browser and the Supabase client is service-role (RLS bypassed), so
+// without this any signed-in user could enroll into another tenant's sequence.
+async function assertClientAccess(
+    clientId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+    const { userId } = await auth();
+    if (!userId) return { ok: false, error: "Not authenticated" };
+    const user = await currentUser();
+    const lookupKey = user?.emailAddresses[0]?.emailAddress || userId;
+    return (await canAccessClient(lookupKey, clientId))
+        ? { ok: true }
+        : { ok: false, error: "Forbidden" };
 }
 
 // ─── List all sequences for a client ───────────────────────────────────────────
@@ -1697,7 +1724,19 @@ export async function enrollListInSequence(
 interface TestEnrollInput {
     phone: string;
     name?: string;
+    /**
+     * Optional. Without it, email steps are silently skipped at dispatch —
+     * the scheduler advances past them without even writing a log row.
+     */
+    email?: string;
     customVariables?: Record<string, string>;
+}
+
+export interface TestEnrollmentRef {
+    enrollmentId: string;
+    contactId: string;
+    phone: string;
+    name?: string;
 }
 
 export async function enrollTestPhones(
@@ -1707,15 +1746,23 @@ export async function enrollTestPhones(
 ): Promise<{
     success: boolean;
     error?: string;
-    data?: { enrolled: number; errors: string[] };
+    data?: {
+        enrolled: number;
+        errors: string[];
+        enrollments: TestEnrollmentRef[];
+    };
 }> {
     try {
+        const access = await assertClientAccess(clientId);
+        if (!access.ok) return { success: false, error: access.error };
+
         if (!inputs || inputs.length === 0) {
             return { success: false, error: "No phones provided" };
         }
 
         let enrolled = 0;
         const errors: string[] = [];
+        const enrollments: TestEnrollmentRef[] = [];
         const now = new Date().toISOString();
 
         for (let i = 0; i < inputs.length; i++) {
@@ -1728,16 +1775,40 @@ export async function enrollTestPhones(
                     continue;
                 }
 
+                // A bad email shouldn't drop the row — warn and continue
+                // phone-only, so SMS/voice steps still get tested.
+                let email: string | null = null;
+                if (input.email?.trim()) {
+                    email = normalizeEmail(input.email);
+                    if (!email) {
+                        errors.push(`${label}: invalid email "${input.email}" — enrolled without it`);
+                    }
+                }
+
                 let contactId: string;
                 const { data: existing } = await supabase
                     .from("contacts")
-                    .select("id")
+                    .select("id, email")
                     .eq("client_id", clientId)
                     .eq("phone", phone)
                     .maybeSingle();
 
                 if (existing?.id) {
                     contactId = existing.id;
+                    // Merge policy matches upsertContactsFromRows: a new
+                    // non-empty value wins, but we never null out an existing
+                    // one just because this test row omitted it.
+                    if (email && email !== existing.email) {
+                        const { error: emailErr } = await supabase
+                            .from("contacts")
+                            .update({ email })
+                            .eq("id", contactId);
+                        if (emailErr) {
+                            errors.push(
+                                `${label}: couldn't update email — ${emailErr.message}`
+                            );
+                        }
+                    }
                 } else {
                     const { data: created, error: contactErr } = await supabase
                         .from("contacts")
@@ -1745,6 +1816,7 @@ export async function enrollTestPhones(
                             client_id: clientId,
                             phone,
                             name: input.name || null,
+                            email,
                             custom_fields: { is_test_contact: true },
                             total_calls: 0,
                         })
@@ -1764,6 +1836,7 @@ export async function enrollTestPhones(
                     ...(input.customVariables || {}),
                     name: safeName,
                     phone,
+                    ...(email ? { email, contact_email: email } : {}),
                 };
                 if (input.name?.trim()) {
                     const [first, ...rest] = input.name.trim().split(/\s+/);
@@ -1818,10 +1891,16 @@ export async function enrollTestPhones(
                         continue;
                     }
                     enrolled++;
+                    enrollments.push({
+                        enrollmentId: existingEnroll.id,
+                        contactId,
+                        phone,
+                        name: input.name?.trim() || undefined,
+                    });
                     continue;
                 }
 
-                const { error: enrollErr } = await supabase
+                const { data: createdEnroll, error: enrollErr } = await supabase
                     .from("sequence_enrollments")
                     .insert({
                         sequence_id: sequenceId,
@@ -1845,20 +1924,28 @@ export async function enrollTestPhones(
                         contact_answered_call: false,
                         appointment_booked: false,
                         channel_overrides: {},
-                    });
+                    })
+                    .select("id")
+                    .single();
 
-                if (enrollErr) {
-                    errors.push(`${label}: enroll failed — ${enrollErr.message}`);
+                if (enrollErr || !createdEnroll) {
+                    errors.push(`${label}: enroll failed — ${enrollErr?.message || "unknown"}`);
                     continue;
                 }
                 enrolled++;
+                enrollments.push({
+                    enrollmentId: createdEnroll.id,
+                    contactId,
+                    phone,
+                    name: input.name?.trim() || undefined,
+                });
             } catch (err: any) {
                 errors.push(`${label}: ${err?.message || "unknown error"}`);
             }
         }
 
         revalidatePath(`/client/${clientId}/sequences/${sequenceId}`);
-        return { success: true, data: { enrolled, errors } };
+        return { success: true, data: { enrolled, errors, enrollments } };
     } catch (error: any) {
         console.error("enrollTestPhones error:", error);
         return { success: false, error: error?.message || "Internal error" };
@@ -1883,9 +1970,16 @@ export async function convertEnrollmentsToTest(
 ): Promise<{
     success: boolean;
     error?: string;
-    data?: { converted: number; skipped: { id: string; reason: string }[] };
+    data?: {
+        converted: number;
+        skipped: { id: string; reason: string }[];
+        enrollmentIds: string[];
+    };
 }> {
     try {
+        const access = await assertClientAccess(clientId);
+        if (!access.ok) return { success: false, error: access.error };
+
         if (!enrollmentIds || enrollmentIds.length === 0) {
             return { success: false, error: "No enrollments selected" };
         }
@@ -1936,7 +2030,7 @@ export async function convertEnrollmentsToTest(
         }
 
         if (continuable.length === 0 && restartable.length === 0) {
-            return { success: true, data: { converted: 0, skipped } };
+            return { success: true, data: { converted: 0, skipped, enrollmentIds: [] } };
         }
 
         const now = new Date().toISOString();
@@ -1978,6 +2072,7 @@ export async function convertEnrollmentsToTest(
             data: {
                 converted: continuable.length + restartable.length,
                 skipped,
+                enrollmentIds: [...continuable, ...restartable],
             },
         };
     } catch (error: any) {
@@ -2229,6 +2324,406 @@ export async function createSequenceFromWizard(
         return { success: true, sequenceId: seq.id, replacedSequenceName };
     } catch (error: any) {
         console.error("createSequenceFromWizard error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Test-run pre-flight + post-flight
+// ═══════════════════════════════════════════════════════════════════
+//
+// A test enrollment fires within ~5s but can silently do nothing: no Twilio
+// account, no minutes, no VAPI slot, no email on the contact. These two
+// actions make that visible instead of leaving the operator staring at a
+// dialog that says "1 contact enrolled" while nothing arrives.
+
+export type {
+    TestChannel,
+    PreflightIssue,
+    TestPreflight,
+    TestEventSeverity,
+    TestRunEvent,
+    TestRunEnrollment,
+    TestRunStatus,
+} from "@/lib/sequences/test-run-types";
+
+import type {
+    TestChannel,
+    PreflightIssue,
+    TestPreflight,
+    TestEventSeverity,
+    TestRunEvent,
+    TestRunStatus,
+} from "@/lib/sequences/test-run-types";
+
+const TEST_CHANNELS: TestChannel[] = ["sms", "voice", "email"];
+
+function isTestChannel(value: unknown): value is TestChannel {
+    return value === "sms" || value === "voice" || value === "email";
+}
+
+/**
+ * What will actually happen if the operator fires a test right now.
+ */
+export async function getSequenceTestPreflight(
+    sequenceId: string,
+    clientId: string
+): Promise<{ success: boolean; error?: string; data?: TestPreflight }> {
+    try {
+        const access = await assertClientAccess(clientId);
+        if (!access.ok) return { success: false, error: access.error };
+
+        const { data: sequence, error: seqErr } = await supabase
+            .from("sequences")
+            .select("name, is_active, generation_mode, agent_id, sequence_strategy")
+            .eq("id", sequenceId)
+            .eq("client_id", clientId)
+            .maybeSingle();
+
+        if (seqErr) return { success: false, error: seqErr.message };
+        if (!sequence) return { success: false, error: "Sequence not found" };
+
+        const generationMode =
+            sequence.generation_mode === "dynamic" ? "dynamic" : "static";
+
+        // Which channels this sequence will try to use.
+        let channels: TestChannel[] = [];
+        let stepCount = 0;
+
+        if (generationMode === "dynamic") {
+            // NOTE: available_channels is a snapshot taken when the sequence
+            // was created. It can be stale — the AI may be barred from a
+            // channel that has since been provisioned (or vice versa). The
+            // warnings below surface that drift rather than hiding it.
+            const raw = (sequence.sequence_strategy as any)?.available_channels;
+            channels = Array.isArray(raw) ? raw.filter(isTestChannel) : [];
+            const { count } = await supabase
+                .from("sequence_steps")
+                .select("id", { count: "exact", head: true })
+                .eq("sequence_id", sequenceId);
+            stepCount = count ?? 0;
+        } else {
+            // enrollment_id IS NULL filters out per-enrollment JIT rows.
+            const { data: steps } = await supabase
+                .from("sequence_steps")
+                .select("channel")
+                .eq("sequence_id", sequenceId)
+                .is("enrollment_id", null);
+            const rows = steps || [];
+            stepCount = rows.length;
+            channels = TEST_CHANNELS.filter((ch) =>
+                rows.some((s) => s.channel === ch)
+            );
+        }
+
+        const readiness = await getChannelCapabilities(clientId, sequence.agent_id);
+
+        const blockers: PreflightIssue[] = [];
+        const warnings: PreflightIssue[] = [];
+
+        if (stepCount === 0) {
+            blockers.push({
+                kind: "sequence",
+                title: "No steps",
+                detail: "This sequence has no steps, so a test would do nothing.",
+            });
+        }
+
+        // Voice needs minutes on top of provisioning.
+        let voiceBlockedByBilling = false;
+        if (channels.includes("voice")) {
+            const callAccess = await canPlaceCall(clientId);
+            if (!callAccess.allowed) {
+                voiceBlockedByBilling = true;
+                blockers.push({
+                    kind: "billing",
+                    title:
+                        callAccess.reason === "no_minutes"
+                            ? "No voice minutes"
+                            : "Calling paused",
+                    detail:
+                        callAccess.reason === "no_minutes"
+                            ? "You have 0 voice minutes left, so calls in this sequence won't be placed."
+                            : "This client's subscription isn't active, so calls won't be placed.",
+                    fixHref: `/client/${clientId}/billing`,
+                    fixLabel:
+                        callAccess.reason === "no_minutes" ? "Add minutes" : "View billing",
+                });
+            }
+        }
+
+        // Per-channel readiness, with two diagnoses the generic reasons can't express.
+        for (const ch of channels) {
+            const state = readiness[ch];
+            if (state.ready) continue;
+
+            let detail = state.reason || `${ch} is not configured.`;
+            let fixHref: string | undefined = `/client/${clientId}/phone-numbers`;
+            let fixLabel: string | undefined = "Configure";
+
+            if (ch === "sms") {
+                const { data: twilio } = await supabase
+                    .from("tenant_twilio_accounts")
+                    .select(
+                        "account_type, subaccount_sid, external_account_sid, messaging_service_sid"
+                    )
+                    .eq("client_id", clientId)
+                    .eq("status", "active")
+                    .maybeSingle();
+
+                if (
+                    twilio?.account_type === "type_a_byoa" &&
+                    twilio.external_account_sid &&
+                    !twilio.subaccount_sid
+                ) {
+                    detail =
+                        "Your Twilio account is connected as BYOA. If SMS still doesn't send, the sequencer may not have picked up the BYOA fix yet.";
+                } else if (!twilio?.messaging_service_sid) {
+                    // The sequencer needs a number whose purpose is 'sequencer'.
+                    // Assigning a tenant's only number to an agent flips it to
+                    // 'dedicated' and silently kills SMS.
+                    const { data: anyActive } = await supabase
+                        .from("tenant_phone_numbers")
+                        .select("id, purpose")
+                        .eq("client_id", clientId)
+                        .eq("status", "active");
+                    const active = anyActive || [];
+                    if (
+                        active.length > 0 &&
+                        !active.some((p) => p.purpose === "sequencer")
+                    ) {
+                        detail =
+                            "Your phone numbers are all assigned to agents, so the sequencer has no number to text from.";
+                    }
+                }
+            } else if (ch === "email") {
+                fixHref = `/client/${clientId}/settings/integrations`;
+                fixLabel = "Set up email";
+            } else if (ch === "voice") {
+                if (voiceBlockedByBilling) continue; // already reported above
+                fixHref = `/client/${clientId}/agents`;
+                fixLabel = "Check agent";
+            }
+
+            const issue: PreflightIssue = {
+                kind: ch,
+                title: `${ch === "sms" ? "SMS" : ch === "voice" ? "Voice" : "Email"} not ready`,
+                detail,
+                fixHref,
+                fixLabel,
+            };
+
+            // If EVERY channel is dead nothing can fire — that's a blocker.
+            // Otherwise the test still exercises the working channels.
+            const allDead = channels.every((c) => !readiness[c].ready);
+            (allDead ? blockers : warnings).push(issue);
+        }
+
+        if (!sequence.is_active) {
+            // Test enrollments still fire — the scheduler gates on enrollment
+            // status, not sequences.is_active — so this is informational.
+            warnings.push({
+                kind: "sequence",
+                title: "Sequence is inactive",
+                detail:
+                    "Test enrollments still run, but no real leads will enter this sequence.",
+            });
+        }
+
+        return {
+            success: true,
+            data: {
+                sequenceName: sequence.name,
+                isActive: !!sequence.is_active,
+                generationMode,
+                stepCount,
+                channels,
+                readiness,
+                blockers,
+                warnings,
+            },
+        };
+    } catch (error: any) {
+        console.error("getSequenceTestPreflight error:", error);
+        return { success: false, error: error?.message || "Internal error" };
+    }
+}
+
+const TERMINAL_STATUSES = new Set([
+    "completed",
+    "failed",
+    "replied",
+    "booked",
+    "converted",
+    "manual_stop",
+    "unenrolled",
+]);
+
+/** Map an execution-log row onto something an operator can act on. */
+function explainEvent(
+    action: string,
+    channel: TestChannel | null,
+    providerId: string | null,
+    providerResponse: any,
+    clientId: string
+): { severity: TestEventSeverity; explanation: string; fixHref?: string; fixLabel?: string } {
+    const reason =
+        typeof providerResponse?.reason === "string" ? providerResponse.reason : null;
+
+    switch (action) {
+        case "sent":
+            if (channel === "sms") {
+                return {
+                    severity: "ok",
+                    explanation: providerId
+                        ? `SMS sent — Twilio SID ${providerId}`
+                        : "SMS sent",
+                };
+            }
+            return { severity: "ok", explanation: "Email sent" };
+        case "sending":
+            return { severity: "pending", explanation: "Email queued for delivery" };
+        case "call_initiated":
+            return {
+                severity: "ok",
+                explanation: providerId
+                    ? `Call placed — VAPI call ${providerId}`
+                    : "Call placed",
+            };
+        case "failed":
+            return {
+                severity: "error",
+                explanation: reason ? `Send failed: ${reason}` : "Send failed",
+            };
+        case "skipped_no_access":
+            return {
+                severity: "error",
+                explanation:
+                    reason === "no_minutes"
+                        ? "Call blocked — you have 0 voice minutes left."
+                        : `Call blocked: ${reason || "no access"}`,
+                fixHref: `/client/${clientId}/billing`,
+                fixLabel: "Add minutes",
+            };
+        case "skipped_capacity":
+            return {
+                severity: "warn",
+                explanation:
+                    "No free VAPI call slot after 3 retries — the call was dropped. Try again in a minute.",
+            };
+        case "skipped_opt_out":
+            return {
+                severity: "warn",
+                explanation: "Contact is opted out, so nothing was sent.",
+            };
+        case "skipped":
+            return {
+                severity: "warn",
+                explanation: reason || "Step skipped",
+            };
+        case "blocked_placeholder":
+            return {
+                severity: "error",
+                explanation:
+                    "Step content still had unrendered {{variables}}, so nothing was sent.",
+            };
+        case "blocked_empty_body":
+            return {
+                severity: "error",
+                explanation: "Step content was empty, so nothing was sent.",
+            };
+        default:
+            return {
+                severity: "pending",
+                explanation: reason ? `${action}: ${reason}` : action,
+            };
+    }
+}
+
+/**
+ * Poll target for the post-flight panel: what has actually happened to these
+ * test enrollments so far.
+ */
+export async function getTestRunStatus(
+    enrollmentIds: string[],
+    clientId: string
+): Promise<{ success: boolean; error?: string; data?: TestRunStatus }> {
+    try {
+        const access = await assertClientAccess(clientId);
+        if (!access.ok) return { success: false, error: access.error };
+
+        if (!enrollmentIds || enrollmentIds.length === 0) {
+            return { success: true, data: { enrollments: [], events: [], settled: true } };
+        }
+
+        const { data: rows, error: rowErr } = await supabase
+            .from("sequence_enrollments")
+            .select(
+                "id, status, current_step_order, next_step_at, tenant_id, contacts(name, phone, email)"
+            )
+            .in("id", enrollmentIds);
+
+        if (rowErr) return { success: false, error: rowErr.message };
+
+        // Service-role client bypasses RLS — scope explicitly.
+        const scoped = (rows || []).filter((r: any) => r.tenant_id === clientId);
+        const scopedIds = scoped.map((r: any) => r.id);
+
+        if (scopedIds.length === 0) {
+            return { success: true, data: { enrollments: [], events: [], settled: true } };
+        }
+
+        const { data: logs, error: logErr } = await supabase
+            .from("sequence_execution_log")
+            .select(
+                "id, enrollment_id, channel, action, provider_id, provider_response, executed_at, sequence_steps(step_order)"
+            )
+            .in("enrollment_id", scopedIds)
+            .order("executed_at", { ascending: true });
+
+        if (logErr) return { success: false, error: logErr.message };
+
+        const events: TestRunEvent[] = (logs || []).map((row: any) => {
+            const channel = isTestChannel(row.channel) ? row.channel : null;
+            const { severity, explanation, fixHref, fixLabel } = explainEvent(
+                row.action,
+                channel,
+                row.provider_id ?? null,
+                row.provider_response,
+                clientId
+            );
+            return {
+                id: row.id,
+                enrollmentId: row.enrollment_id,
+                channel,
+                action: row.action,
+                severity,
+                explanation,
+                executedAt: row.executed_at,
+                stepOrder: row.sequence_steps?.step_order ?? null,
+                fixHref,
+                fixLabel,
+            };
+        });
+
+        return {
+            success: true,
+            data: {
+                enrollments: scoped.map((r: any) => ({
+                    enrollmentId: r.id,
+                    status: r.status,
+                    currentStepOrder: r.current_step_order,
+                    nextStepAt: r.next_step_at,
+                    contactName: r.contacts?.name ?? null,
+                    contactPhone: r.contacts?.phone ?? null,
+                    contactEmail: r.contacts?.email ?? null,
+                })),
+                events,
+                settled: scoped.every((r: any) => TERMINAL_STATUSES.has(r.status)),
+            },
+        };
+    } catch (error: any) {
+        console.error("getTestRunStatus error:", error);
         return { success: false, error: error?.message || "Internal error" };
     }
 }

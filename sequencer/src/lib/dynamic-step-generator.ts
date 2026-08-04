@@ -29,6 +29,7 @@ import type {
     EmailContent,
     VoiceContent,
 } from './types.js';
+import { clampTestDelaySeconds } from './test-mode.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000, maxRetries: 1 });
 
@@ -273,7 +274,7 @@ DECISION RULES (follow strictly):
 10. If hot_lead → act fast, shorten delays, match their preferred channel
 
 CONTENT RULES:
-- SMS: Under 160 chars, natural, reference the specific outcome. Use {{first_name}} and {{business_name}} placeholders.
+- SMS: content MUST be an object shaped exactly {"body": "..."} (the text goes in "body", NOT "text"/"message"). Under 160 chars, natural, reference the specific outcome. Use {{first_name}} and {{business_name}} placeholders.
 - Email: Include subject, body_html, body_text. Reference prior interactions naturally.
 - Voice: Provide first_message (greeting) and system_prompt (agent instructions). The system will inject the vapi_assistant_id automatically.
 - NEVER be generic. Always reference what just happened.${smsStyleGuide}
@@ -351,6 +352,39 @@ If should_continue is false, omit the "step" field.`;
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Normalize GPT-generated step content to the canonical shape the dispatch
+ * pipeline expects. The step-decider prompt under-specifies the SMS content
+ * key (it names keys for email/voice but not SMS), so GPT-4o may emit
+ * `{ text }` / `{ message }` / a bare string instead of the canonical
+ * `{ body }` that `renderTemplate` and the SMS dispatch (`scheduler-worker.ts`)
+ * read. Without this, a dynamic SMS dispatches with `body: undefined`, Twilio
+ * rejects it (21602), and the job fails silently. Email/voice are returned
+ * unchanged (the voice `vapi_assistant_id` injection happens after this).
+ */
+export function normalizeGeneratedStepContent(
+    channel: ChannelType,
+    content: unknown
+): SmsContent | EmailContent | VoiceContent {
+    if (channel !== 'sms') {
+        return content as EmailContent | VoiceContent;
+    }
+    if (typeof content === 'string') {
+        return { body: content };
+    }
+    const c = (content ?? {}) as Record<string, unknown>;
+    for (const key of ['body', 'text', 'message', 'sms'] as const) {
+        const v = c[key];
+        if (typeof v === 'string' && v.trim().length > 0) {
+            return { body: v };
+        }
+    }
+    // No recognizable text — return empty; the scheduler's empty-body guard
+    // logs a visible failure and (for dynamic) triggers immediate regeneration
+    // rather than shipping an undefined body to Twilio.
+    return { body: '' };
+}
+
+/**
  * Insert a JIT-generated step into sequence_steps and update the enrollment.
  */
 export async function insertGeneratedStep(params: {
@@ -364,7 +398,10 @@ export async function insertGeneratedStep(params: {
 
     if (!result.should_continue || !result.step) return null;
 
-    let content = result.step.content;
+    // Coerce SMS content to the canonical { body } shape before persisting —
+    // the generator prompt under-specifies the SMS key so the model may emit
+    // { text } etc. (see normalizeGeneratedStepContent).
+    let content = normalizeGeneratedStepContent(result.step.channel, result.step.content);
 
     // For voice steps, inject vapi_assistant_id
     if (result.step.channel === 'voice' && vapiAssistantId) {
@@ -518,9 +555,16 @@ export async function endDynamicSequence(
 export async function activateEnrollmentForNextStep(
     enrollmentId: string,
     delaySeconds: number,
-    currentStepOrder: number
+    currentStepOrder: number,
+    isTest: boolean
 ): Promise<void> {
-    const nextStepAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+    // Test enrollments compress every wait (see lib/test-mode.ts). Without this
+    // the LLM-chosen delay applied verbatim, so a dynamic test could idle for
+    // hours between steps even though the outcome timeout upstream had already
+    // been compressed to 30s. `isTest` is required (not optional) so a future
+    // caller that forgets it fails the build rather than silently regressing.
+    const effectiveDelaySeconds = clampTestDelaySeconds(delaySeconds, isTest);
+    const nextStepAt = new Date(Date.now() + effectiveDelaySeconds * 1000).toISOString();
 
     const { error } = await supabase
         .from('sequence_enrollments')
@@ -547,5 +591,10 @@ export async function activateEnrollmentForNextStep(
         console.error('[JIT] increment_enrollment_attempts failed:', rpcError);
     }
 
-    console.log(`[JIT] Enrollment ${enrollmentId} activated — next step ${currentStepOrder + 1} at ${nextStepAt}`);
+    console.log(
+        `[JIT] Enrollment ${enrollmentId} activated — next step ${currentStepOrder + 1} at ${nextStepAt}` +
+        (isTest && effectiveDelaySeconds !== delaySeconds
+            ? ` (test mode: delay compressed ${delaySeconds}s → ${effectiveDelaySeconds}s)`
+            : '')
+    );
 }
