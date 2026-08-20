@@ -89,7 +89,16 @@ import {
     isWithinBusinessHours,
     getNextBusinessHoursStart,
     getNextTCPAWindow,
+    parseCallingWindow,
+    isWithinCallingWindow,
+    getNextCallingWindowStart,
+    withJitter,
 } from '../lib/compliance.js';
+import {
+    dailyCallCapKey,
+    reserveDailyCall,
+    releaseDailyCall,
+} from '../lib/daily-call-cap.js';
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
@@ -116,6 +125,15 @@ interface EnrollmentWithContext {
     tenantProfile: TenantProfile;
     contactFieldDefs: ContactFieldDef[];
 }
+
+/**
+ * Cap reservations currently held by an in-flight processStep, keyed by
+ * enrollment id. processStep clears its entry when it releases the slot or
+ * hands ownership to the queued VAPI job; the tick loop releases anything
+ * left behind by a throw, so an LLM/DB error can never permanently burn a
+ * slot in the day's cap.
+ */
+const pendingCapReservations = new Map<string, string>();
 
 /**
  * Get priority number for VAPI queue based on urgency tier
@@ -454,7 +472,10 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         step.channel !== 'email' &&
         !isWithinBusinessHours(timezone, tenantProfile.business_hours)
     ) {
-        const nextWindow = getNextBusinessHoursStart(timezone, tenantProfile.business_hours);
+        const nextWindow = withJitter(
+            getNextBusinessHoursStart(timezone, tenantProfile.business_hours),
+            null
+        );
         console.log(`[SCHEDULER] Outside business hours, rescheduling to ${nextWindow.toISOString()}`);
         await rescheduleStep(enrollment.id, nextWindow);
         return;
@@ -466,14 +487,67 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         ['sms', 'voice'].includes(step.channel) &&
         !isTCPACompliant(timezone)
     ) {
-        const nextWindow = getNextTCPAWindow(timezone);
+        const nextWindow = withJitter(getNextTCPAWindow(timezone), null);
         console.log(`[SCHEDULER] Outside TCPA window, rescheduling to ${nextWindow.toISOString()}`);
         await rescheduleStep(enrollment.id, nextWindow);
         return;
     }
 
+    // 3b. Per-sequence calling window (voice only). Tenant-timezone bounds that
+    // INTERSECT the business-hours + TCPA gates above rather than replacing
+    // them. Evaluated here — before conversation-context loading and brief
+    // generation — so a deferred lead costs one UPDATE, not an LLM call.
+    const callingWindow = parseCallingWindow(
+        sequence.calling_window_start,
+        sequence.calling_window_end
+    );
+
+    // Reservation held against this sequence's daily cap for THIS dispatch.
+    // Every early return past the gate below has to hand it back, or a lead
+    // that was never dialed still burns a slot in today's cap.
+    let capReservationKey: string | null = null;
+
+    if (!isTestEnrollment && step.channel === 'voice') {
+        if (callingWindow && !isWithinCallingWindow(timezone, callingWindow)) {
+            const nextOpen = withJitter(
+                getNextCallingWindowStart(timezone, callingWindow),
+                callingWindow.durationMinutes
+            );
+            console.log(
+                `[SCHEDULER] Enrollment ${enrollment.id} outside calling window ${callingWindow.start}-${callingWindow.end} (${timezone}), rescheduling to ${nextOpen.toISOString()}`
+            );
+            await rescheduleStep(enrollment.id, nextOpen);
+            return;
+        }
+
+        // 3c. Daily call cap. Reserved atomically so overlapping ticks (or a
+        // second scheduler process) can't both spend the last slot.
+        const dailyCap = sequence.daily_call_cap;
+        if (dailyCap && dailyCap > 0) {
+            const key = dailyCallCapKey(sequence.id, timezone);
+            if (!(await reserveDailyCall(key, dailyCap))) {
+                // Today's cap is spent. The window gate above already proved
+                // we're inside today's window, so the next opening is
+                // tomorrow's (business-hours opening when no window is set).
+                const nextDay = withJitter(
+                    callingWindow
+                        ? getNextCallingWindowStart(timezone, callingWindow)
+                        : getNextBusinessHoursStart(timezone, tenantProfile.business_hours),
+                    callingWindow?.durationMinutes ?? null
+                );
+                console.log(
+                    `[SCHEDULER] Daily call cap (${dailyCap}) reached for sequence ${sequence.id} — deferring enrollment ${enrollment.id} to ${nextDay.toISOString()}`
+                );
+                await rescheduleStep(enrollment.id, nextDay);
+                return;
+            }
+            capReservationKey = key;
+            pendingCapReservations.set(enrollment.id, key);
+        }
+    }
+
     if (isTestEnrollment) {
-        console.log(`[SCHEDULER] Test enrollment ${enrollment.id} — bypassing business-hours & TCPA gates.`);
+        console.log(`[SCHEDULER] Test enrollment ${enrollment.id} — bypassing business-hours, TCPA, calling-window & daily-cap gates.`);
     }
 
     // 4. Load conversation context for cross-channel awareness
@@ -628,10 +702,24 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         dispatchChannel = override;
     }
 
+    // Self-healing steered this touch away from voice — no dial will happen.
+    if (capReservationKey && dispatchChannel !== 'voice') {
+        await releaseDailyCall(capReservationKey);
+        pendingCapReservations.delete(enrollment.id);
+        capReservationKey = null;
+    }
+    // The reverse steer (e.g. landline: sms → voice) skipped the window/cap
+    // gates above because they key on step.channel. The dial-time gate in the
+    // VAPI worker re-checks TCPA/window/cap for jobs without a dailyCapKey,
+    // so the dial is still bounded — see processVapiJob.
+
     // Check contact validity for the dispatch channel
     const validity = checkContactValidity(contact, dispatchChannel);
     if (!validity.valid) {
         console.log(`[SCHEDULER] Contact invalid for ${dispatchChannel}: ${validity.reason}`);
+        await releaseDailyCall(capReservationKey);
+        pendingCapReservations.delete(enrollment.id);
+        capReservationKey = null;
         // Trigger self-healing which will find an alternative
         if (validity.failureType) {
             const healingAction = await handleFailure(enrollment.id, step.id, validity.failureType, {
@@ -721,6 +809,9 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                   (renderedContent as VoiceContent).system_prompt,
               ];
     if (placeholderCheckFields.some((f) => typeof f === 'string' && f.includes('[AI-generated at dispatch]'))) {
+        await releaseDailyCall(capReservationKey);
+        pendingCapReservations.delete(enrollment.id);
+        capReservationKey = null;
         const retryAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
         console.error(
             `[SCHEDULER] Step ${step.id} (enrollment ${enrollment.id}) still contains dispatch placeholder ` +
@@ -1043,13 +1134,27 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 assistantConfig: voiceContent,
                 enrollmentId: enrollment.id,
                 stepId: step.id,
+                // The worker's dial-time gate and capacity requeue need these:
+                // sequenceId to re-check window/cap, stepOrder to know exactly
+                // which step this dial was for (never inferred from enrollment
+                // state, which advances right after this add), isTest to keep
+                // operator test dials instant.
+                sequenceId: sequence.id,
+                stepOrder: step.step_order,
+                ...(isTestEnrollment ? { isTest: true } : {}),
                 urgencyPriority: getCallPriority(sequence.urgency_tier),
                 ...(phoneNumberId ? { phoneNumberId } : {}),
                 ...(inlineAgent ? { inlineAgent } : {}),
                 ...(selectedVariantId ? { variantId: selectedVariantId } : {}),
+                // Travels with the job (and its capacity retries) so the worker
+                // can hand the cap slot back if the call is never placed.
+                ...(capReservationKey ? { dailyCapKey: capReservationKey } : {}),
             }, {
                 priority: getCallPriority(sequence.urgency_tier),
             });
+            // Slot ownership now rides with the job — the worker releases it
+            // if the call is never placed.
+            pendingCapReservations.delete(enrollment.id);
             console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId})` : ''}${inlineAgent ? ' (blueprint inline)' : ' (legacy)'}`);
             break;
         }
@@ -1412,6 +1517,15 @@ async function tick(): Promise<void> {
                     await processStep(ctx);
                 } catch (error) {
                     console.error(`[SCHEDULER] Error processing enrollment ${ctx.enrollment.id}:`, error);
+                } finally {
+                    // A throw between reserving a cap slot and dispatching
+                    // must hand the slot back, or failed enrollments silently
+                    // burn the day's cap on every retry.
+                    const leakedKey = pendingCapReservations.get(ctx.enrollment.id);
+                    if (leakedKey) {
+                        await releaseDailyCall(leakedKey);
+                        pendingCapReservations.delete(ctx.enrollment.id);
+                    }
                 }
             }
         }

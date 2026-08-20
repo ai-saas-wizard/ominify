@@ -14,8 +14,10 @@ import {
     Activity,
     PanelRightOpen,
     Zap,
+    CalendarClock,
 } from "lucide-react";
 import { TestNowDialog } from "./test-now-dialog";
+import { callingScheduleSummary } from "@/components/sequences/calling-schedule-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -74,6 +76,7 @@ export function FlowToolbar({
         sequence?.mutation_aggressiveness || "moderate"
     );
     const [savingMutation, setSavingMutation] = useState(false);
+    const scheduleSummary = callingScheduleSummary(sequence);
 
     async function handleToggleActive() {
         setToggling(true);
@@ -193,6 +196,24 @@ export function FlowToolbar({
                         <TooltipContent>Fire a test call to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
+
+                {/* Read-only calling-schedule summary — the editable controls
+                    live in the Info sidebar. */}
+                {scheduleSummary && (
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium tabular-nums text-gray-600">
+                                    <CalendarClock className="h-3 w-3 text-gray-400" />
+                                    {scheduleSummary}
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Voice dialing limit &amp; window (business timezone)
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                )}
 
                 <Separator orientation="vertical" className="h-6" />
 

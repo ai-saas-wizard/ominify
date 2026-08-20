@@ -566,7 +566,7 @@ export async function activateEnrollmentForNextStep(
     const effectiveDelaySeconds = clampTestDelaySeconds(delaySeconds, isTest);
     const nextStepAt = new Date(Date.now() + effectiveDelaySeconds * 1000).toISOString();
 
-    const { error } = await supabase
+    const { data: activated, error } = await supabase
         .from('sequence_enrollments')
         .update({
             status: 'active',
@@ -575,10 +575,17 @@ export async function activateEnrollmentForNextStep(
             outcome_timeout_at: null,
             updated_at: new Date().toISOString(),
         })
-        .eq('id', enrollmentId);
+        .eq('id', enrollmentId)
+        // CAS: only land this if the enrollment is still ours. The VAPI
+        // worker's capacity re-arm can reset the row mid-generation; its
+        // step pointer must win over our stale pre-generation read.
+        .eq('status', 'generating_next_step')
+        .select('id');
 
     if (error) {
         console.error('[JIT] Error activating enrollment:', error);
+    } else if (!activated?.length) {
+        console.log(`[JIT] Activation skipped for ${enrollmentId} — enrollment state changed during generation`);
     }
 
     // Atomic counter (replaces the stale read-modify-write that lost

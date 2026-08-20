@@ -19,6 +19,7 @@ import { EnrollmentTable } from "@/components/sequences/enrollment-table";
 import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
 import { getExecutionLog, listOutboundAgents, updateSequence } from "@/app/actions/sequence-actions";
+import { CallingScheduleCard } from "@/components/sequences/calling-schedule-card";
 import { cn } from "@/lib/utils";
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -269,6 +270,15 @@ export function FlowSidebarPanel({
                                     </p>
                                 )}
                             </div>
+
+                            <Separator />
+
+                            {/* Calling schedule (daily cap / window / release pace) */}
+                            <CallingScheduleCard
+                                sequenceId={sequenceId}
+                                sequence={sequence}
+                                className="border-none p-0"
+                            />
 
                             <Separator />
 

@@ -934,6 +934,189 @@ export async function updateSequenceMutationSettings(
     }
 }
 
+// ─── Update calling schedule (daily cap / window / pace) ─────────────────────────
+
+// "" / null → null (clear the window). "H:MM" / "HH:MM" / "HH:MM:SS" →
+// Postgres TIME. Single-digit hours are accepted (the sequencer's parser
+// accepts them, so rejecting here would make the two sides disagree).
+function normalizeWindowTime(
+    value: string | null | undefined
+): string | null | "invalid" {
+    if (value === null || value === undefined || value.trim() === "") return null;
+    const match = /^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/.exec(value.trim());
+    if (!match) return "invalid";
+    const hour = parseInt(match[1], 10);
+    if (hour > 23) return "invalid";
+    return `${String(hour).padStart(2, "0")}:${match[2]}:00`;
+}
+
+/**
+ * True when the calling window overlaps the tenant's business hours on at
+ * least one day. Without this a window entirely outside business hours makes
+ * the sequencer's two gates defer in alternation forever — the campaign
+ * never dials and nothing surfaces why. Reads the onboarding shape
+ * ({mon..sun: {open, close, closed}}) and the ops-script shape
+ * ({weekdays/saturday/sunday: {start, end}}); unparseable or empty hours
+ * count as "no restriction" (overlap = true), matching the sequencer.
+ */
+function windowOverlapsBusinessHours(
+    windowStart: string, // 'HH:MM:SS'
+    windowEnd: string,
+    businessHours: unknown
+): boolean {
+    if (!businessHours || typeof businessHours !== "object") return true;
+    const raw = businessHours as Record<string, any>;
+    if (raw.emergency_24_7 === true) return true;
+
+    const toHHMM = (v: unknown): string | null => {
+        if (typeof v !== "string") return null;
+        const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(v.trim());
+        if (!m) return null;
+        const h = parseInt(m[1], 10);
+        if (h > 23 || parseInt(m[2], 10) > 59) return null;
+        return `${String(h).padStart(2, "0")}:${m[2]}`;
+    };
+
+    const ranges: Array<{ start: string; end: string }> = [];
+    for (const key of ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]) {
+        const entry = raw[key];
+        if (!entry || typeof entry !== "object" || entry.closed === true) continue;
+        const s = toHHMM(entry.open);
+        const e = toHHMM(entry.close);
+        if (s && e && s < e) ranges.push({ start: s, end: e });
+    }
+    for (const key of ["weekdays", "saturday", "sunday"]) {
+        const entry = raw[key];
+        if (!entry || typeof entry !== "object") continue;
+        const s = toHHMM(entry.start);
+        const e = toHHMM(entry.end);
+        if (s && e && s < e) ranges.push({ start: s, end: e });
+    }
+    if (ranges.length === 0) return true; // unparseable/empty → sequencer fails open
+
+    const winStart = windowStart.slice(0, 5);
+    const winEnd = windowEnd.slice(0, 5);
+    return ranges.some((r) => winStart < r.end && winEnd > r.start);
+}
+
+/**
+ * Dial-pacing levers for a sequence. Unlike step authoring, these apply to
+ * AI-managed (dynamic) sequences too — bulk voice campaigns are exactly the
+ * shape that needs them — so this deliberately does NOT go through
+ * assertSequenceEditable.
+ *
+ * daily_call_cap + calling_window_* are enforced by the sequencer's scheduler
+ * (voice steps only, tenant timezone). pacing_per_minute staggers next_step_at
+ * at bulk-enrollment time.
+ */
+export async function updateSequencePacing(
+    sequenceId: string,
+    settings: {
+        daily_call_cap?: number | null;
+        calling_window_start?: string | null;
+        calling_window_end?: string | null;
+        pacing_per_minute?: number | null;
+    }
+) {
+    try {
+        const { data: seq } = await supabase
+            .from("sequences")
+            .select("client_id")
+            .eq("id", sequenceId)
+            .single();
+        if (!seq) return { success: false, error: "Sequence not found" };
+
+        const access = await assertClientAccess(seq.client_id);
+        if (!access.ok) return { success: false, error: access.error };
+
+        const updates: Record<string, number | string | null> = {};
+
+        if ("daily_call_cap" in settings) {
+            const cap = settings.daily_call_cap;
+            if (cap !== null && cap !== undefined) {
+                if (!Number.isInteger(cap) || cap < 1 || cap > 2000) {
+                    return {
+                        success: false,
+                        error: "Daily call cap must be a whole number from 1 to 2000, or blank for no cap",
+                    };
+                }
+            }
+            updates.daily_call_cap = cap ?? null;
+        }
+
+        if ("pacing_per_minute" in settings) {
+            const pacing = settings.pacing_per_minute;
+            if (pacing !== null && pacing !== undefined) {
+                if (!Number.isInteger(pacing) || pacing < 1 || pacing > 600) {
+                    return {
+                        success: false,
+                        error: "Pace must be a whole number from 1 to 600 per minute, or blank",
+                    };
+                }
+            }
+            updates.pacing_per_minute = pacing ?? null;
+        }
+
+        if ("calling_window_start" in settings || "calling_window_end" in settings) {
+            const start = normalizeWindowTime(settings.calling_window_start);
+            const end = normalizeWindowTime(settings.calling_window_end);
+            if (start === "invalid" || end === "invalid") {
+                return { success: false, error: "Calling window times must be in HH:MM format" };
+            }
+            if ((start === null) !== (end === null)) {
+                return {
+                    success: false,
+                    error: "Set both a start and an end time for the calling window, or leave both blank",
+                };
+            }
+            if (start && end && start >= end) {
+                return { success: false, error: "Calling window start must be earlier than its end" };
+            }
+            if (start && end) {
+                const { data: seqSettings } = await supabase
+                    .from("sequences")
+                    .select("respect_business_hours")
+                    .eq("id", sequenceId)
+                    .single();
+                if (seqSettings?.respect_business_hours !== false) {
+                    const { data: profile } = await supabase
+                        .from("tenant_profiles")
+                        .select("business_hours")
+                        .eq("client_id", seq.client_id)
+                        .maybeSingle();
+                    if (profile && !windowOverlapsBusinessHours(start, end, profile.business_hours)) {
+                        return {
+                            success: false,
+                            error:
+                                "This calling window falls entirely outside your business hours, so no calls would ever go out. Widen the window, adjust business hours, or turn off business-hours enforcement for this sequence.",
+                        };
+                    }
+                }
+            }
+            updates.calling_window_start = start;
+            updates.calling_window_end = end;
+        }
+
+        if (Object.keys(updates).length === 0) return { success: true };
+
+        const { error } = await supabase
+            .from("sequences")
+            .update(updates)
+            .eq("id", sequenceId);
+
+        if (error) {
+            console.error("updateSequencePacing error:", error);
+            return { success: false, error: error.message };
+        }
+
+        revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
+        return { success: true };
+    } catch (error) {
+        console.error("updateSequencePacing error:", error);
+        return { success: false, error: "Internal error" };
+    }
+}
+
 // ─── Update step mutation settings ───────────────────────────────────────────────
 
 export async function updateStepMutationSettings(

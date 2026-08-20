@@ -14,7 +14,7 @@
 import 'dotenv/config';
 import { Worker, Job } from 'bullmq';
 import { supabase } from '../lib/db.js';
-import { redisConnection, vapiQueue } from '../lib/redis.js';
+import { redisConnection, redis, vapiQueue } from '../lib/redis.js';
 import { umbrellaResolver } from '../lib/umbrella-resolver.js';
 import { concurrencyManager } from '../lib/concurrency-manager.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
@@ -22,10 +22,25 @@ import { canPlaceCall } from '../lib/access.js';
 import { getCallTimeVariables } from '../lib/call-variables.js';
 import { handleFailure } from '../lib/self-healer.js';
 import { claimOnce, releaseClaim } from '../lib/idempotency.js';
+import { releaseDailyCall, reserveDailyCall, dailyCallCapKey } from '../lib/daily-call-cap.js';
+import { createNotification } from '../lib/emotional-intelligence.js';
+import { clampTestDelayMs } from '../lib/test-mode.js';
+import {
+    isTCPACompliant,
+    getNextTCPAWindow,
+    parseCallingWindow,
+    isWithinCallingWindow,
+    getNextCallingWindowStart,
+    withJitter,
+} from '../lib/compliance.js';
 import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 30000; // 30 seconds
+// Capacity-skipped leads come back after a random 15-45min so a whole
+// exhausted batch doesn't re-arrive on the same instant.
+const CAPACITY_REQUEUE_MIN_MS = 15 * 60 * 1000;
+const CAPACITY_REQUEUE_MAX_MS = 45 * 60 * 1000;
 
 /**
  * Log execution to database
@@ -358,22 +373,263 @@ async function makeVapiCall(
     return { callId: data.id };
 }
 
+// After this many re-arm cycles for the same step, stop retrying and flag the
+// enrollment for a human — restores the bound the old self-healer path
+// (MAX_HEALING_ACTIONS) provided before capacity skips were routed here.
+const MAX_STEP_REARMS = 5;
+
+/**
+ * Re-arm an enrollment so the scheduler re-dispatches the step this job was
+ * dialing. Never infers the step from enrollment state: payload.stepOrder is
+ * the authority. Jobs without it (self-healer re-queues, pre-upgrade jobs)
+ * get no rollback — guessing re-sends already-delivered touches.
+ *
+ * Enrollment lifecycle at requeue time (scheduler dispatches, THEN advances):
+ *   - advance succeeded, more steps:  status transit, current = stepOrder + 1
+ *   - advance succeeded, last step:   status 'completed', current = stepOrder
+ *   - advance failed (DB blip):       status transit, current = stepOrder
+ *   - JIT generating:                 left alone — rolling back mid-generation
+ *     races activateEnrollmentForNextStep's non-CAS write and loses.
+ */
+async function rearmEnrollmentForRetry(params: {
+    enrollmentId: string;
+    stepOrder: number | null | undefined;
+    retryAt: Date;
+    reason: string;
+}): Promise<void> {
+    const { enrollmentId, stepOrder, reason } = params;
+
+    if (stepOrder == null) {
+        console.log(`[VAPI] Not re-arming ${enrollmentId} after ${reason} — job carries no stepOrder (healer/legacy origin)`);
+        return;
+    }
+
+    const { data: enrollment, error } = await supabase
+        .from('sequence_enrollments')
+        .select('status, current_step_order, is_test, tenant_id, contact_id')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (error || !enrollment) {
+        console.error(`[VAPI] Cannot re-arm enrollment ${enrollmentId} after ${reason}:`, error);
+        return;
+    }
+
+    // Bound the retry loop per step. Redis, not the job payload: each re-arm
+    // goes back through the scheduler, which stamps a fresh payload.
+    try {
+        const attemptKey = `seq:rearm:${enrollmentId}:${stepOrder}`;
+        const attempts = await redis.incr(attemptKey);
+        if (attempts === 1) await redis.expire(attemptKey, 24 * 60 * 60);
+        if (attempts > MAX_STEP_REARMS) {
+            console.error(`[VAPI] Step ${stepOrder} of enrollment ${enrollmentId} re-armed ${MAX_STEP_REARMS}+ times (${reason}) — escalating to human`);
+            await supabase
+                .from('sequence_enrollments')
+                .update({ needs_human_intervention: true, updated_at: new Date().toISOString() })
+                .eq('id', enrollmentId);
+            await createNotification({
+                clientId: enrollment.tenant_id,
+                enrollmentId,
+                contactId: enrollment.contact_id,
+                type: 'escalation',
+                title: 'Repeated call dispatch failures',
+                body: `A sequence call could not be placed after ${MAX_STEP_REARMS} attempts (${reason}). The enrollment is paused for review.`,
+                priority: 'high',
+                metadata: { step_order: stepOrder, reason },
+            });
+            return;
+        }
+    } catch (err) {
+        console.error(`[VAPI] Re-arm bound check failed for ${enrollmentId} (continuing):`, err);
+    }
+
+    const retryAt = enrollment.is_test
+        ? new Date(Date.now() + clampTestDelayMs(params.retryAt.getTime() - Date.now(), true))
+        : params.retryAt;
+    const now = new Date().toISOString();
+    const current = enrollment.current_step_order;
+
+    if (['active', 'awaiting_outcome'].includes(enrollment.status) && current === stepOrder + 1) {
+        // Normal case: advance already moved past the undialed step — roll back.
+        const { data: updated, error: updateErr } = await supabase
+            .from('sequence_enrollments')
+            .update({
+                status: 'active',
+                current_step_order: stepOrder,
+                next_step_at: retryAt.toISOString(),
+                outcome_timeout_at: null,
+                updated_at: now,
+            })
+            .eq('id', enrollmentId)
+            .eq('current_step_order', stepOrder + 1)
+            .eq('status', enrollment.status)
+            .select('id');
+        if (updateErr || !updated?.length) {
+            console.log(`[VAPI] Re-arm rollback for ${enrollmentId} step ${stepOrder} skipped (moved concurrently)`, updateErr ?? '');
+        } else {
+            console.log(`[VAPI] Enrollment ${enrollmentId} re-armed for step ${stepOrder} at ${retryAt.toISOString()} (${reason})`);
+        }
+    } else if (enrollment.status === 'completed' && current === stepOrder) {
+        // Last static step: advance closed the enrollment before the dial
+        // happened. Reopen it so the final call isn't silently dropped.
+        const { data: updated, error: updateErr } = await supabase
+            .from('sequence_enrollments')
+            .update({
+                status: 'active',
+                completed_at: null,
+                next_step_at: retryAt.toISOString(),
+                updated_at: now,
+            })
+            .eq('id', enrollmentId)
+            .eq('status', 'completed')
+            .eq('current_step_order', stepOrder)
+            .select('id');
+        if (!updateErr && updated?.length) {
+            console.log(`[VAPI] Reopened completed enrollment ${enrollmentId} to retry final step ${stepOrder} (${reason})`);
+        }
+    } else if (['active', 'awaiting_outcome'].includes(enrollment.status) && current === stepOrder) {
+        // Advance never landed — the pointer is still on our step. Only push
+        // the schedule; decrementing here would re-arm the PREVIOUS step.
+        const { error: updateErr } = await supabase
+            .from('sequence_enrollments')
+            .update({ status: 'active', next_step_at: retryAt.toISOString(), outcome_timeout_at: null, updated_at: now })
+            .eq('id', enrollmentId)
+            .eq('current_step_order', stepOrder);
+        if (!updateErr) {
+            console.log(`[VAPI] Enrollment ${enrollmentId} rescheduled for step ${stepOrder} at ${retryAt.toISOString()} (${reason}, advance had not landed)`);
+        }
+    } else {
+        // Terminal / operator-owned / mid-generation states are left alone —
+        // a call we never placed must not resurrect or corrupt them.
+        console.log(`[VAPI] Not re-arming ${enrollmentId} after ${reason} — status=${enrollment.status}, current=${current}, stepOrder=${stepOrder}`);
+    }
+}
+
+function capacityRetryAt(): Date {
+    return new Date(
+        Date.now() +
+        CAPACITY_REQUEUE_MIN_MS +
+        Math.floor(Math.random() * (CAPACITY_REQUEUE_MAX_MS - CAPACITY_REQUEUE_MIN_MS))
+    );
+}
+
+/**
+ * Dial-time compliance gate. The scheduler cleared this job at ENQUEUE time,
+ * but limiter backpressure and capacity retries can hold it long past that —
+ * even across a tenant-local midnight. Re-check TCPA plus the sequence's
+ * calling window / daily cap right before dialing. Also the ONLY gate for
+ * voice jobs that never passed the scheduler's (self-healer dispatches,
+ * sms→voice channel overrides) — they carry no dailyCapKey, so the cap is
+ * reserved here. Fails open on lookup errors: the dial proceeds rather than
+ * the fleet stalling on a DB blip.
+ *
+ * On ok, returns the cap key now backing this dial (it changes when the local
+ * day rolled over since enqueue). On defer, all cap bookkeeping is already
+ * settled — the caller only re-arms the enrollment and logs.
+ */
+async function checkDialTimeGate(
+    data: VapiJobPayload
+): Promise<{ ok: true; capKey: string | null } | { ok: false; deferTo: Date; reason: string }> {
+    const payloadCapKey = data.dailyCapKey ?? null;
+    try {
+        const { tenantTimezone: tz } = await getCallTimeVariables(data.tenantId);
+
+        if (!isTCPACompliant(tz)) {
+            await releaseDailyCall(payloadCapKey);
+            return { ok: false, deferTo: withJitter(getNextTCPAWindow(tz)), reason: 'outside_tcpa_at_dial' };
+        }
+
+        if (!data.sequenceId) return { ok: true, capKey: payloadCapKey };
+
+        const { data: sequence } = await supabase
+            .from('sequences')
+            .select('daily_call_cap, calling_window_start, calling_window_end')
+            .eq('id', data.sequenceId)
+            .maybeSingle();
+        if (!sequence) return { ok: true, capKey: payloadCapKey };
+
+        const window = parseCallingWindow(sequence.calling_window_start, sequence.calling_window_end);
+        if (window && !isWithinCallingWindow(tz, window)) {
+            await releaseDailyCall(payloadCapKey);
+            return {
+                ok: false,
+                deferTo: withJitter(getNextCallingWindowStart(tz, window), window.durationMinutes),
+                reason: 'outside_window_at_dial',
+            };
+        }
+
+        const cap = sequence.daily_call_cap;
+        if (cap && cap > 0) {
+            const todayKey = dailyCallCapKey(data.sequenceId, tz);
+            if (payloadCapKey !== todayKey) {
+                // Either the local day rolled over since the reservation, or this
+                // job never went through the scheduler gate. Re-reserve for today.
+                await releaseDailyCall(payloadCapKey);
+                if (!(await reserveDailyCall(todayKey, cap))) {
+                    const deferTo = window
+                        ? withJitter(getNextCallingWindowStart(tz, window), window.durationMinutes)
+                        : withJitter(getNextTCPAWindow(tz));
+                    return { ok: false, deferTo, reason: 'daily_cap_at_dial' };
+                }
+                return { ok: true, capKey: todayKey };
+            }
+        }
+        return { ok: true, capKey: payloadCapKey };
+    } catch (err) {
+        console.error(`[VAPI] Dial-time gate error for enrollment ${data.enrollmentId} (failing open):`, err);
+        return { ok: true, capKey: payloadCapKey };
+    }
+}
+
 /**
  * VAPI Worker processor
  */
 async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: string; status: string }> {
     const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId, inlineAgent } = job.data;
-    // variantId/dedupKey are stamped by the scheduler (see lib/types.ts payload contract)
-    const { variantId, dedupKey } = job.data as VapiJobPayload & { variantId?: string; dedupKey?: string };
+    // variantId/dedupKey/dailyCapKey are stamped by the scheduler (see lib/types.ts payload contract)
+    const { variantId, dedupKey } = job.data;
 
     console.log(`[VAPI] Processing job ${job.id} for tenant ${tenantId}, phone ${contactPhone}, priority ${urgencyPriority}`);
 
-    // 0. Paywall + balance gate. Reject (do not re-queue) if the tenant lacks
+    // 0a. Dial-time compliance gate (skipped for operator test dials, which
+    //     must stay instant). See checkDialTimeGate for why enqueue-time
+    //     clearance isn't enough.
+    let dailyCapKey = job.data.dailyCapKey ?? null;
+    if (!job.data.isTest) {
+        const gate = await checkDialTimeGate(job.data);
+        // `=== false` (not `!gate.ok`): with strict:false the falsy check
+        // doesn't narrow the discriminated union.
+        if (gate.ok === false) {
+            console.log(`[VAPI] Dial-time gate deferred enrollment ${enrollmentId} (${gate.reason}) to ${gate.deferTo.toISOString()}`);
+            await logExecution({
+                enrollmentId,
+                stepId,
+                channel: 'voice',
+                action: 'skipped_out_of_window',
+                providerId: '',
+                providerResponse: { reason: gate.reason, defer_to: gate.deferTo.toISOString() },
+                callStatus: 'skipped',
+                variantId: variantId ?? null,
+            });
+            await rearmEnrollmentForRetry({
+                enrollmentId,
+                stepOrder: job.data.stepOrder,
+                retryAt: gate.deferTo,
+                reason: gate.reason,
+            });
+            return { callId: '', status: 'deferred_out_of_window' };
+        }
+        dailyCapKey = gate.capKey;
+    }
+
+    // 0b. Paywall + balance gate. Reject (do not re-queue) if the tenant lacks
     //    access or has zero minutes — the job is a no-op until they resubscribe
     //    or buy a top-up pack.
     const access = await canPlaceCall(tenantId);
     if (access.allowed === false) {
         console.log(`[VAPI] Access denied for tenant ${tenantId}: ${access.reason}`);
+        // No dial will happen — give the daily-cap slot back to the sequence.
+        await releaseDailyCall(dailyCapKey);
         await logExecution({
             enrollmentId,
             stepId,
@@ -414,8 +670,14 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
             });
             console.log(`[VAPI] Re-queued for retry ${retryCount + 1}`);
         } else {
-            // Max retries reached, log and hand off to the self-healer so the
-            // touch is rescheduled/switched instead of silently dropped
+            // Max retries reached. Capacity is a fleet-wide condition, not a
+            // problem with this lead: routing it to the self-healer fired a
+            // "I tried to give you a call…" fallback SMS at every skipped
+            // lead, which turns a 2,000-lead voice campaign into a 2,000-lead
+            // SMS blast. Log it, hand the daily-cap slot back (no dial
+            // happened), and re-arm the enrollment for a later attempt — the
+            // scheduler's window/cap gates will push it into the next window
+            // if that is where it now belongs.
             await logExecution({
                 enrollmentId,
                 stepId,
@@ -427,12 +689,13 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
                 variantId: variantId ?? null,
             });
 
-            if (stepId) {
-                const healingAction = await handleFailure(enrollmentId, stepId, 'capacity_exhausted', { reason, retryCount });
-                console.log(`[VAPI] Healing action for capacity_exhausted on ${enrollmentId}: ${healingAction?.type || 'none'}`);
-            } else {
-                console.log(`[VAPI] No stepId for capacity-exhausted enrollment ${enrollmentId} — cannot invoke self-healer`);
-            }
+            await releaseDailyCall(dailyCapKey);
+            await rearmEnrollmentForRetry({
+                enrollmentId,
+                stepOrder: job.data.stepOrder,
+                retryAt: capacityRetryAt(),
+                reason: 'capacity_exhausted',
+            });
         }
 
         return { callId: '', status: 'requeued' };
@@ -447,6 +710,8 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
         console.log(`[VAPI] duplicate dispatch, skipping (${claimKey})`);
         // Give back the slot we just acquired — no call will be placed
         await concurrencyManager.release(umbrella.umbrellaId, tenantId, enrollmentId);
+        // Same for the daily-cap slot this duplicate reserved.
+        await releaseDailyCall(dailyCapKey);
         return { callId: '', status: 'duplicate_skipped' };
     }
 
@@ -469,6 +734,12 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
     } catch (error) {
         // Release slot on API error (exactly once — see comment above)
         await concurrencyManager.release(umbrella.umbrellaId, tenantId, enrollmentId);
+
+        // The daily-cap reservation is deliberately NOT released here: this
+        // job still has BullMQ attempts left, and the self-healer's
+        // 'call_failed' path re-queues the same dial an hour out. The
+        // reservation represents an intended dial for today either way, so
+        // holding it keeps the cap conservative instead of over-dialing.
 
         // Release the send claim so a legitimate BullMQ retry can re-place the call
         if (claimKey) {
@@ -566,6 +837,19 @@ const vapiWorker = new Worker<VapiJobPayload>('vapi-calls', processVapiJob, {
     connection: redisConnection,
     concurrency: 5, // Process multiple jobs, but concurrency is really managed by the manager
     lockDuration: 60000, // 1 minute lock (calls can take time to initiate)
+    limiter: {
+        // Ceiling on how fast we START calls. concurrency-manager caps how many
+        // are LIVE; without this, a bulk enrollment still handed VAPI the whole
+        // batch at once and everything past the concurrency limit burned its
+        // three capacity retries. (SMS/email workers have had limiters all along.)
+        // Guarded parse: `Number('')` is 0 and a typo is NaN — either would
+        // silently rate-limit the fleet to zero dials.
+        max: (() => {
+            const parsed = Number(process.env.VAPI_DISPATCH_PER_MIN);
+            return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 10;
+        })(),
+        duration: 60_000,
+    },
 });
 
 // Event listeners

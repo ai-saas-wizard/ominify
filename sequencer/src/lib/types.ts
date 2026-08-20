@@ -158,6 +158,12 @@ export interface Sequence {
     // Max outbound actions per minute. When set, bulk enrollment staggers
     // next_step_at so the scheduler doesn't fire all calls simultaneously.
     pacing_per_minute: number | null;
+    // Max voice calls per calendar day (tenant timezone). null = uncapped.
+    daily_call_cap: number | null;
+    // Time-of-day bounds for voice dialing, in the TENANT's timezone ('HH:MM:SS').
+    // Intersected with business hours + TCPA, never replacing them. null = none.
+    calling_window_start: string | null;
+    calling_window_end: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -378,6 +384,23 @@ export interface VapiJobPayload {
     inlineAgent?: InlineVapiAgent;
     variantId?: string;
     dedupKey?: string;
+    // Redis key of the daily-call-cap reservation the scheduler took for this
+    // dispatch. Present ONLY on scheduler-originated jobs (self-healer
+    // re-queues never reserved one), so the worker knows whether it owes a
+    // decrement when the call is abandoned. See lib/daily-call-cap.ts.
+    dailyCapKey?: string;
+    // Sequence this dial belongs to — lets the worker re-check the calling
+    // window / daily cap at dial time (jobs can sit in the queue long past
+    // the moment the scheduler cleared them).
+    sequenceId?: string;
+    // step_order of the step this job dials. The capacity requeue re-arms
+    // EXACTLY this step instead of inferring "current - 1" from enrollment
+    // state, which is wrong for healer-originated jobs and failed advances.
+    // Absent on healer re-queues and pre-upgrade jobs → no rollback attempted.
+    stepOrder?: number;
+    // Test enrollments bypass the dial-time compliance gate and get the
+    // 30s test-mode retry delay instead of 15-45min.
+    isTest?: boolean;
 }
 
 export type EmailReplyMode = 'auto' | 'draft' | 'notify_only';

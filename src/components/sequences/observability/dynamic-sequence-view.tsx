@@ -13,6 +13,7 @@ import {
     Loader2,
     UserMinus,
     FlaskConical,
+    CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -25,6 +26,10 @@ import {
 import { TestNowDialog } from "@/components/sequences/flow/panels/test-now-dialog";
 import { StrategyOverviewCard } from "./strategy-overview-card";
 import { LeadJourneyTimeline } from "./lead-journey-timeline";
+import {
+    CallingScheduleCard,
+    callingScheduleSummary,
+} from "@/components/sequences/calling-schedule-card";
 import {
     toggleSequenceActive,
     deleteSequence,
@@ -168,6 +173,7 @@ export function DynamicSequenceView({
     };
 
     const selectedEnrollment = enrollments.find((e) => e.id === selectedEnrollmentId);
+    const scheduleSummary = callingScheduleSummary(sequence);
 
     return (
         <TooltipProvider delayDuration={200}>
@@ -226,6 +232,21 @@ export function DynamicSequenceView({
                             <TooltipContent>Fire a test to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
                         </Tooltip>
 
+                        {/* Read-only calling-schedule summary */}
+                        {scheduleSummary && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium tabular-nums text-gray-600">
+                                        <CalendarClock className="h-3 w-3 text-gray-400" />
+                                        {scheduleSummary}
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    Voice dialing limit &amp; window (business timezone)
+                                </TooltipContent>
+                            </Tooltip>
+                        )}
+
                         <div className="flex-1" />
 
                         {/* Learning Dashboard */}
@@ -263,7 +284,7 @@ export function DynamicSequenceView({
                 </div>
 
                 {/* Info strip: strategy + agent + stats */}
-                <div className="grid flex-shrink-0 grid-cols-1 gap-4 px-4 pt-4 lg:grid-cols-3">
+                <div className="grid flex-shrink-0 grid-cols-1 gap-4 px-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
                     <StrategyOverviewCard sequence={sequence} />
 
                     <div className={cn(seqCardStatic, "p-4")}>
@@ -307,6 +328,8 @@ export function DynamicSequenceView({
                             ))}
                         </select>
                     </div>
+
+                    <CallingScheduleCard sequenceId={sequenceId} sequence={sequence} />
 
                     <div className={cn(seqCardStatic, "p-4")}>
                         <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">

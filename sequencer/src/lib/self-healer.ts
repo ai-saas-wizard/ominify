@@ -265,16 +265,17 @@ export function diagnoseFailure(ctx: FailureContext): HealingAction {
             };
         }
 
-        case 'call_failed':
-        case 'capacity_exhausted': {
+        // 'capacity_exhausted' no longer routes here (2026-08-21): capacity
+        // skips are re-armed by the VAPI worker (rearmEnrollmentForRetry)
+        // instead of texting every skipped lead "I tried to give you a call…",
+        // which turned bulk voice campaigns into SMS blasts.
+        case 'call_failed': {
             // Send SMS fallback immediately + re-queue call with delay
             return {
                 type: 'inject_fallback_sms',
                 details: {
                     delay_seconds: 3600, // Re-queue call for 1 hour later
-                    reason: failureType === 'capacity_exhausted'
-                        ? 'Call capacity exhausted — sending SMS fallback'
-                        : 'Call failed — sending SMS fallback',
+                    reason: 'Call failed — sending SMS fallback',
                     new_content: {
                         body: `Hi {{first_name}}, I tried to give you a call but couldn't connect. Would you prefer a quick text conversation instead? Just reply here!`,
                     } as SmsContent,
