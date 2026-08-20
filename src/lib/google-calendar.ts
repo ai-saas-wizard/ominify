@@ -1,4 +1,5 @@
 import "server-only";
+import crypto from "crypto";
 import { google } from "googleapis";
 import { fromZonedTime, toZonedTime, formatInTimeZone } from "date-fns-tz";
 import { supabase } from "@/lib/supabase";
@@ -397,6 +398,9 @@ export async function createEvent(
     eventId?: string;
     appointmentId?: string;
     formatted?: string;
+    meetingUrl?: string;
+    /** True when the lead was added as an attendee and Google emailed the invite. */
+    inviteSent?: boolean;
     error?: string;
     code?: "duplicate" | "too_soon" | "calendar_not_connected" | "conflict" | "outside_hours" | "unknown";
 }> {
@@ -459,28 +463,79 @@ export async function createEvent(
         };
     }
 
-    // Insert into Google Calendar
+    // Insert into Google Calendar. When we captured a VALID email we add the
+    // lead as an attendee, ask Google to email the invite (sendUpdates), and
+    // request a Meet link so the invite actually carries a way to join. The
+    // email is voice-transcribed ("j smith at gmail" happens) and Google 400s
+    // the whole insert on a malformed attendee — so an invalid one is demoted
+    // to description-only, and an invite-bearing insert that still fails is
+    // retried once as a plain event: the booking must never be lost to
+    // invite plumbing.
+    const rawEmail = params.customerEmail?.trim() || null;
+    const attendeeEmail = rawEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) ? rawEmail : null;
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
     let eventId: string | undefined;
+    let meetingUrl: string | undefined;
+    let inviteSent = false;
+
+    const baseRequestBody = {
+        summary: `${params.serviceType || "Appointment"} - ${params.customerName}`,
+        description: [
+            `Customer: ${params.customerName}`,
+            `Phone: ${phoneE164}`,
+            rawEmail ? `Email: ${rawEmail}` : "",
+            params.serviceType ? `Service: ${params.serviceType}` : "",
+            params.notes ? `Notes: ${params.notes}` : "",
+            "",
+            "Booked via AI Assistant",
+        ].filter(Boolean).join("\n"),
+        start: { dateTime: scheduledAt.toISOString(), timeZone: tz },
+        end: { dateTime: scheduledEnd.toISOString(), timeZone: tz },
+    };
+
     try {
-        const event = await calendar.events.insert({
-            calendarId: config.calendar_id,
-            requestBody: {
-                summary: `${params.serviceType || "Appointment"} - ${params.customerName}`,
-                description: [
-                    `Customer: ${params.customerName}`,
-                    `Phone: ${phoneE164}`,
-                    params.customerEmail ? `Email: ${params.customerEmail}` : "",
-                    params.serviceType ? `Service: ${params.serviceType}` : "",
-                    params.notes ? `Notes: ${params.notes}` : "",
-                    "",
-                    "Booked via AI Assistant",
-                ].filter(Boolean).join("\n"),
-                start: { dateTime: scheduledAt.toISOString(), timeZone: tz },
-                end: { dateTime: scheduledEnd.toISOString(), timeZone: tz },
-            },
-        });
-        eventId = event.data.id || undefined;
+        if (attendeeEmail) {
+            try {
+                const event = await calendar.events.insert({
+                    calendarId: config.calendar_id,
+                    sendUpdates: "all",
+                    conferenceDataVersion: 1,
+                    requestBody: {
+                        ...baseRequestBody,
+                        attendees: [{ email: attendeeEmail, displayName: params.customerName }],
+                        conferenceData: {
+                            createRequest: {
+                                requestId: crypto.randomUUID(),
+                                conferenceSolutionKey: { type: "hangoutsMeet" },
+                            },
+                        },
+                    },
+                });
+                eventId = event.data.id || undefined;
+                meetingUrl =
+                    event.data.hangoutLink ||
+                    event.data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ||
+                    undefined;
+                inviteSent = true;
+            } catch (inviteErr) {
+                // Bad attendee address, calendar can't mint Meet links, etc.
+                console.warn(
+                    "[GOOGLE CALENDAR] Invite-bearing insert failed, booking as plain event:",
+                    inviteErr instanceof Error ? inviteErr.message : inviteErr
+                );
+                const event = await calendar.events.insert({
+                    calendarId: config.calendar_id,
+                    requestBody: baseRequestBody,
+                });
+                eventId = event.data.id || undefined;
+            }
+        } else {
+            const event = await calendar.events.insert({
+                calendarId: config.calendar_id,
+                requestBody: baseRequestBody,
+            });
+            eventId = event.data.id || undefined;
+        }
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Unknown calendar error";
         const code: "conflict" | "unknown" = message.toLowerCase().includes("conflict") ? "conflict" : "unknown";
@@ -489,34 +544,70 @@ export async function createEvent(
     }
 
     // Persist booked appointment
-    const { data: inserted, error: insertErr } = await supabase
+    const appointmentRow = {
+        client_id: clientId,
+        vapi_call_id: params.vapiCallId || null,
+        google_event_id: eventId || null,
+        customer_name: params.customerName,
+        customer_phone_e164: phoneE164,
+        customer_email: attendeeEmail,
+        service_type: params.serviceType || null,
+        notes: params.notes || null,
+        scheduled_at: scheduledAt.toISOString(),
+        duration_minutes: duration,
+        timezone: tz,
+        status: "booked",
+        meeting_url: meetingUrl || null,
+    };
+
+    let inserted: { id: string } | null = null;
+    const primaryInsert = await supabase
         .from("appointments")
-        .insert({
-            client_id: clientId,
-            vapi_call_id: params.vapiCallId || null,
-            google_event_id: eventId || null,
-            customer_name: params.customerName,
-            customer_phone_e164: phoneE164,
-            customer_email: params.customerEmail || null,
-            service_type: params.serviceType || null,
-            notes: params.notes || null,
-            scheduled_at: scheduledAt.toISOString(),
-            duration_minutes: duration,
-            timezone: tz,
-            status: "booked",
-        })
+        .insert(appointmentRow)
         .select("id")
         .single();
 
-    if (insertErr) {
-        console.error("[GOOGLE CALENDAR] Failed to persist appointment:", insertErr);
+    if (primaryInsert.error) {
+        // Retry without meeting_url ONLY for the missing-column case (the
+        // 20260821 migration not applied yet). Retrying on arbitrary errors
+        // risks a duplicate row when the first insert committed but the
+        // response failed, and buries the real error under a schema warning.
+        const err = primaryInsert.error;
+        const missingMeetingUrlColumn =
+            err.code === "PGRST204" || /meeting_url/i.test(err.message || "");
+        if (missingMeetingUrlColumn) {
+            console.warn(
+                "[GOOGLE CALENDAR] meeting_url column missing (migration not applied) — retrying insert without it:",
+                err.message
+            );
+            const { meeting_url, ...legacyRow } = appointmentRow;
+            void meeting_url;
+            const retryInsert = await supabase
+                .from("appointments")
+                .insert(legacyRow)
+                .select("id")
+                .single();
+            if (retryInsert.error) {
+                console.error("[GOOGLE CALENDAR] Failed to persist appointment:", retryInsert.error);
+            } else {
+                inserted = retryInsert.data as { id: string };
+            }
+        } else {
+            console.error("[GOOGLE CALENDAR] Failed to persist appointment:", err);
+        }
+    } else {
+        inserted = primaryInsert.data as { id: string };
     }
 
-    const appointmentId = inserted?.id as string | undefined;
+    const appointmentId = inserted?.id;
 
-    // Fire-and-forget notification (no await on purpose).
+    // Awaited (with its own error wall): a fire-and-forget promise from a
+    // serverless route can be frozen after the response flushes and the
+    // notification silently lost. Failure here never fails the booking.
     if (appointmentId) {
-        void sendBookingNotification(clientId, appointmentId);
+        await sendBookingNotification(clientId, appointmentId, appointmentRow).catch((err) =>
+            console.error("[GOOGLE CALENDAR] Booking notification failed:", err)
+        );
     }
 
     return {
@@ -524,6 +615,8 @@ export async function createEvent(
         eventId,
         appointmentId,
         formatted: `${formatDateForVoice(scheduledAt, tz)} for ${duration} minutes`,
+        meetingUrl,
+        inviteSent,
     };
 }
 
@@ -672,6 +765,10 @@ export async function rescheduleEvent(
             await calendar.events.patch({
                 calendarId: config.calendar_id,
                 eventId: target.googleEventId,
+                // Attendees were invited at booking time — without this the
+                // patch is silent and the lead keeps the old slot on their
+                // calendar (Google's default is to notify no one).
+                sendUpdates: "all",
                 requestBody: {
                     start: { dateTime: newStart.toISOString(), timeZone: tz },
                     end: { dateTime: newEnd.toISOString(), timeZone: tz },
@@ -736,6 +833,9 @@ export async function cancelEvent(
                 await calendar.events.delete({
                     calendarId: config.calendar_id,
                     eventId: appt.googleEventId,
+                    // Emails the cancellation to invited attendees, so the
+                    // lead's calendar entry actually goes away.
+                    sendUpdates: "all",
                 });
             } catch (err) {
                 console.warn("[GOOGLE CALENDAR] Event delete failed (continuing):", err);
@@ -759,15 +859,89 @@ export async function cancelEvent(
 }
 
 // ═══════════════════════════════════════════════════════════
-// NOTIFICATION (stub)
+// NOTIFICATION
 // ═══════════════════════════════════════════════════════════
 
-// TODO: wire to Resend/Twilio
+/**
+ * Drop an `appointment_booked` row into tenant_notifications so the booking
+ * shows up in the dashboard's notification center. Never throws, and a
+ * failure here must never fail the booking itself. Pass `apptRow` when the
+ * caller already holds the row (createEvent does) to skip the re-select.
+ */
 export async function sendBookingNotification(
     clientId: string,
-    appointmentId: string
+    appointmentId: string,
+    apptRow?: {
+        customer_name: string | null;
+        customer_phone_e164: string | null;
+        customer_email: string | null;
+        service_type: string | null;
+        scheduled_at: string;
+        timezone: string | null;
+    }
 ): Promise<void> {
-    console.log("[NOTIFY]", { clientId, appointmentId });
+    try {
+        // Dedupe: a retried VAPI tool call can reach here twice for the same
+        // appointment — one notification per booking is plenty.
+        const { data: existing } = await supabase
+            .from("tenant_notifications")
+            .select("id")
+            .eq("client_id", clientId)
+            .eq("type", "appointment_booked")
+            .eq("metadata->>appointment_id", appointmentId)
+            .limit(1);
+        if (existing && existing.length > 0) return;
+
+        let appt = apptRow ?? null;
+        if (!appt) {
+            const { data } = await supabase
+                .from("appointments")
+                .select("customer_name, customer_phone_e164, customer_email, service_type, scheduled_at, timezone")
+                .eq("id", appointmentId)
+                .single();
+            appt = data as typeof appt;
+        }
+
+        if (!appt) return;
+
+        const scheduledAt = new Date(appt.scheduled_at as string);
+        const apptTz = (appt.timezone as string) || DEFAULT_TIMEZONE;
+        // Read by a human in the dashboard, so plain formatting — not the
+        // spelled-out voice formatting used for what the agent says aloud.
+        const when = formatInTimeZone(scheduledAt, apptTz, "EEEE, MMM d 'at' h:mm a");
+        const name = (appt.customer_name as string) || "A caller";
+        const phone = (appt.customer_phone_e164 as string) || "";
+        const email = (appt.customer_email as string | null) || null;
+
+        // Link the notification to the contact when we recognize the number.
+        const { data: contact } = await supabase
+            .from("contacts")
+            .select("id")
+            .eq("client_id", clientId)
+            .eq("phone", phone)
+            .maybeSingle();
+
+        await supabase.from("tenant_notifications").insert({
+            client_id: clientId,
+            contact_id: (contact?.id as string | undefined) || null,
+            type: "appointment_booked",
+            title: `${name} booked ${appt.service_type || "an appointment"}`,
+            body: [
+                `${when}${phone ? ` — ${phone}` : ""}`,
+                email
+                    ? `Calendar invite sent to ${email}.`
+                    : "No email captured, so no invite was emailed.",
+            ].join(" "),
+            priority: "high",
+            metadata: {
+                appointment_id: appointmentId,
+                scheduled_at: scheduledAt.toISOString(),
+                customer_email: email,
+            },
+        });
+    } catch (err) {
+        console.error("[GOOGLE CALENDAR] Failed to create booking notification:", err);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════

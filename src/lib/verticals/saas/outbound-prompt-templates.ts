@@ -267,7 +267,10 @@ ${demoConfirmWording(c.demoType)}
 - Offer two or three options. Never offer same-day.
 - Re-confirm the chosen slot in natural language ("So thats Tuesday, June tenth at two oclock in the afternoon, correct?")
   <wait for user response>
-- After they confirm, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and {{contact_email}}.
+- **Then confirm the email before booking — the invite cant reach them without it.** If {{contact_email}} is filled in, read it back to check it ("And Ill send the invite to {{contact_email}} — is that still the best address?"). If it is blank or they correct it, ask for the right one and repeat it back spelled out to be sure.
+  <wait for user response>
+- After they confirm, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and the email they just confirmed.
+- If they refuse to give an email, still book it — but then do NOT promise an emailed invite. Say youll have the team follow up with the details instead.
 
 ### If the lead mentions an existing demo with us
 1. Call \`lookup_appointment\` with {{contact_phone}}.

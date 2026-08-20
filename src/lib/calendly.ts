@@ -522,6 +522,12 @@ export async function createEvent(
     inviteeUri?: string;
     appointmentId?: string;
     formatted?: string;
+    /**
+     * True when Calendly will actually deliver a confirmation email — i.e. the
+     * caller gave a real address. Without one we synthesize a `.invalid` invitee
+     * email (see synthEmailFromPhone) and nothing is delivered.
+     */
+    inviteSent?: boolean;
     error?: string;
     code?: "duplicate" | "calendar_not_connected" | "no_event_type" | "conflict" | "paid_plan_required" | "unknown";
 }> {
@@ -646,6 +652,10 @@ export async function createEvent(
         inviteeUri,
         appointmentId: inserted?.id as string | undefined,
         formatted: `${formatDateForVoice(startInstant, tz)} for ${duration} minutes`,
+        // trim() matches the Google path — a whitespace-only "email" must not
+        // make the agent promise an invite that goes nowhere. Synthetic
+        // voice-<digits>@…invalid fallback addresses never reach params.
+        inviteSent: !!params.customerEmail?.trim(),
     };
 }
 

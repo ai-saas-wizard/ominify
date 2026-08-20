@@ -179,7 +179,17 @@ export async function POST(request: Request) {
                 });
 
                 if (result.success) {
-                    return ok(toolCallId, `Booked for ${result.formatted}. You're all set.`);
+                    // Only promise what actually happened: an invite when one
+                    // was sent, a meeting link only when the event carries one
+                    // (Google can return the Meet link as pending, and Calendly
+                    // bookings have no meetingUrl at all). Never speak the URL
+                    // itself — it goes out in the invite.
+                    const spoken = !result.inviteSent
+                        ? `Booked for ${result.formatted}. You're all set.`
+                        : "meetingUrl" in result && result.meetingUrl
+                        ? `Booked for ${result.formatted}. The calendar invite with the meeting link is on its way to your email.`
+                        : `Booked for ${result.formatted}. The calendar invite is on its way to your email.`;
+                    return ok(toolCallId, spoken);
                 }
 
                 switch (result.code) {

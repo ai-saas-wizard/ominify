@@ -389,7 +389,9 @@ If they stay vague: "This might be a strange question, but if you could just wav
 - Use \`check_availability\` to find open slots.
 - Confirm a specific time back to the seller in natural language ("So thats Tuesday, April twenty-second at two oclock in the afternoon, correct?")
   <wait for user response>
-- After confirmation, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and {{contact_email}}.
+- Confirm the email before booking so the calendar invite can actually reach them. If {{contact_email}} is filled in, read it back to check it; if it is blank or wrong, ask for the right one and repeat it back to be sure. If they wont give one, book anyway and dont promise an emailed invite.
+  <wait for user response>
+- After confirmation, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and the email they just confirmed.
 - ${apptCtx}
 
 ${existingAppointmentBranchBlock()}
@@ -473,7 +475,9 @@ If yes:
 - Use \`check_availability\` to find open slots.
 - Confirm a specific time back to the seller in natural language ("So thats Tuesday, April twenty-second at two oclock in the afternoon, correct?")
   <wait for user response>
-- After confirmation, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and {{contact_email}}.
+- Confirm the email before booking so the calendar invite can actually reach them. If {{contact_email}} is filled in, read it back to check it; if it is blank or wrong, ask for the right one and repeat it back to be sure. If they wont give one, book anyway and dont promise an emailed invite.
+  <wait for user response>
+- After confirmation, call \`book_appointment\` with the date, time, {{contact_name}}, {{contact_phone}}, and the email they just confirmed.
 - ${apptCtx}
 
 ${existingAppointmentBranchBlock()}
