@@ -246,18 +246,50 @@ export function isWithinCallingWindow(
 }
 
 /**
- * Next instant the sequence's calling window opens, in the tenant's timezone.
- * Strictly in the future — called from inside the window, this returns
- * tomorrow's opening (which is exactly what the daily-cap defer wants).
+ * Day-of-week allow-list for dialing. Input is the stored TEXT[] of
+ * 'sun'..'sat' keys; output is a Set of JS day indexes (0=Sun..6=Sat).
+ * null = no restriction (unset, unrecognized, or all seven days).
+ */
+export function parseCallingDays(value: unknown): Set<number> | null {
+    if (!Array.isArray(value) || value.length === 0) return null;
+    const days = new Set<number>();
+    for (const v of value) {
+        const idx = ONBOARDING_DAY_KEYS.indexOf(String(v).toLowerCase());
+        if (idx >= 0) days.add(idx);
+    }
+    if (days.size === 0 || days.size === 7) return null;
+    return days;
+}
+
+/** Current tenant-local day is one the sequence may dial on. */
+export function isCallingDayAllowed(
+    timezone: string,
+    days: Set<number> | null,
+    now: Date = new Date()
+): boolean {
+    if (!days) return true;
+    return days.has(dayOfWeekInZone(now, timezone));
+}
+
+/**
+ * Next instant the sequence may dial again: the window's opening time (or the
+ * 8am TCPA floor when no window is set) on the next allowed day. Strictly in
+ * the future — called from inside today's window, this returns the NEXT
+ * opening (exactly what the daily-cap defer wants). Scans two weeks so a
+ * single-day-per-week schedule still resolves.
  */
 export function getNextCallingWindowStart(
     timezone: string,
-    window: CallingWindow,
+    window: CallingWindow | null,
+    allowedDays: Set<number> | null = null,
     now: Date = new Date()
 ): Date {
-    for (let i = 0; i < 2; i++) {
-        const dateStr = formatInTimeZone(addDays(now, i), timezone, 'yyyy-MM-dd');
-        const startUtc = zonedTimeToUtc(`${dateStr}T${window.start}:00`, timezone);
+    const start = window?.start && window.start > TCPA_EARLIEST ? window.start : TCPA_EARLIEST;
+    for (let i = 0; i < 14; i++) {
+        const candidate = addDays(now, i);
+        if (allowedDays && !allowedDays.has(dayOfWeekInZone(candidate, timezone))) continue;
+        const dateStr = formatInTimeZone(candidate, timezone, 'yyyy-MM-dd');
+        const startUtc = zonedTimeToUtc(`${dateStr}T${start}:00`, timezone);
         if (startUtc.getTime() > now.getTime()) return startUtc;
     }
     return new Date(now.getTime() + 24 * 60 * 60 * 1000);

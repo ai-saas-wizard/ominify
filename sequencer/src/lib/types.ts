@@ -166,6 +166,9 @@ export interface Sequence {
     // Intersected with business hours + TCPA, never replacing them. null = none.
     calling_window_start: string | null;
     calling_window_end: string | null;
+    // Days of week voice dialing is allowed ('sun'..'sat' keys, tenant tz).
+    // null = every day. Enforced with the window in both dispatch gates.
+    calling_days: string[] | null;
     created_at: string;
     updated_at: string;
 }

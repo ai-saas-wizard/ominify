@@ -31,6 +31,8 @@ import {
     parseCallingWindow,
     isWithinCallingWindow,
     getNextCallingWindowStart,
+    parseCallingDays,
+    isCallingDayAllowed,
     withJitter,
 } from '../lib/compliance.js';
 import type { VapiJobPayload, VoiceContent, InlineVapiAgent } from '../lib/types.js';
@@ -543,17 +545,28 @@ async function checkDialTimeGate(
 
         const { data: sequence } = await supabase
             .from('sequences')
-            .select('daily_call_cap, calling_window_start, calling_window_end')
+            .select('daily_call_cap, calling_window_start, calling_window_end, calling_days')
             .eq('id', data.sequenceId)
             .maybeSingle();
         if (!sequence) return { ok: true, capKey: payloadCapKey };
 
         const window = parseCallingWindow(sequence.calling_window_start, sequence.calling_window_end);
+        const days = parseCallingDays(sequence.calling_days);
+
+        if (days && !isCallingDayAllowed(tz, days)) {
+            await releaseDailyCall(payloadCapKey);
+            return {
+                ok: false,
+                deferTo: withJitter(getNextCallingWindowStart(tz, window, days), window?.durationMinutes ?? null),
+                reason: 'outside_days_at_dial',
+            };
+        }
+
         if (window && !isWithinCallingWindow(tz, window)) {
             await releaseDailyCall(payloadCapKey);
             return {
                 ok: false,
-                deferTo: withJitter(getNextCallingWindowStart(tz, window), window.durationMinutes),
+                deferTo: withJitter(getNextCallingWindowStart(tz, window, days), window.durationMinutes),
                 reason: 'outside_window_at_dial',
             };
         }
@@ -566,8 +579,8 @@ async function checkDialTimeGate(
                 // job never went through the scheduler gate. Re-reserve for today.
                 await releaseDailyCall(payloadCapKey);
                 if (!(await reserveDailyCall(todayKey, cap))) {
-                    const deferTo = window
-                        ? withJitter(getNextCallingWindowStart(tz, window), window.durationMinutes)
+                    const deferTo = window || days
+                        ? withJitter(getNextCallingWindowStart(tz, window, days), window?.durationMinutes ?? null)
                         : withJitter(getNextTCPAWindow(tz));
                     return { ok: false, deferTo, reason: 'daily_cap_at_dial' };
                 }

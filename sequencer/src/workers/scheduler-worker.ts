@@ -92,6 +92,8 @@ import {
     parseCallingWindow,
     isWithinCallingWindow,
     getNextCallingWindowStart,
+    parseCallingDays,
+    isCallingDayAllowed,
     withJitter,
 } from '../lib/compliance.js';
 import {
@@ -493,14 +495,16 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
-    // 3b. Per-sequence calling window (voice only). Tenant-timezone bounds that
-    // INTERSECT the business-hours + TCPA gates above rather than replacing
-    // them. Evaluated here — before conversation-context loading and brief
-    // generation — so a deferred lead costs one UPDATE, not an LLM call.
+    // 3b. Per-sequence calling window + calling days (voice only).
+    // Tenant-timezone bounds that INTERSECT the business-hours + TCPA gates
+    // above rather than replacing them. Evaluated here — before
+    // conversation-context loading and brief generation — so a deferred lead
+    // costs one UPDATE, not an LLM call.
     const callingWindow = parseCallingWindow(
         sequence.calling_window_start,
         sequence.calling_window_end
     );
+    const callingDays = parseCallingDays(sequence.calling_days);
 
     // Reservation held against this sequence's daily cap for THIS dispatch.
     // Every early return past the gate below has to hand it back, or a lead
@@ -508,9 +512,21 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     let capReservationKey: string | null = null;
 
     if (!isTestEnrollment && step.channel === 'voice') {
+        if (callingDays && !isCallingDayAllowed(timezone, callingDays)) {
+            const nextOpen = withJitter(
+                getNextCallingWindowStart(timezone, callingWindow, callingDays),
+                callingWindow?.durationMinutes ?? null
+            );
+            console.log(
+                `[SCHEDULER] Enrollment ${enrollment.id} outside calling days (${sequence.calling_days?.join(',')}) in ${timezone}, rescheduling to ${nextOpen.toISOString()}`
+            );
+            await rescheduleStep(enrollment.id, nextOpen);
+            return;
+        }
+
         if (callingWindow && !isWithinCallingWindow(timezone, callingWindow)) {
             const nextOpen = withJitter(
-                getNextCallingWindowStart(timezone, callingWindow),
+                getNextCallingWindowStart(timezone, callingWindow, callingDays),
                 callingWindow.durationMinutes
             );
             console.log(
@@ -526,12 +542,13 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         if (dailyCap && dailyCap > 0) {
             const key = dailyCallCapKey(sequence.id, timezone);
             if (!(await reserveDailyCall(key, dailyCap))) {
-                // Today's cap is spent. The window gate above already proved
-                // we're inside today's window, so the next opening is
-                // tomorrow's (business-hours opening when no window is set).
+                // Today's cap is spent. The gates above already proved we're
+                // inside today's window on an allowed day, so the next opening
+                // is the NEXT allowed day's (business-hours opening when
+                // neither a window nor days are configured).
                 const nextDay = withJitter(
-                    callingWindow
-                        ? getNextCallingWindowStart(timezone, callingWindow)
+                    callingWindow || callingDays
+                        ? getNextCallingWindowStart(timezone, callingWindow, callingDays)
                         : getNextBusinessHoursStart(timezone, tenantProfile.business_hours),
                     callingWindow?.durationMinutes ?? null
                 );

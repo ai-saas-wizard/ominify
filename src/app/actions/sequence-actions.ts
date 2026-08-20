@@ -950,18 +950,22 @@ function normalizeWindowTime(
     return `${String(hour).padStart(2, "0")}:${match[2]}:00`;
 }
 
+const CALLING_DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
 /**
- * True when the calling window overlaps the tenant's business hours on at
- * least one day. Without this a window entirely outside business hours makes
- * the sequencer's two gates defer in alternation forever — the campaign
- * never dials and nothing surfaces why. Reads the onboarding shape
- * ({mon..sun: {open, close, closed}}) and the ops-script shape
- * ({weekdays/saturday/sunday: {start, end}}); unparseable or empty hours
- * count as "no restriction" (overlap = true), matching the sequencer.
+ * True when dialing is possible at all given the calling window, the allowed
+ * days, and the tenant's business hours. Without this a window (or day set)
+ * entirely outside business hours makes the sequencer's gates defer in
+ * alternation forever — the campaign never dials and nothing surfaces why.
+ * Reads the onboarding shape ({mon..sun: {open, close, closed}}) and the
+ * ops-script shape ({weekdays/saturday/sunday: {start, end}}); unparseable or
+ * empty hours count as "no restriction" (possible = true), matching the
+ * sequencer's fail-open.
  */
-function windowOverlapsBusinessHours(
-    windowStart: string, // 'HH:MM:SS'
-    windowEnd: string,
+function dialingPossibleWithBusinessHours(
+    windowStart: string | null, // 'HH:MM:SS'
+    windowEnd: string | null,
+    callingDays: string[] | null,
     businessHours: unknown
 ): boolean {
     if (!businessHours || typeof businessHours !== "object") return true;
@@ -977,26 +981,51 @@ function windowOverlapsBusinessHours(
         return `${String(h).padStart(2, "0")}:${m[2]}`;
     };
 
-    const ranges: Array<{ start: string; end: string }> = [];
-    for (const key of ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]) {
-        const entry = raw[key];
-        if (!entry || typeof entry !== "object" || entry.closed === true) continue;
-        const s = toHHMM(entry.open);
-        const e = toHHMM(entry.close);
-        if (s && e && s < e) ranges.push({ start: s, end: e });
-    }
-    for (const key of ["weekdays", "saturday", "sunday"]) {
-        const entry = raw[key];
-        if (!entry || typeof entry !== "object") continue;
+    // Per-day open ranges, merged the same way the sequencer merges the two
+    // shapes: the ops-script shape first, per-day onboarding entries win.
+    const byDay = new Map<string, { start: string; end: string }>();
+    const opsRange = (entry: any) => {
+        if (!entry || typeof entry !== "object") return null;
         const s = toHHMM(entry.start);
         const e = toHHMM(entry.end);
-        if (s && e && s < e) ranges.push({ start: s, end: e });
+        return s && e && s < e ? { start: s, end: e } : null;
+    };
+    const weekdays = opsRange(raw.weekdays);
+    if (weekdays) for (const d of ["mon", "tue", "wed", "thu", "fri"]) byDay.set(d, weekdays);
+    const sat = opsRange(raw.saturday);
+    if (sat) byDay.set("sat", sat);
+    const sun = opsRange(raw.sunday);
+    if (sun) byDay.set("sun", sun);
+    let sawOnboardingEntry = false;
+    for (const key of CALLING_DAY_KEYS) {
+        const entry = raw[key];
+        if (!entry || typeof entry !== "object") continue;
+        sawOnboardingEntry = true;
+        if (entry.closed === true) {
+            byDay.delete(key);
+            continue;
+        }
+        const s = toHHMM(entry.open);
+        const e = toHHMM(entry.close);
+        if (s && e && s < e) byDay.set(key, { start: s, end: e });
     }
-    if (ranges.length === 0) return true; // unparseable/empty → sequencer fails open
+    // Nothing parseable at all → sequencer treats hours as unset (fail open).
+    if (byDay.size === 0 && !sawOnboardingEntry && !weekdays && !sat && !sun) return true;
 
+    const days = callingDays && callingDays.length > 0 ? callingDays : [...CALLING_DAY_KEYS];
+    const openSelectedRanges = days
+        .map((d) => byDay.get(d))
+        .filter((r): r is { start: string; end: string } => !!r);
+    if (openSelectedRanges.length === 0) {
+        // Every selected day is closed. If NO day parses as open the sequencer
+        // fails open anyway (misconfig), so only block when hours are real.
+        return byDay.size === 0;
+    }
+
+    if (!windowStart || !windowEnd) return true;
     const winStart = windowStart.slice(0, 5);
     const winEnd = windowEnd.slice(0, 5);
-    return ranges.some((r) => winStart < r.end && winEnd > r.start);
+    return openSelectedRanges.some((r) => winStart < r.end && winEnd > r.start);
 }
 
 /**
@@ -1015,13 +1044,14 @@ export async function updateSequencePacing(
         daily_call_cap?: number | null;
         calling_window_start?: string | null;
         calling_window_end?: string | null;
+        calling_days?: string[] | null;
         pacing_per_minute?: number | null;
     }
 ) {
     try {
         const { data: seq } = await supabase
             .from("sequences")
-            .select("client_id")
+            .select("client_id, respect_business_hours, calling_window_start, calling_window_end, calling_days")
             .eq("id", sequenceId)
             .single();
         if (!seq) return { success: false, error: "Sequence not found" };
@@ -1029,7 +1059,7 @@ export async function updateSequencePacing(
         const access = await assertClientAccess(seq.client_id);
         if (!access.ok) return { success: false, error: access.error };
 
-        const updates: Record<string, number | string | null> = {};
+        const updates: Record<string, number | string | string[] | null> = {};
 
         if ("daily_call_cap" in settings) {
             const cap = settings.daily_call_cap;
@@ -1072,29 +1102,63 @@ export async function updateSequencePacing(
             if (start && end && start >= end) {
                 return { success: false, error: "Calling window start must be earlier than its end" };
             }
-            if (start && end) {
-                const { data: seqSettings } = await supabase
-                    .from("sequences")
-                    .select("respect_business_hours")
-                    .eq("id", sequenceId)
-                    .single();
-                if (seqSettings?.respect_business_hours !== false) {
-                    const { data: profile } = await supabase
-                        .from("tenant_profiles")
-                        .select("business_hours")
-                        .eq("client_id", seq.client_id)
-                        .maybeSingle();
-                    if (profile && !windowOverlapsBusinessHours(start, end, profile.business_hours)) {
-                        return {
-                            success: false,
-                            error:
-                                "This calling window falls entirely outside your business hours, so no calls would ever go out. Widen the window, adjust business hours, or turn off business-hours enforcement for this sequence.",
-                        };
-                    }
-                }
-            }
             updates.calling_window_start = start;
             updates.calling_window_end = end;
+        }
+
+        if ("calling_days" in settings) {
+            const days = settings.calling_days;
+            if (days !== null && days !== undefined) {
+                if (!Array.isArray(days)) {
+                    return { success: false, error: "Calling days must be a list of days" };
+                }
+                const cleaned = [...new Set(days.map((d) => String(d).toLowerCase()))];
+                if (cleaned.some((d) => !(CALLING_DAY_KEYS as readonly string[]).includes(d))) {
+                    return { success: false, error: "Calling days must be sun/mon/tue/wed/thu/fri/sat" };
+                }
+                if (cleaned.length === 0) {
+                    return {
+                        success: false,
+                        error: "Select at least one calling day, or leave every day enabled",
+                    };
+                }
+                // All seven = no restriction; store NULL so the sequencer skips the gate.
+                updates.calling_days = cleaned.length === 7 ? null : cleaned;
+            } else {
+                updates.calling_days = null;
+            }
+        }
+
+        // Anti-livelock: validate the EFFECTIVE window + days combination (new
+        // values where provided, else stored) against business hours, so a
+        // days-only edit can't strand a stored window (or vice versa).
+        if (seq.respect_business_hours !== false) {
+            const effStart = ("calling_window_start" in updates
+                ? updates.calling_window_start
+                : seq.calling_window_start) as string | null;
+            const effEnd = ("calling_window_end" in updates
+                ? updates.calling_window_end
+                : seq.calling_window_end) as string | null;
+            const effDays = ("calling_days" in updates
+                ? updates.calling_days
+                : seq.calling_days) as string[] | null;
+            if (effStart || effDays) {
+                const { data: profile } = await supabase
+                    .from("tenant_profiles")
+                    .select("business_hours")
+                    .eq("client_id", seq.client_id)
+                    .maybeSingle();
+                if (
+                    profile &&
+                    !dialingPossibleWithBusinessHours(effStart, effEnd, effDays, profile.business_hours)
+                ) {
+                    return {
+                        success: false,
+                        error:
+                            "With these calling days and window, every allowed time falls outside your business hours — no calls would ever go out. Adjust the days/window, your business hours, or turn off business-hours enforcement for this sequence.",
+                    };
+                }
+            }
         }
 
         if (Object.keys(updates).length === 0) return { success: true };
