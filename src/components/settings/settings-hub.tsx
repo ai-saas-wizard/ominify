@@ -23,6 +23,7 @@ interface SettingsHubProps {
     currentName: string;
     currentEmail: string;
     currentBusinessName?: string;
+    currentBookingLink?: string;
 }
 
 const navLinks = [
@@ -101,6 +102,7 @@ export function SettingsHub({
     currentName,
     currentEmail,
     currentBusinessName,
+    currentBookingLink,
 }: SettingsHubProps) {
     return (
         <motion.div
@@ -166,6 +168,7 @@ export function SettingsHub({
                             currentName={currentName}
                             currentEmail={currentEmail}
                             currentBusinessName={currentBusinessName}
+                            currentBookingLink={currentBookingLink}
                             updateProfile={updateProfile}
                         />
                     </CardContent>

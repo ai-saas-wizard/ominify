@@ -219,6 +219,11 @@ export async function generateNextStep(params: {
         ? `\n\nWHEN THE NEXT STEP IS SMS, write it in this texting persona/style (adapt, don't copy verbatim):\n${messaging.smsPrompt}`
         : '';
 
+    // The tenant's real scheduling URL, rendered at dispatch via the
+    // {{booking_link}} placeholder (scheduler-worker renderTemplate). Told to
+    // the model explicitly either way so it never PROMISES a link it can't send.
+    const bookingLink = (tenantProfile.booking_link || '').trim();
+
     const systemPrompt = `You are an expert outbound sales sequencer AI. Your job is to decide the NEXT step in a multi-channel outreach sequence based on what just happened.
 
 SEQUENCE STRATEGY:
@@ -233,6 +238,7 @@ BUSINESS PROFILE:
 - Industry: ${tenantProfile.industry}
 - Brand voice: ${tenantProfile.brand_voice}
 - Timezone: ${tenantProfile.timezone}
+${bookingLink ? `- Booking link: available as the {{booking_link}} placeholder (renders as the real scheduling URL at send time)` : ''}
 ${tenantProfile.business_hours ? `- Business hours: ${JSON.stringify(tenantProfile.business_hours)}` : ''}
 ${sequence.respect_business_hours ? '- MUST respect business hours' : ''}
 
@@ -277,6 +283,9 @@ CONTENT RULES:
 - SMS: content MUST be an object shaped exactly {"body": "..."} (the text goes in "body", NOT "text"/"message"). Under 160 chars, natural, reference the specific outcome. Use {{first_name}} and {{business_name}} placeholders.
 - Email: Include subject, body_html, body_text. Reference prior interactions naturally.
 - Voice: Provide first_message (greeting) and system_prompt (agent instructions). The system will inject the vapi_assistant_id automatically.
+- ${bookingLink
+        ? 'When inviting the lead to book a time, include the {{booking_link}} placeholder — it renders as the real booking URL. NEVER write out a URL yourself.'
+        : 'NO booking link is configured for this business. NEVER promise to send or include a scheduling/booking link.'}
 - NEVER be generic. Always reference what just happened.${smsStyleGuide}
 
 OUTPUT FORMAT (JSON only):

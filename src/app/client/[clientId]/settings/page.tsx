@@ -24,10 +24,10 @@ export default async function ClientSettingsPage(props: {
         return <div className="p-8 text-center text-red-600">Client not found</div>;
     }
 
-    // Fetch business name from tenant_profiles (stored as legal_business_name)
+    // Fetch business name (stored as legal_business_name) + booking link from tenant_profiles
     const { data: tenantProfile } = await supabase
         .from('tenant_profiles')
-        .select('legal_business_name')
+        .select('legal_business_name, booking_link')
         .eq('client_id', clientId)
         .single();
 
@@ -48,16 +48,20 @@ export default async function ClientSettingsPage(props: {
         const name = formData.get("name") as string;
         const email = formData.get("email") as string;
         const businessName = formData.get("business_name") as string;
+        const bookingLink = formData.get("booking_link") as string;
 
         await supabase
             .from('clients')
             .update({ name, email })
             .eq('id', clientId);
 
-        // Save business name to tenant_profiles.legal_business_name
+        // Save business name + booking link to tenant_profiles
         await supabase
             .from('tenant_profiles')
-            .update({ legal_business_name: businessName || null })
+            .update({
+                legal_business_name: businessName || null,
+                booking_link: bookingLink?.trim() || null,
+            })
             .eq('client_id', clientId);
 
         revalidatePath(`/client/${clientId}/settings`);
@@ -93,6 +97,7 @@ export default async function ClientSettingsPage(props: {
                 currentName={client.name || ""}
                 currentEmail={client.email || ""}
                 currentBusinessName={tenantProfile?.legal_business_name || ""}
+                currentBookingLink={tenantProfile?.booking_link || ""}
             />
         </div>
     );
