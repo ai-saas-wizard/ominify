@@ -12,17 +12,19 @@ interface UpdateProfileFormProps {
     currentName: string;
     currentEmail: string;
     currentBusinessName?: string;
+    currentBookingLink?: string;
     updateProfile: (formData: FormData) => Promise<void>;
 }
 
-export function UpdateProfileForm({ currentName, currentEmail, currentBusinessName = "", updateProfile }: UpdateProfileFormProps) {
+export function UpdateProfileForm({ currentName, currentEmail, currentBusinessName = "", currentBookingLink = "", updateProfile }: UpdateProfileFormProps) {
     const [name, setName] = useState(currentName);
     const [email, setEmail] = useState(currentEmail);
     const [businessName, setBusinessName] = useState(currentBusinessName);
+    const [bookingLink, setBookingLink] = useState(currentBookingLink);
     const [isSaving, setIsSaving] = useState(false);
     const [saved, setSaved] = useState(false);
 
-    const hasChanges = name !== currentName || email !== currentEmail || businessName !== currentBusinessName;
+    const hasChanges = name !== currentName || email !== currentEmail || businessName !== currentBusinessName || bookingLink !== currentBookingLink;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -33,6 +35,7 @@ export function UpdateProfileForm({ currentName, currentEmail, currentBusinessNa
         formData.set("name", name);
         formData.set("email", email);
         formData.set("business_name", businessName);
+        formData.set("booking_link", bookingLink);
 
         await updateProfile(formData);
         setIsSaving(false);
@@ -54,6 +57,22 @@ export function UpdateProfileForm({ currentName, currentEmail, currentBusinessNa
                     placeholder="e.g. Acme Corp"
                 />
                 <p className="mt-1 text-xs text-gray-500">This name is displayed in the sidebar and used across your dashboard.</p>
+            </div>
+
+            <div>
+                <Label htmlFor="profile-booking-link" className="mb-1.5 block">
+                    Booking Link
+                </Label>
+                <Input
+                    id="profile-booking-link"
+                    type="url"
+                    value={bookingLink}
+                    onChange={(e) => setBookingLink(e.target.value)}
+                    placeholder="https://calendly.com/your-team/intro-call"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                    {"Texted to interested leads after a positive call, and available in sequence messages as {{booking_link}}. Leave blank to disable."}
+                </p>
             </div>
 
             <div>

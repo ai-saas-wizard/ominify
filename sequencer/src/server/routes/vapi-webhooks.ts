@@ -256,29 +256,47 @@ function detectAppointmentBooked(payload: VapiWebhookPayload, transcript?: strin
         return true;
     }
 
-    // Check artifact messages for booking-related tool calls
+    // Check artifact messages for the actual booking tool. Exact-match on
+    // book_appointment: the old substring check ('book'/'schedule'/
+    // 'appointment') also matched lookup_appointment, reschedule_appointment,
+    // and cancel_appointment, flagging every lookup/reschedule/cancellation
+    // call as a NEW booking — which flipped the enrollment to 'booked' and
+    // ended the sequence.
     const artifactMessages = payload.message.artifact?.messages;
+    let cancelSeen = false;
     if (artifactMessages && Array.isArray(artifactMessages)) {
         for (const msg of artifactMessages) {
             if (msg.role === 'tool_calls' && msg.toolCalls) {
                 for (const toolCall of msg.toolCalls) {
                     const funcName = toolCall.function?.name?.toLowerCase() || '';
-                    if (funcName.includes('book') || funcName.includes('schedule') || funcName.includes('appointment')) {
+                    if (funcName === 'book_appointment') {
                         return true;
+                    }
+                    if (funcName === 'cancel_appointment') {
+                        cancelSeen = true;
                     }
                 }
             }
         }
     }
 
-    // Check for specific patterns in transcript
+    // A cancellation call (with no new booking) is definitively NOT a booking.
+    // Its transcript naturally contains booking-ish phrases about the OLD
+    // appointment ("your appointment confirmed for Tuesday has been
+    // cancelled"), so skip the keyword fallback entirely.
+    if (cancelSeen) {
+        return false;
+    }
+
+    // Check for specific patterns in transcript. Confirmation-anchored phrases
+    // only — 'booked for'/'scheduled for' fired on lookup/reschedule calls
+    // reading back an EXISTING appointment, 'see you on' matched "see you
+    // online", and "we'll be there" matched "we'll be there for you".
     const transcriptText = transcript || payload.message.transcript || payload.message.call?.transcript || '';
     const bookingIndicators = [
         'appointment confirmed',
-        'booked for',
-        'scheduled for',
-        'see you on',
-        "we'll be there",
+        "i've booked",
+        "i've scheduled",
         'showing confirmed',
         'tour scheduled',
         "you're all set for",

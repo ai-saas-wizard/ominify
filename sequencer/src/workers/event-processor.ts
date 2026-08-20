@@ -38,9 +38,12 @@ import {
     isStopEmailBody,
     isStartMessage,
     isHelpMessage,
+    isContactOptedOut,
     optOutContact,
     reoptInContact,
 } from '../lib/opt-out.js';
+import { getTenantCapableChannels } from '../lib/channel-capabilities.js';
+import { isTCPACompliant, getNextBusinessHoursStart } from '../lib/compliance.js';
 import { computeStepAttribution } from '../lib/outcome-learning.js';
 import { phoneLookupCandidates } from '../lib/phone.js';
 import {
@@ -311,6 +314,104 @@ async function maybeTriggerDynamicGeneration(
     }
 }
 
+/** EI intents that read as a positive call for the booking-link follow-up. */
+const BOOKING_LINK_POSITIVE_INTENTS = new Set(['interested', 'ready_to_buy']);
+
+/**
+ * Deterministic booking-link SMS after a positive answered call.
+ *
+ * When a call was answered, NO appointment was booked on it, and the EI
+ * analysis reads the lead as positive (hot lead or interested/ready-to-buy
+ * intent), text the tenant's booking link right away instead of relying on
+ * the AI's next generated step to remember to include one.
+ *
+ * Skips silently when no booking_link is configured or the tenant can't send
+ * SMS. Honors contact opt-out; outside the TCPA window the job is queued with
+ * a delay to the next business-hours start (same policy as healing sends).
+ */
+async function maybeSendBookingLinkSms(
+    enrollmentId: string,
+    callId: string | undefined,
+    eiAnalysis: EmotionalAnalysis | null
+): Promise<void> {
+    if (!eiAnalysis) return;
+    if (!eiAnalysis.is_hot_lead && !BOOKING_LINK_POSITIVE_INTENTS.has(eiAnalysis.intent)) return;
+
+    const { data: enrollment, error: enrollErr } = await supabase
+        .from('sequence_enrollments')
+        .select('contact_id, tenant_id, status, appointment_booked, is_test, contacts(phone, first_name, name, opted_out_at)')
+        .eq('id', enrollmentId)
+        .single();
+
+    if (enrollErr || !enrollment) {
+        if (enrollErr) {
+            console.error(`[EVENT] Booking-link SMS: enrollment fetch failed for ${enrollmentId}:`, enrollErr);
+        }
+        return;
+    }
+
+    // Already booked (e.g. on an earlier call) — nothing to invite them to.
+    if (enrollment.appointment_booked || enrollment.status === 'booked') return;
+
+    const contact = (enrollment as any).contacts as {
+        phone?: string | null;
+        first_name?: string | null;
+        name?: string | null;
+        opted_out_at?: string | null;
+    } | null;
+    if (!contact?.phone) return;
+    if (isContactOptedOut(contact)) {
+        console.log(`[EVENT] Booking-link SMS skipped for ${enrollmentId} — contact opted out`);
+        return;
+    }
+
+    const { data: profile, error: profileErr } = await supabase
+        .from('tenant_profiles')
+        .select('booking_link, timezone, business_hours')
+        .eq('client_id', enrollment.tenant_id)
+        .maybeSingle();
+    if (profileErr) {
+        console.error(`[EVENT] Booking-link SMS: profile fetch failed for tenant ${enrollment.tenant_id}:`, profileErr);
+        return;
+    }
+
+    const bookingLink = (profile?.booking_link || '').trim();
+    if (!bookingLink) return; // not configured — silent skip
+
+    const capableChannels = await getTenantCapableChannels(enrollment.tenant_id);
+    if (!capableChannels.includes('sms')) return; // tenant can't send SMS — silent skip
+
+    // TCPA: never text outside the 8am-9pm window — delay to the next
+    // business-hours start instead of dropping the send.
+    const timezone = profile?.timezone || 'America/New_York';
+    let delayMs = 0;
+    if (!isTCPACompliant(timezone)) {
+        const resumeAt = getNextBusinessHoursStart(timezone, profile?.business_hours || null, new Date());
+        delayMs = Math.max(0, resumeAt.getTime() - Date.now());
+    }
+    delayMs = clampTestDelayMs(delayMs, (enrollment as any).is_test === true);
+
+    const firstName = contact.first_name || contact.name?.split(' ')[0] || '';
+    const body = `${firstName ? `${firstName}, great` : 'Great'} talking with you just now! You can grab a time that works for you here: ${bookingLink}`;
+
+    await smsQueue.add('sms:booking-link', {
+        tenantId: enrollment.tenant_id,
+        contactPhone: contact.phone,
+        body,
+        enrollmentId,
+        stepId: null,
+        // One send per call: a replayed/retried call-outcome event for the
+        // same callId must not re-text the link.
+        dedupKey: `booking-link:${enrollmentId}:${callId || 'no-call-id'}`,
+        metadata: { source: 'booking_link', callId: callId || null },
+    }, delayMs > 0 ? { delay: delayMs } : {});
+
+    console.log(
+        `[EVENT] Booking-link SMS queued for enrollment ${enrollmentId}` +
+        (delayMs > 0 ? ` (delayed ${Math.round(delayMs / 1000)}s for TCPA window)` : '')
+    );
+}
+
 /**
  * Handle call outcome event
  */
@@ -542,6 +643,17 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
             if (eiAnalysis?.is_hot_lead || enrollForPipeline.is_hot_lead) {
                 await autoAdvancePipelineStage(enrollForPipeline.contact_id, enrollForPipeline.tenant_id, 'Qualified');
             }
+        }
+    }
+
+    // 8b. Deterministic booking-link SMS — an answered call that ended
+    // positive but WITHOUT a booking gets the tenant's booking link texted.
+    // 'transferred' is deliberately excluded: a human took over that call.
+    if (enrollmentId && (disposition === 'answered' || disposition === 'completed') && !appointmentBooked) {
+        try {
+            await maybeSendBookingLinkSms(enrollmentId, callId, eiAnalysis);
+        } catch (err) {
+            console.error(`[EVENT] Booking-link SMS failed for ${enrollmentId}:`, err);
         }
     }
 

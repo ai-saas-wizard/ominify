@@ -619,6 +619,8 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         // Business / agent context
         business_name: sequence.name?.split(' - ')[0] || (tenantProfile as any).business_name || '',
         agent_name: (sequence as any).agent_name || sequence.name || '',
+        // Tenant scheduling URL (dynamic steps are told to emit {{booking_link}})
+        booking_link: (tenantProfile.booking_link || '').trim(),
         // Persistent contact custom fields (from manual entry / settings)
         ...(contact.custom_fields || {}),
         // Per-enrollment custom variables (from CSV / webhook — overrides contact fields)

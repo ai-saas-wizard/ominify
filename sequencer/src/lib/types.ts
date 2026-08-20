@@ -77,6 +77,8 @@ export interface TenantProfile {
         emergency_24_7?: boolean;
     } | null;
     primary_goal: string | null;
+    /** Public scheduling URL (Calendly etc.) — texted after positive calls and rendered via {{booking_link}}. */
+    booking_link?: string | null;
     lead_sources: Array<{
         source: string;
         urgency_multiplier: number;
