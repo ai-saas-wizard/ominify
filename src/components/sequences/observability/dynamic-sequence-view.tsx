@@ -35,11 +35,12 @@ import {
     toggleSequenceActive,
     deleteSequence,
     unenrollContact,
+    resumeSequenceEnrollments,
     listOutboundAgents,
     updateSequence,
 } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
-import { seqFocusRing, seqBtnSecondary, seqCardStatic } from "@/components/sequences/theme";
+import { seqFocusRing, seqBtnPrimary, seqBtnSecondary, seqCardStatic } from "@/components/sequences/theme";
 
 // Dynamic enrollments spend most of their life awaiting an outcome or
 // generating the next step — those are in-flight (sky). Terminal outcomes
@@ -93,6 +94,8 @@ export function DynamicSequenceView({
         enrollments[0]?.id ?? null
     );
     const [unenrollingId, setUnenrollingId] = useState<string | null>(null);
+    const [resuming, setResuming] = useState(false);
+    const [resumeMsg, setResumeMsg] = useState<string | null>(null);
 
     // Bound-agent picker (operational, not authoring — same optimistic pattern
     // as the flow sidebar's Info tab).
@@ -143,6 +146,20 @@ export function DynamicSequenceView({
         if (!res?.success) {
             setBoundAgentId(prev);
             alert(res?.error || "Failed to update the bound agent");
+        }
+    }
+
+    async function handleResume() {
+        setResuming(true);
+        setResumeMsg(null);
+        const res = await resumeSequenceEnrollments(sequenceId);
+        setResuming(false);
+        if (res?.success) {
+            const n = res.data?.resumed ?? 0;
+            setResumeMsg(`Resumed ${n} lead${n === 1 ? "" : "s"}`);
+            router.refresh();
+        } else {
+            setResumeMsg(res?.error || "Could not resume");
         }
     }
 
@@ -359,6 +376,31 @@ export function DynamicSequenceView({
                                 </div>
                             ))}
                         </div>
+
+                        {/* Deactivating parks in-flight leads at status=paused and
+                            re-activating deliberately does not undo it, so paused
+                            leads need an explicit way back into rotation. */}
+                        {stats.paused > 0 && (
+                            <div className="mt-4 border-t border-gray-100 pt-3">
+                                <button
+                                    type="button"
+                                    onClick={handleResume}
+                                    disabled={resuming}
+                                    className={cn(seqBtnPrimary, "w-full px-3 py-1.5 text-xs")}
+                                >
+                                    {resuming
+                                        ? "Resuming..."
+                                        : `Resume ${stats.paused} paused lead${stats.paused === 1 ? "" : "s"}`}
+                                </button>
+                                <p className="mt-2 text-xs text-gray-500">
+                                    Puts them back in rotation, re-staggered by your release
+                                    pace. Outreach continues on the sequence schedule.
+                                </p>
+                                {resumeMsg && (
+                                    <p className="mt-2 text-xs text-gray-700">{resumeMsg}</p>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
 

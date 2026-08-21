@@ -79,6 +79,9 @@ type JourneyEvent =
  */
 export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) {
     const [loading, setLoading] = useState(true);
+    const [dispatchedByProviderId, setDispatchedByProviderId] = useState<
+        Record<string, string>
+    >({});
     const [error, setError] = useState<string | null>(null);
     const [events, setEvents] = useState<JourneyEvent[]>([]);
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -113,6 +116,20 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                     at: i.created_at,
                     data: i,
                 }));
+            // Outbound sends store the ACTUAL dispatched text on the
+            // interaction row (sms-worker records contentBody). The step row
+            // keeps the "[AI-generated at dispatch]" template, because dynamic
+            // content is generated per lead at send time and never written
+            // back. Key the real text by provider id so the log row can show
+            // what the lead actually received instead of the template.
+            const sentByProviderId: Record<string, string> = {};
+            for (const i of result.interactions || []) {
+                if (i.direction === "outbound" && i.provider_id && i.content_body) {
+                    sentByProviderId[i.provider_id] = i.content_body;
+                }
+            }
+            setDispatchedByProviderId(sentByProviderId);
+
             const merged = [...logs, ...interactions].sort(
                 (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
             );
@@ -187,7 +204,9 @@ export function LeadJourneyTimeline({ enrollmentId }: { enrollmentId: string }) 
                         const step = log.sequence_steps;
                         const meta = CHANNEL_META[log.channel] || CHANNEL_META.sms;
                         const Icon = meta.icon;
-                        const preview = stepContentPreview(step);
+                        const preview =
+                            (log.provider_id && dispatchedByProviderId[log.provider_id]) ||
+                            stepContentPreview(step);
                         const delay = formatDelay(step?.delay_minutes);
                         const status = statusStyle(log.status);
                         return (

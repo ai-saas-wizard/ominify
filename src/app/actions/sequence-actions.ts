@@ -591,6 +591,87 @@ export async function unenrollContact(enrollmentId: string) {
     }
 }
 
+// ─── Resume enrollments paused by deactivation ─────────────────────────────────
+
+/**
+ * Put a sequence's paused enrollments back into rotation.
+ *
+ * Deactivating a sequence sweeps every in-flight enrollment to
+ * status='paused', next_step_at=null (setSequenceActiveCore) — that sweep is
+ * what actually halts dispatch. Re-activating deliberately does NOT undo it,
+ * so without this the leads stay parked forever. `paused` has exactly one
+ * writer (that sweep), so resuming the whole set is unambiguous.
+ *
+ * next_step_at is re-staggered by the sequence's pacing_per_minute. Without
+ * that, every resumed lead becomes due on the same tick and the batch
+ * stampedes the moment the window opens — the exact thing the pacing controls
+ * exist to prevent.
+ */
+export async function resumeSequenceEnrollments(sequenceId: string) {
+    try {
+        const { data: seq } = await supabase
+            .from("sequences")
+            .select("client_id, is_active, pacing_per_minute")
+            .eq("id", sequenceId)
+            .single();
+        if (!seq) return { success: false, error: "Sequence not found" };
+
+        const access = await assertClientAccess(seq.client_id);
+        if (!access.ok) return { success: false, error: access.error };
+
+        // The scheduler claims on enrollment status alone, so resuming into a
+        // deactivated sequence would dispatch anyway. Refuse instead, so the
+        // Inactive badge keeps meaning something.
+        if (!seq.is_active) {
+            return {
+                success: false,
+                error: "Activate the sequence first — resuming while it is inactive would start outreach anyway.",
+            };
+        }
+
+        const { data: paused, error: fetchErr } = await supabase
+            .from("sequence_enrollments")
+            .select("id")
+            .eq("sequence_id", sequenceId)
+            .eq("status", "paused");
+        if (fetchErr) return { success: false, error: fetchErr.message };
+        if (!paused || paused.length === 0) {
+            return { success: true, data: { resumed: 0 } };
+        }
+
+        const pacing = seq.pacing_per_minute as number | null;
+        const intervalMs = pacing && pacing > 0 ? Math.floor(60_000 / pacing) : 0;
+        const baseTime = Date.now();
+
+        let resumed = 0;
+        const errors: string[] = [];
+        for (let i = 0; i < paused.length; i++) {
+            const nextStepAt = new Date(baseTime + i * intervalMs).toISOString();
+            const { error } = await supabase
+                .from("sequence_enrollments")
+                .update({
+                    status: "active",
+                    next_step_at: nextStepAt,
+                    outcome_timeout_at: null,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq("id", paused[i].id)
+                // Only move rows still paused — never revive one that changed
+                // underneath us (opted out, unenrolled) while we iterated.
+                .eq("status", "paused");
+            if (error) errors.push(error.message);
+            else resumed++;
+        }
+
+        revalidatePath(`/client/${seq.client_id}/sequences`);
+        revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
+        return { success: true, data: { resumed, errors } };
+    } catch (error) {
+        console.error("resumeSequenceEnrollments error:", error);
+        return { success: false, error: "Internal error" };
+    }
+}
+
 // ─── List enrollments for a sequence ───────────────────────────────────────────
 
 export async function getEnrollments(sequenceId: string) {
