@@ -1,33 +1,16 @@
-export default function DashboardPage() {
-    return (
-        <div className="p-4 lg:p-8 h-full">
-            <div className="mb-8 space-y-4">
-                <h2 className="text-2xl md:text-4xl font-bold text-center lg:text-left">
-                    Dashboard
-                </h2>
-                <p className="text-muted-foreground font-light text-sm md:text-lg text-center lg:text-left">
-                    Overview of your voice agents and performance.
-                </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Placeholders for Metrics */}
-                <div className="p-6 bg-white border rounded-xl shadow-sm">
-                    <div className="text-sm font-medium text-gray-500">Total Agents</div>
-                    <div className="text-3xl font-bold">0</div>
-                </div>
-                <div className="p-6 bg-white border rounded-xl shadow-sm">
-                    <div className="text-sm font-medium text-gray-500">Total Calls</div>
-                    <div className="text-3xl font-bold">0</div>
-                </div>
-                <div className="p-6 bg-white border rounded-xl shadow-sm">
-                    <div className="text-sm font-medium text-gray-500">Total Minutes</div>
-                    <div className="text-3xl font-bold">0</div>
-                </div>
-                <div className="p-6 bg-white border rounded-xl shadow-sm">
-                    <div className="text-sm font-medium text-gray-500">Active Custom Clients</div>
-                    <div className="text-3xl font-bold">0</div>
-                </div>
-            </div>
-        </div>
-    );
+import { redirect } from "next/navigation";
+
+/**
+ * The client area has no dashboard of its own — this route used to render a
+ * placeholder whose metrics were hardcoded zeros, and the sidebar never linked
+ * to it. Several flows still land here (post-onboarding, post-deploy, the
+ * phone-numbers account-type gate, and "back" links from billing/settings), so
+ * the route has to keep resolving: send them to Agents, the first real item in
+ * the sidebar, instead of a dead end.
+ */
+export default async function ClientIndexPage(props: {
+    params: Promise<{ clientId: string }>;
+}) {
+    const { clientId } = await props.params;
+    redirect(`/client/${clientId}/agents`);
 }

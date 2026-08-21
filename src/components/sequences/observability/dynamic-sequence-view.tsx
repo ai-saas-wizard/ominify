@@ -30,6 +30,7 @@ import {
     CallingScheduleCard,
     callingScheduleSummary,
 } from "@/components/sequences/calling-schedule-card";
+import { EnrollListCard } from "@/components/sequences/enroll-list-card";
 import {
     toggleSequenceActive,
     deleteSequence,
@@ -330,6 +331,7 @@ export function DynamicSequenceView({
                     </div>
 
                     <CallingScheduleCard sequenceId={sequenceId} sequence={sequence} />
+                    <EnrollListCard sequenceId={sequenceId} clientId={clientId} />
 
                     <div className={cn(seqCardStatic, "p-4")}>
                         <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">

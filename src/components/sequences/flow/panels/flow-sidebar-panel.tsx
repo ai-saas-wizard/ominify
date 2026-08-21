@@ -20,6 +20,7 @@ import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
 import { getExecutionLog, listOutboundAgents, updateSequence } from "@/app/actions/sequence-actions";
 import { CallingScheduleCard } from "@/components/sequences/calling-schedule-card";
+import { EnrollListCard } from "@/components/sequences/enroll-list-card";
 import { cn } from "@/lib/utils";
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -277,6 +278,15 @@ export function FlowSidebarPanel({
                             <CallingScheduleCard
                                 sequenceId={sequenceId}
                                 sequence={sequence}
+                                className="border-none p-0"
+                            />
+
+                            <Separator />
+
+                            {/* Enroll an already-saved contact list */}
+                            <EnrollListCard
+                                sequenceId={sequenceId}
+                                clientId={clientId}
                                 className="border-none p-0"
                             />
 
