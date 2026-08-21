@@ -367,7 +367,7 @@ function RailItem({
             type="button"
             onClick={onClick}
             className={cn(
-                "w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-colors duration-150",
+                "w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300",
                 selected ? "bg-emerald-50 text-emerald-900 font-semibold" : "text-gray-600 hover:bg-gray-50"
             )}
         >
@@ -413,7 +413,7 @@ function ThreadRow({
             transition={{ duration: 0.2, delay: index < 10 ? index * 0.03 : 0 }}
             onClick={onSelect}
             className={cn(
-                "relative w-full text-left px-4 py-3.5 border-b border-gray-50 transition-colors duration-200",
+                "relative w-full text-left px-4 py-3.5 border-b border-gray-50 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-300",
                 selected ? "bg-emerald-50/60" : "hover:bg-gray-50/80",
                 thread.hasLiveCall && !selected && "bg-emerald-50/30"
             )}

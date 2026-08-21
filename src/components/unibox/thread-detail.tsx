@@ -68,7 +68,7 @@ export function ThreadDetail({ thread, clientId, now }: ThreadDetailProps) {
     };
 
     return (
-        <section className="flex-1 min-w-0 flex flex-col bg-[#fafafa] h-full overflow-hidden">
+        <section className="relative flex-1 min-w-0 h-full overflow-hidden bg-[#fafafa]">
             <AnimatePresence mode="wait">
                 {thread ? (
                     <motion.div
@@ -77,23 +77,24 @@ export function ThreadDetail({ thread, clientId, now }: ThreadDetailProps) {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -8 }}
                         transition={{ duration: 0.25 }}
-                        className="flex flex-col h-full min-h-0"
+                        className="absolute inset-0 flex flex-col"
                     >
                         <ThreadHeader thread={thread} onEndCall={liveEvent ? handleEndCall : undefined} isEnding={isEnding} />
 
-                        <div className="flex-1 min-h-0 overflow-y-auto">
-                            <div className="max-w-2xl mx-auto px-6 pt-6 pb-12 space-y-6">
+                        <div className="shrink-0 px-6 pt-5">
+                            <div className="max-w-2xl mx-auto">
                                 <StatsStrip thread={thread} now={now} />
-                                <Timeline thread={thread} />
                             </div>
                         </div>
+
+                        <TimelineScroller thread={thread} />
                     </motion.div>
                 ) : (
                     <motion.div
                         key="empty"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="flex-1 flex flex-col items-center justify-center text-gray-300"
+                        className="absolute inset-0 flex flex-col items-center justify-center text-gray-300"
                     >
                         <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
                             <Inbox className="w-7 h-7 text-gray-300" />
@@ -104,6 +105,34 @@ export function ThreadDetail({ thread, clientId, now }: ThreadDetailProps) {
                 )}
             </AnimatePresence>
         </section>
+    );
+}
+
+/**
+ * The timeline opens on the newest touch, like a chat — that is what the
+ * operator came to see. Re-anchors when a new event lands (e.g. a live call).
+ */
+function TimelineScroller({ thread }: { thread: UniboxThread }) {
+    const ref = useRef<HTMLDivElement>(null);
+    const lastEventId = thread.events[thread.events.length - 1]?.id;
+
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const toBottom = () => {
+            el.scrollTop = el.scrollHeight;
+        };
+        toBottom();
+        const frame = requestAnimationFrame(toBottom);
+        return () => cancelAnimationFrame(frame);
+    }, [thread.id, lastEventId]);
+
+    return (
+        <div ref={ref} className="flex-1 min-h-0 overflow-y-auto">
+            <div className="max-w-2xl mx-auto px-6 py-6">
+                <Timeline thread={thread} />
+            </div>
+        </div>
     );
 }
 
