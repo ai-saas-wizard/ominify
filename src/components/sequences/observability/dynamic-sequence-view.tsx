@@ -156,7 +156,16 @@ export function DynamicSequenceView({
         setResuming(false);
         if (res?.success) {
             const n = res.data?.resumed ?? 0;
-            setResumeMsg(`Resumed ${n} lead${n === 1 ? "" : "s"}`);
+            // Leads with no step left to run stay paused rather than being
+            // revived into a silent "completed" — say so instead of implying
+            // everything came back.
+            const stranded = res.data?.stranded ?? 0;
+            setResumeMsg(
+                `Resumed ${n} lead${n === 1 ? "" : "s"}` +
+                    (stranded
+                        ? ` · ${stranded} left paused (no next step — they have finished their touches)`
+                        : "")
+            );
             router.refresh();
         } else {
             setResumeMsg(res?.error || "Could not resume");

@@ -113,12 +113,16 @@ const BATCH_SIZE = 100;
 const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutes
 // Contact fatigue guard (see gate 3a). Same channel twice needs a real gap;
 // a different channel may follow quickly so voicemail-then-text still works.
-const MIN_SAME_CHANNEL_GAP_HOURS = Number(process.env.MIN_SAME_CHANNEL_GAP_HOURS) > 0
-    ? Number(process.env.MIN_SAME_CHANNEL_GAP_HOURS)
-    : 20;
-const MIN_CROSS_CHANNEL_GAP_MINUTES = Number(process.env.MIN_CROSS_CHANNEL_GAP_MINUTES) > 0
-    ? Number(process.env.MIN_CROSS_CHANNEL_GAP_MINUTES)
-    : 2;
+// `0` must DISABLE the guard — an operator killing it mid-incident should not
+// silently get the strictest setting instead.
+function gapEnv(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+const MIN_SAME_CHANNEL_GAP_HOURS = gapEnv('MIN_SAME_CHANNEL_GAP_HOURS', 20);
+const MIN_CROSS_CHANNEL_GAP_MINUTES = gapEnv('MIN_CROSS_CHANNEL_GAP_MINUTES', 2);
 
 interface ContactFieldDef {
     field_key: string;
@@ -134,6 +138,11 @@ interface EnrollmentWithContext {
     contact: Contact;
     tenantProfile: TenantProfile;
     contactFieldDefs: ContactFieldDef[];
+}
+
+/** Test enrollments bypass gates so an operator can dial themselves on demand. */
+function isTestEnrollmentEarly(enrollment: SequenceEnrollment): boolean {
+    return enrollment.is_test === true;
 }
 
 /**
@@ -404,6 +413,29 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 
     console.log(`[SCHEDULER] Processing enrollment ${enrollment.id}, step ${step.step_order} (${step.channel})`);
 
+    // 0aa. The sequence itself must be active.
+    //
+    // claim_due_enrollments filters on the ENROLLMENT's status only, and
+    // nothing in this package ever read sequences.is_active — so deactivating a
+    // sequence stopped nothing for leads already enrolled. What actually halted
+    // dispatch was the separate sweep to status='paused' that the UI toggle
+    // performs; enroll into a deactivated sequence afterwards and it dispatches
+    // happily while the UI reads "Inactive". Park the lead instead of sending.
+    if (sequence.is_active === false && !isTestEnrollmentEarly(enrollment)) {
+        const retryAt = new Date(Date.now() + 60 * 60_000).toISOString();
+        console.log(
+            `[SCHEDULER] Sequence ${sequence.id} is inactive — parking enrollment ${enrollment.id} until ${retryAt}`
+        );
+        const { error: parkErr } = await supabase
+            .from('sequence_enrollments')
+            .update({ next_step_at: retryAt, updated_at: new Date().toISOString() })
+            .eq('id', enrollment.id);
+        if (parkErr) {
+            console.error(`[SCHEDULER] Failed to park enrollment ${enrollment.id} for inactive sequence:`, parkErr);
+        }
+        return;
+    }
+
     // 0. Check if enrollment needs human intervention (EI flag)
     const enrollmentEI = enrollment as SequenceEnrollment & {
         needs_human_intervention?: boolean;
@@ -466,6 +498,24 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     // 1. Check skip conditions
     if (shouldSkipStep(enrollment, step.skip_conditions)) {
         console.log(`[SCHEDULER] Skipping step ${step.step_order} - conditions met`);
+        // Record the skip. getExecutedSteps counts touches by execution-log
+        // rows, so a silent skip made the step invisible: the JIT generator saw
+        // zero steps used, regenerated, skipped again, and looped — burning LLM
+        // calls and inserting rows forever. A logged skip counts toward
+        // max_steps and terminates the loop.
+        const { error: skipLogErr } = await supabase.from('sequence_execution_log').insert({
+            enrollment_id: enrollment.id,
+            step_id: step.id,
+            channel: step.channel,
+            action: 'skipped_conditions',
+            provider_id: null,
+            provider_response: { skip_conditions: step.skip_conditions },
+            call_status: 'skipped',
+            executed_at: new Date().toISOString(),
+        });
+        if (skipLogErr) {
+            console.error(`[SCHEDULER] Failed to log condition skip for enrollment ${enrollment.id}:`, skipLogErr);
+        }
         await advanceToNextStep(enrollment, sequence.id, undefined, sequence, step, true);
         return;
     }
@@ -518,14 +568,41 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     // Same-channel repeats are held for MIN_SAME_CHANNEL_GAP_HOURS. A different
     // channel is allowed after only a couple of minutes on purpose — the
     // voicemail-then-text follow-up is designed behaviour and must survive.
-    if (!isTestEnrollment && ['sms', 'voice', 'email'].includes(step.channel)) {
-        const { data: recent } = await supabase
-            .from('contact_interactions')
-            .select('channel, created_at')
-            .eq('contact_id', contact.id)
-            .eq('direction', 'outbound')
-            .order('created_at', { ascending: false })
-            .limit(5);
+    // Key on the channel that will actually be dispatched, not the step's
+    // nominal one. getChannelOverride is a pure read of
+    // enrollment.channel_overrides (resolved again at dispatch); using
+    // step.channel here let a landline sms->voice override read a prior call as
+    // "cross-channel" and allow a second dial 10 minutes later, and inversely
+    // held a legal SMS for ~17h after a voice step.
+    const fatigueChannel = getChannelOverride(enrollment, step.channel) || step.channel;
+    if (!isTestEnrollment && ['sms', 'voice', 'email'].includes(fatigueChannel)) {
+        // Two targeted queries instead of one limit(5): the newest outbound on
+        // THIS channel, and the newest on any other. A burst on one channel can
+        // no longer push the row that matters out of the window.
+        const lookbackFrom = new Date(
+            Date.now() - Math.max(MIN_SAME_CHANNEL_GAP_HOURS, 1) * 3600_000
+        ).toISOString();
+        const [sameRes, otherRes] = await Promise.all([
+            supabase
+                .from('contact_interactions')
+                .select('channel, created_at')
+                .eq('contact_id', contact.id)
+                .eq('direction', 'outbound')
+                .eq('channel', fatigueChannel)
+                .gte('created_at', lookbackFrom)
+                .order('created_at', { ascending: false })
+                .limit(1),
+            supabase
+                .from('contact_interactions')
+                .select('channel, created_at')
+                .eq('contact_id', contact.id)
+                .eq('direction', 'outbound')
+                .neq('channel', fatigueChannel)
+                .gte('created_at', lookbackFrom)
+                .order('created_at', { ascending: false })
+                .limit(1),
+        ]);
+        const recent = [...(sameRes.data || []), ...(otherRes.data || [])];
 
         const now = Date.now();
         let holdUntil = 0;
@@ -534,21 +611,41 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             const at = new Date(r.created_at as string).getTime();
             if (!at) continue;
             const gapMs = now - at;
-            const sameChannel = r.channel === step.channel;
+            const sameChannel = r.channel === fatigueChannel;
             const requiredMs = sameChannel
                 ? MIN_SAME_CHANNEL_GAP_HOURS * 3600_000
                 : MIN_CROSS_CHANNEL_GAP_MINUTES * 60_000;
             if (gapMs < requiredMs && at + requiredMs > holdUntil) {
                 holdUntil = at + requiredMs;
-                why = `${sameChannel ? 'same-channel' : 'cross-channel'} ${step.channel} ${Math.round(gapMs / 60000)}min ago`;
+                why = `${sameChannel ? 'same-channel' : 'cross-channel'} ${fatigueChannel} ${Math.round(gapMs / 60000)}min ago`;
             }
         }
 
         if (holdUntil > now) {
-            const retryAt = withJitter(new Date(holdUntil), null);
+            // Jitter exists to break up a batch landing on one instant (window
+            // reopens). A short cross-channel pacing hold is not that, and a
+            // flat 0-15min spread would delay the intended voicemail-then-text
+            // follow-up. Only jitter holds that are already long.
+            const holdMs = holdUntil - now;
+            const retryAt = holdMs > 30 * 60_000 ? withJitter(new Date(holdUntil), null) : new Date(holdUntil);
             console.log(
                 `[SCHEDULER] Contact fatigue guard held enrollment ${enrollment.id} (${why}) — deferring to ${retryAt.toISOString()}`
             );
+            // Every other withholding gate writes a log row; without one a
+            // fatigue hold is invisible and a quiet lead looks like a bug.
+            const { error: fatigueLogErr } = await supabase.from('sequence_execution_log').insert({
+                enrollment_id: enrollment.id,
+                step_id: step.id,
+                channel: fatigueChannel,
+                action: 'held_contact_fatigue',
+                provider_id: null,
+                provider_response: { reason: why, retry_at: retryAt.toISOString() },
+                call_status: 'skipped',
+                executed_at: new Date().toISOString(),
+            });
+            if (fatigueLogErr) {
+                console.error(`[SCHEDULER] Failed to log fatigue hold for enrollment ${enrollment.id}:`, fatigueLogErr);
+            }
             await rescheduleStep(enrollment.id, retryAt);
             return;
         }
@@ -628,10 +725,18 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
 
     // 4. Load conversation context for cross-channel awareness
     let conversationCtx: ConversationContext | null = null;
+    let contextLoadFailed = false;
     try {
         conversationCtx = await getConversationContext(contact.id, enrollment.id);
     } catch (err) {
-        console.log(`[SCHEDULER] Could not load conversation context, proceeding without it`);
+        contextLoadFailed = true;
+        // Loud, not silent: with no context the voice opener decision below and
+        // every {{conversation_history}} / {{tone_directive}} substitution are
+        // running blind.
+        console.error(
+            `[SCHEDULER] Conversation context unavailable for contact ${contact.id} (enrollment ${enrollment.id}) — dispatching without cross-channel memory:`,
+            err
+        );
     }
 
     // 4b. Resolve the bound agent's messaging assets (SMS persona, shared offer
@@ -838,8 +943,15 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     // is what a cold-call script exists to avoid. Once there IS history, a
     // generated opener earns its place: it can reference the prior text or call
     // instead of re-introducing the company to someone who already heard it.
+    // "No history" and "we could not read the history" are different, and the
+    // count alone cannot tell them apart. On a failed load, keep the agent's
+    // scripted opener: it is written to work cold, and the script already
+    // instructs the model to pick the thread back up when
+    // {{conversation_history}} is non-empty. Generating a replacement with no
+    // context is the case that produced generic vendor lines.
     const priorInteractions = conversationCtx?.interaction_count?.total ?? 0;
-    const skipVoiceOpenerGeneration = dispatchChannel === 'voice' && priorInteractions === 0;
+    const skipVoiceOpenerGeneration =
+        dispatchChannel === 'voice' && (contextLoadFailed || priorInteractions === 0);
     if (skipVoiceOpenerGeneration) {
         // Drop the step's placeholder opener. Leaving it would (a) trip the
         // placeholder guard below and withhold the call, and (b) count as a

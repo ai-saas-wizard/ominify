@@ -532,6 +532,10 @@ async function createREOutboundAgent(
                         ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
+                // Detection without a message means the machine is detected and nothing
+                // is said — the call is simply burned. Outbound wording, not "leave a
+                // message": we called them.
+                voicemailMessage: outboundVoicemailMessage(formData.companyName),
                 metadata: {
                     clientId,
                     agentType: "outbound",
@@ -746,6 +750,10 @@ async function createSaaSOutboundAgent(
                         ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
+                // Detection without a message means the machine is detected and nothing
+                // is said — the call is simply burned. Outbound wording, not "leave a
+                // message": we called them.
+                voicemailMessage: outboundVoicemailMessage(formData.companyName),
                 metadata: {
                     clientId,
                     agentType: "outbound",

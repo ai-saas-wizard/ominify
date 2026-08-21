@@ -143,7 +143,12 @@ function buildLegacyTransientAssistant(
     assistantConfig: VoiceContent
 ): Record<string, any> {
     return {
-        firstMessage: assistantConfig.first_message,
+        // The scheduler clears first_message on a lead's first voice touch so
+        // the bound assistant's own scripted opener is used. This fallback has
+        // no such opener, so an empty string would connect the lead to silence.
+        firstMessage: assistantConfig.first_message?.trim()
+            ? assistantConfig.first_message
+            : 'Hi, this is an automated call. Do you have a moment?',
         model: {
             provider: 'openai',
             model: 'gpt-4',
@@ -368,7 +373,13 @@ async function makeVapiCall(
 
     if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`VAPI API error: ${response.status} - ${errorText}`);
+        // Definitive rejection: VAPI answered and refused. No call exists, so
+        // the send claim is safe to release for a retry. Distinguished from a
+        // network/timeout failure, where VAPI may well have created the call
+        // and a retry would dial a lead who is already on the phone.
+        const err = new Error(`VAPI API error: ${response.status} - ${errorText}`) as Error & { vapiRejected?: boolean };
+        err.vapiRejected = true;
+        throw err;
     }
 
     const data = await response.json() as { id: string };
@@ -594,8 +605,17 @@ async function checkDialTimeGate(
         }
         return { ok: true, capKey: payloadCapKey };
     } catch (err) {
-        console.error(`[VAPI] Dial-time gate error for enrollment ${data.enrollmentId} (failing open):`, err);
-        return { ok: true, capKey: payloadCapKey };
+        // Fail CLOSED. This is the last check before a real phone rings, and
+        // getCallTimeVariables silently returns America/New_York on any lookup
+        // failure — for a Pacific tenant that reads 09:00 ET at 06:00 PT and
+        // would clear both TCPA and the window three hours early. Defer by an
+        // hour instead of dialing on a guess.
+        console.error(`[VAPI] Dial-time gate error for enrollment ${data.enrollmentId} — deferring rather than dialing blind:`, err);
+        return {
+            ok: false,
+            deferTo: new Date(Date.now() + 60 * 60_000),
+            reason: 'gate_check_failed',
+        };
     }
 }
 
@@ -759,9 +779,19 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
         // reservation represents an intended dial for today either way, so
         // holding it keeps the cap conservative instead of over-dialing.
 
-        // Release the send claim so a legitimate BullMQ retry can re-place the call
-        if (claimKey) {
+        // Release the send claim ONLY when VAPI definitively rejected the
+        // request. On a network error or a read timeout the call may already
+        // have been created on VAPI's side; releasing the claim there lets a
+        // BullMQ retry place a SECOND live call to a lead who is already
+        // talking to the agent. Holding the claim costs at most one missed
+        // retry, which the self-healer's call_failed path re-queues anyway.
+        const vapiRejected = (error as { vapiRejected?: boolean })?.vapiRejected === true;
+        if (claimKey && vapiRejected) {
             await releaseClaim(claimKey);
+        } else if (claimKey) {
+            console.warn(
+                `[VAPI] Holding send claim ${claimKey} — VAPI may have accepted the call before the failure; not risking a duplicate dial`
+            );
         }
 
         if (stepId) {

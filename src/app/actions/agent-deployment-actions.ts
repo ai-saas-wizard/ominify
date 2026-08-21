@@ -17,7 +17,7 @@ import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import type { CreateAssistantPayload } from "@/lib/vapi";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 import { normalizeToE164 } from "@/lib/phone-utils";
-import { VOICEMAIL_DETECTION_TYPES } from "@/lib/voicemail-config";
+import { VOICEMAIL_DETECTION_TYPES, outboundVoicemailMessage } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // AGENT FLEET DEPLOYMENT
@@ -50,6 +50,7 @@ function buildVapiPayload(
         maxDurationSeconds?: number;
         backgroundSound?: string;
         voicemailDetection?: any;
+        voicemailMessage?: string;
     }
 ): CreateAssistantPayload {
     if (!defaults) {
@@ -199,6 +200,11 @@ export async function deployAgentFleet(
                           voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                       }
                     : undefined,
+                // Pair every detection with something to say — detection alone
+                // means the machine is caught and the call is burned in silence.
+                voicemailMessage: agentDef?.voicemail_detection
+                    ? outboundVoicemailMessage(client.name)
+                    : undefined,
             });
 
             // Create VAPI assistant
@@ -247,6 +253,9 @@ export async function deployAgentFleet(
                     maxDurationSeconds: vapiPayload.maxDurationSeconds || 300,
                     backgroundSound: vapiPayload.backgroundSound || "office",
                     voicemailDetection: vapiPayload.voicemailDetection,
+                    // Without this the message set above never reaches VAPI and
+                    // detection fires with nothing to say.
+                    voicemailMessage: vapiPayload.voicemailMessage,
                     serverUrl: `${APP_URL}/api/webhooks/vapi`,
                 },
             });
@@ -532,6 +541,13 @@ export async function deployAgentFleetV2(
                           voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                       }
                     : undefined,
+                // Detection without a message means the machine is detected and
+                // nothing is said — the call is simply burned. Outbound wording,
+                // not "leave a message": we called them.
+                voicemailMessage:
+                    suggestedAgent.direction === "outbound"
+                        ? outboundVoicemailMessage(client.name)
+                        : undefined,
             });
 
             // Create VAPI assistant
@@ -580,6 +596,9 @@ export async function deployAgentFleetV2(
                     maxDurationSeconds: vapiPayload.maxDurationSeconds || 300,
                     backgroundSound: vapiPayload.backgroundSound || "office",
                     voicemailDetection: vapiPayload.voicemailDetection,
+                    // Without this the message set above never reaches VAPI and
+                    // detection fires with nothing to say.
+                    voicemailMessage: vapiPayload.voicemailMessage,
                     serverUrl: `${APP_URL}/api/webhooks/vapi`,
                 },
             });

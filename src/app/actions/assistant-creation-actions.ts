@@ -6,7 +6,7 @@ import { getClientVapiKey } from "@/lib/client-secrets";
 import { buildInboundPrompt, buildOutboundPrompt, TenantProfileData } from "@/lib/prompt-templates";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 import { buildCalendarTools } from "@/lib/calendar-tools";
-import { VOICEMAIL_DETECTION_TYPES, inboundVoicemailMessage } from "@/lib/voicemail-config";
+import { VOICEMAIL_DETECTION_TYPES, inboundVoicemailMessage, outboundVoicemailMessage } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // AUTO-CREATE VAPI ASSISTANTS ON ONBOARDING COMPLETION
@@ -366,6 +366,10 @@ export async function createTenantAssistants(clientId: string): Promise<{
                     enabled: true,
                     voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                 },
+                // Detection without a message means the machine is detected and nothing
+                // is said — the call is simply burned. Outbound wording, not "leave a
+                // message": we called them.
+                voicemailMessage: outboundVoicemailMessage(client.name),
                 metadata: { clientId, agentType: "outbound", templateVersion: TEMPLATE_VERSION },
             },
             vapiKey

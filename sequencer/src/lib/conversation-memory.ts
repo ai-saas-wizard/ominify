@@ -171,7 +171,17 @@ export async function getConversationContext(
         .order('created_at', { ascending: false })
         .limit(MAX_INTERACTIONS_FOR_CONTEXT);
 
-    if (error || !interactions || interactions.length === 0) {
+    if (error) {
+        // A failed query is NOT "this lead has no history". Callers use
+        // interaction_count.total === 0 to decide first-touch behaviour — e.g.
+        // the scheduler keeps the agent's scripted cold opener on a first voice
+        // touch — so returning an empty context on a DB blip made a lead who
+        // had already been texted and called hear the cold-open script again.
+        // Surface the failure and let the caller decide.
+        console.error(`[MEMORY] Failed to load conversation context for contact ${contactId}:`, error);
+        throw new Error(`conversation context unavailable: ${error.message}`);
+    }
+    if (!interactions || interactions.length === 0) {
         return buildEmptyContext();
     }
 

@@ -515,6 +515,10 @@ export async function deploySaaSAgents(
                         ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
+                // Detection without a message means the machine is detected and nothing
+                // is said — the call is simply burned. Outbound wording, not "leave a
+                // message": we called them.
+                voicemailMessage: outboundVoicemailMessage(formData.companyName),
             }
         );
 

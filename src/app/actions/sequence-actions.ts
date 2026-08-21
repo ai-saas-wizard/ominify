@@ -647,10 +647,15 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
         // Firing everyone at "now" collapses the cadence: a lead who was three
         // days from their next touch gets it seconds after the resume. That is
         // how a live pilot sent 23 leads a second SMS within an hour of the
-        // first, against a step delay of 3.5 days. Rebuild each lead's due time
-        // from when their last step actually ran plus the next step's delay,
-        // and only fall back to now when that instant has already passed.
-        const stepDelays = new Map<number, number>();
+        // first, against a step delay of 3.5 days.
+        //
+        // The step to look up is resolved the same way the scheduler resolves
+        // it (scheduler-worker fetchStep): step_order = current_step_order + 1,
+        // preferring this enrollment's OWN generated row over a shared template
+        // row at the same order. A template-only lookup silently returned
+        // undefined for dynamic enrollments — the exact population this exists
+        // to protect — and fell straight back to "now".
+        const templateDelays = new Map<number, number>();
         {
             const { data: steps } = await supabase
                 .from("sequence_steps")
@@ -658,16 +663,45 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
                 .eq("sequence_id", sequenceId)
                 .is("enrollment_id", null);
             for (const st of steps || []) {
-                stepDelays.set(st.step_order as number, (st.delay_minutes as number) ?? 0);
+                templateDelays.set(st.step_order as number, (st.delay_minutes as number) ?? 0);
+            }
+        }
+        // Per-enrollment (JIT) steps, keyed by enrollment + order.
+        const ownDelays = new Map<string, number>();
+        {
+            const { data: steps } = await supabase
+                .from("sequence_steps")
+                .select("enrollment_id, step_order, delay_minutes")
+                .eq("sequence_id", sequenceId)
+                .in("enrollment_id", paused.map((p: any) => p.id));
+            for (const st of steps || []) {
+                ownDelays.set(`${st.enrollment_id}:${st.step_order}`, (st.delay_minutes as number) ?? 0);
             }
         }
 
         let resumed = 0;
+        let stranded = 0;
         const errors: string[] = [];
         for (let i = 0; i < paused.length; i++) {
             const row = paused[i] as { id: string; current_step_order?: number | null };
             const nextOrder = (row.current_step_order ?? 0) + 1;
-            const delayMs = (stepDelays.get(nextOrder) ?? 0) * 60_000;
+
+            const ownKey = `${row.id}:${nextOrder}`;
+            const hasOwn = ownDelays.has(ownKey);
+            const hasTemplate = templateDelays.has(nextOrder);
+
+            // No step exists at this order, on either path. Deactivation sweeps
+            // awaiting_outcome/generating_next_step rows to paused with
+            // current_step_order already advanced, so a dynamic lead past the
+            // template count has nothing to run: reviving it as active makes
+            // the scheduler find no step and silently mark it completed,
+            // dropping the lead. Leave it paused and report it instead.
+            if (!hasOwn && !hasTemplate) {
+                stranded++;
+                continue;
+            }
+
+            const delayMs = (hasOwn ? ownDelays.get(ownKey)! : templateDelays.get(nextOrder)!) * 60_000;
 
             let dueAt = baseTime;
             if (delayMs > 0) {
@@ -702,7 +736,7 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
 
         revalidatePath(`/client/${seq.client_id}/sequences`);
         revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
-        return { success: true, data: { resumed, errors } };
+        return { success: true, data: { resumed, stranded, errors } };
     } catch (error) {
         console.error("resumeSequenceEnrollments error:", error);
         return { success: false, error: "Internal error" };
@@ -2660,6 +2694,29 @@ export async function createSequenceFromWizard(
         const capableBriefs = input.stepBriefs.filter((brief) =>
             enabledChannels.includes(brief.channel)
         );
+
+        // Enforce the operator's first-touch pick. Until now it was a prompt
+        // directive only: the briefs come from whatever timeline the model
+        // returned, so if it opened on a different channel the pin was silently
+        // lost and the campaign's first real touch went out on the wrong one —
+        // which is exactly how a calling campaign shipped as four SMS steps.
+        // Reorder rather than rewrite: promoting an existing brief keeps its
+        // intent and CTA intact, so nothing is fabricated.
+        const pinned = input.firstTouch;
+        if (pinned && capableBriefs.length > 1 && capableBriefs[0].channel !== pinned) {
+            const idx = capableBriefs.findIndex((b) => b.channel === pinned);
+            if (idx > 0) {
+                const [promoted] = capableBriefs.splice(idx, 1);
+                capableBriefs.unshift(promoted);
+                console.warn(
+                    `[WIZARD] Simulation opened on "${promoted.channel === pinned ? "?" : capableBriefs[1]?.channel}" despite a "${pinned}" first-touch pin — promoted the ${pinned} step to first.`
+                );
+            } else {
+                console.warn(
+                    `[WIZARD] First-touch pinned to "${pinned}" but the simulation produced no ${pinned} step; leaving the plan as generated.`
+                );
+            }
+        }
         if (capableBriefs.length > 0) {
             const steps = capableBriefs.map((brief, idx) => {
                 const delayMinutes = idx === 0 ? 0 : Math.round((7 * 24 * 60) / input.cadence);
