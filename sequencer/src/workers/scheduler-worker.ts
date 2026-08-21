@@ -111,6 +111,14 @@ const BATCH_SIZE = 100;
 // in the future, preventing duplicate dispatch. If processStep crashes, the
 // lease expires and the row becomes eligible again.
 const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutes
+// Contact fatigue guard (see gate 3a). Same channel twice needs a real gap;
+// a different channel may follow quickly so voicemail-then-text still works.
+const MIN_SAME_CHANNEL_GAP_HOURS = Number(process.env.MIN_SAME_CHANNEL_GAP_HOURS) > 0
+    ? Number(process.env.MIN_SAME_CHANNEL_GAP_HOURS)
+    : 20;
+const MIN_CROSS_CHANNEL_GAP_MINUTES = Number(process.env.MIN_CROSS_CHANNEL_GAP_MINUTES) > 0
+    ? Number(process.env.MIN_CROSS_CHANNEL_GAP_MINUTES)
+    : 2;
 
 interface ContactFieldDef {
     field_key: string;
@@ -493,6 +501,57 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         console.log(`[SCHEDULER] Outside TCPA window, rescheduling to ${nextWindow.toISOString()}`);
         await rescheduleStep(enrollment.id, nextWindow);
         return;
+    }
+
+    // 3a. Contact fatigue guard — the last line of defence before a real phone.
+    //
+    // Every gate above asks whether sending is ALLOWED right now (opt-out,
+    // business hours, TCPA, window, cap). None of them asks whether we just
+    // messaged this person. next_step_at is treated as gospel, so any bug that
+    // sets it wrong reaches the lead: a resume that rebuilt schedules from
+    // "now" once sent 23 leads a second SMS within an hour of the first,
+    // against a configured 3.5-day step delay.
+    //
+    // This checks the CONTACT, not the enrollment, so it also catches the same
+    // person being reached by two sequences at once.
+    //
+    // Same-channel repeats are held for MIN_SAME_CHANNEL_GAP_HOURS. A different
+    // channel is allowed after only a couple of minutes on purpose — the
+    // voicemail-then-text follow-up is designed behaviour and must survive.
+    if (!isTestEnrollment && ['sms', 'voice', 'email'].includes(step.channel)) {
+        const { data: recent } = await supabase
+            .from('contact_interactions')
+            .select('channel, created_at')
+            .eq('contact_id', contact.id)
+            .eq('direction', 'outbound')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        const now = Date.now();
+        let holdUntil = 0;
+        let why = '';
+        for (const r of recent || []) {
+            const at = new Date(r.created_at as string).getTime();
+            if (!at) continue;
+            const gapMs = now - at;
+            const sameChannel = r.channel === step.channel;
+            const requiredMs = sameChannel
+                ? MIN_SAME_CHANNEL_GAP_HOURS * 3600_000
+                : MIN_CROSS_CHANNEL_GAP_MINUTES * 60_000;
+            if (gapMs < requiredMs && at + requiredMs > holdUntil) {
+                holdUntil = at + requiredMs;
+                why = `${sameChannel ? 'same-channel' : 'cross-channel'} ${step.channel} ${Math.round(gapMs / 60000)}min ago`;
+            }
+        }
+
+        if (holdUntil > now) {
+            const retryAt = withJitter(new Date(holdUntil), null);
+            console.log(
+                `[SCHEDULER] Contact fatigue guard held enrollment ${enrollment.id} (${why}) — deferring to ${retryAt.toISOString()}`
+            );
+            await rescheduleStep(enrollment.id, retryAt);
+            return;
+        }
     }
 
     // 3b. Per-sequence calling window + calling days (voice only).
