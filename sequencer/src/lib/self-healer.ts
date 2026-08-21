@@ -421,6 +421,15 @@ export async function executeHealingAction(
                     assistantConfig: step.content as VoiceContent,
                     enrollmentId,
                     stepId,
+                    // Without sequenceId the VAPI worker's dial-time gate
+                    // returns early (checkDialTimeGate) and the dial clears on
+                    // TCPA alone — skipping the sequence's calling window,
+                    // calling days and daily cap. A call_failed at 15:40 then
+                    // re-dialled an hour later, outside a 09:00-16:00 window
+                    // and uncounted. Stamp both so this dial is gated exactly
+                    // like a scheduler-dispatched one.
+                    sequenceId: (enrollment as any).sequence_id,
+                    stepOrder: (step as any).step_order,
                     urgencyPriority: 5,
                     // Distinct from the SMS dedup key — this is a second,
                     // separate send from the same healing action.
@@ -707,6 +716,10 @@ async function dispatchToAlternateChannel(
                 },
                 enrollmentId,
                 stepId,
+                // See the note on the fallback re-queue above: without these
+                // the dial-time gate skips window/days/cap.
+                sequenceId: (enrollment as any).sequence_id,
+                stepOrder: (step as any).step_order,
                 urgencyPriority: 5,
                 dedupKey,
             }, {

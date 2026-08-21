@@ -1125,6 +1125,30 @@ async function maybeTriggerChatbotReply(
                 // well double-counted every chatbot turn in the GPT-fed timeline
                 // and inflated engagement scoring.
                 const turnNumber = result.metadata?.turn || 1;
+
+                // TCPA — this was the one outbound SMS producer with NO
+                // time-of-day gate at all. A lead texting at 11:40pm got an AI
+                // reply at 11:40pm. Replying to an inbound message is the most
+                // defensible send there is, but the 8am-9pm rule still governs
+                // it, so delay rather than drop, matching the booking-link and
+                // healer paths.
+                let chatbotDelayMs = 0;
+                try {
+                    const { data: tp } = await supabase
+                        .from('tenant_profiles')
+                        .select('timezone, business_hours')
+                        .eq('client_id', enrollment.tenant_id)
+                        .maybeSingle();
+                    const tz = (tp as any)?.timezone || 'America/New_York';
+                    if (!isTCPACompliant(tz)) {
+                        const resumeAt = getNextBusinessHoursStart(tz, (tp as any)?.business_hours || null, new Date());
+                        chatbotDelayMs = Math.max(0, resumeAt.getTime() - Date.now());
+                    }
+                    chatbotDelayMs = clampTestDelayMs(chatbotDelayMs, (enrollment as any).is_test === true);
+                } catch (err) {
+                    console.error(`[EVENT] Chatbot TCPA check failed for ${enrollmentId} — sending without delay:`, err);
+                }
+
                 await smsQueue.add('sms:chatbot-reply', {
                     tenantId: enrollment.tenant_id,
                     contactPhone: contact?.phone || fromPhone,
@@ -1133,7 +1157,10 @@ async function maybeTriggerChatbotReply(
                     stepId: null, // No specific step — this is a chatbot reply
                     dedupKey: `chatbot:${enrollmentId}:${inboundSid || Date.now()}`,
                     metadata: { source: 'chatbot', turn: turnNumber },
-                });
+                }, chatbotDelayMs > 0 ? { delay: chatbotDelayMs } : {});
+                if (chatbotDelayMs > 0) {
+                    console.log(`[EVENT] Chatbot reply for ${enrollmentId} delayed ${Math.round(chatbotDelayMs / 1000)}s for the TCPA window`);
+                }
 
                 // Hold the sequence while the lead is mid-conversation with the
                 // chatbot so a scheduled step can't fire over the live chat.

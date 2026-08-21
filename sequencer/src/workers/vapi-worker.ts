@@ -516,7 +516,12 @@ function capacityRetryAt(): Date {
 }
 
 /**
- * Dial-time compliance gate. The scheduler cleared this job at ENQUEUE time,
+ * Dial-time compliance gate.
+ *
+ * NOTE: this only fully gates jobs that carry `sequenceId`. Without it the
+ * function returns early and the dial clears on TCPA alone — window, days and
+ * cap are skipped. Every producer must stamp `sequenceId` (the scheduler and
+ * both self-healer voice paths now do). The scheduler cleared this job at ENQUEUE time,
  * but limiter backpressure and capacity retries can hold it long past that —
  * even across a tenant-local midnight. Re-check TCPA plus the sequence's
  * calling window / daily cap right before dialing. Also the ONLY gate for

@@ -2353,7 +2353,7 @@ export async function convertEnrollmentsToTest(
         // outside this client.
         const { data: rows, error: readErr } = await supabase
             .from("sequence_enrollments")
-            .select("id, status, tenant_id, sequence_id")
+            .select("id, status, tenant_id, sequence_id, is_test, contacts(custom_fields)")
             .in("id", enrollmentIds);
 
         if (readErr) {
@@ -2383,6 +2383,23 @@ export async function convertEnrollmentsToTest(
                 skipped.push({
                     id: row.id,
                     reason: `status is ${row.status} — won't retest a contact who already engaged`,
+                });
+                continue;
+            }
+            // is_test is a permanent, one-way flag on the enrollment, and it
+            // strips EVERY safety gate for that lead from then on: business
+            // hours, TCPA, the calling window and days, the daily cap, the
+            // contact fatigue guard, the VAPI worker's dial-time gate, and it
+            // compresses every delay to 30s. Applying it to a real lead means
+            // calling and texting a stranger repeatedly at any hour. Only
+            // contacts explicitly created as test contacts may be converted.
+            const isTestContact =
+                ((row as any).contacts?.custom_fields as any)?.is_test_contact === true;
+            if (!(row as any).is_test && !isTestContact) {
+                skipped.push({
+                    id: row.id,
+                    reason:
+                        "not a test contact — converting a real lead to test mode would bypass business hours, TCPA, the calling window and the daily cap",
                 });
                 continue;
             }

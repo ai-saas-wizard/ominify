@@ -73,15 +73,21 @@ export function TestNowDialog({
     const reactId = useId();
 
     // Eligible existing enrollments — only active/paused ones can be flipped
-    // to test in place. Filtered + sorted (live first, then test) for display.
+    // to test in place, and ONLY ones that are already test enrollments.
+    // is_test is permanent and strips every safety gate for that lead
+    // (business hours, TCPA, calling window/days, daily cap, fatigue guard,
+    // the dial-time gate) while compressing delays to 30s. Listing real leads
+    // here — previously sorted live-first, so they appeared at the top — put a
+    // "call this stranger repeatedly at any hour" button one click away. The
+    // server refuses them too (convertEnrollmentsToTest); this keeps the UI
+    // honest about what can be selected.
     const eligibleEnrollments = useMemo(
         () =>
             enrollments
-                .filter((e) => ["active", "paused"].includes(e.status))
-                .sort((a, b) => {
-                    if (a.is_test !== b.is_test) return a.is_test ? 1 : -1;
-                    return (a.contacts?.name || "").localeCompare(b.contacts?.name || "");
-                }),
+                .filter((e) => ["active", "paused"].includes(e.status) && e.is_test)
+                .sort((a, b) =>
+                    (a.contacts?.name || "").localeCompare(b.contacts?.name || "")
+                ),
         [enrollments]
     );
 
