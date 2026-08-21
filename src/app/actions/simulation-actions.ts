@@ -156,9 +156,23 @@ ${scenarioType === "handoff" ? "Lead's reply triggers one of the configured hand
 
 DECISION RULES (follow strictly — these match the production sequencer):
 
+0. FIRST TOUCH CHANNEL (decide this before anything else): the opening outbound
+   is whichever ENABLED channel the stated goal actually calls for. Read the
+   Goal text above and honour what it describes — if it talks about calling,
+   dialling, cold calling, or an agent speaking to the lead, open with "voice";
+   if it talks about texting, messaging, or a text-first nurture, open with
+   "sms"; if it describes emailing, open with "email". When the goal names a
+   later channel too ("call them, then text the link"), that later channel is a
+   FOLLOW-UP step, not the opener. Only when the goal implies no channel at all
+   should you infer one from the contact data available (phone-only lists
+   suggest voice or sms; email-only lists suggest email). There is no default
+   channel — never open with SMS merely because it is listed first or because
+   it is the lower-effort option. This timeline becomes the operator's real
+   campaign plan, so the opening channel must be the one they asked for.
+
 1. CHANNEL STICKINESS (CRITICAL): If an inbound entry has channel "X", the very next outbound entry MUST also have channel "X". Do NOT switch channels while the lead is actively replying. This is non-negotiable — owners specifically asked for this.
 
-2. CHANNEL ALTERNATION: Only alternate channels when the lead has gone SILENT after 1-2 outbound attempts on the current channel. Logical fallbacks: SMS → email, email → voice, voice (no answer) → SMS referencing the missed call.
+2. CHANNEL ALTERNATION: Only alternate channels when the lead has gone SILENT after 1-2 outbound attempts on the current channel. Alternate to any other ENABLED channel that has not just been tried — the pairing is symmetric (voice ↔ sms, sms ↔ email, voice ↔ email), not a fixed ladder that starts at SMS. The one directional rule is voicemail: see rule 5.
 
 3. OPT-OUT IS A HARD STOP: If any inbound entry contains opt-out language ("stop", "don't contact me", "remove me", "not interested", "leave me alone", "unsubscribe", or similar), that inbound entry MUST be the LAST entry in the timeline. Set its handoff field to { triggered: true, reason: "opted_out", notification: "<short internal owner notification>" }. Generate ZERO outbound entries after it.
 
@@ -192,7 +206,7 @@ Return ONLY valid JSON in this exact format:
     {
       "day": 1,
       "time": "10:02 AM",
-      "channel": "sms",
+      "channel": "<the first-touch channel you chose per rule 0 — NOT automatically sms>",
       "direction": "outbound",
       "content": "the actual message text",
       "ai_reasoning": "why the AI chose this approach",
