@@ -79,7 +79,16 @@ export async function getExecutedSteps(
 
     const logMap = new Map((logs || []).map(l => [l.step_id, l]));
 
-    return steps.map(step => {
+    // Only steps this enrollment has ACTUALLY run. The query above returns
+    // every step on the sequence, so a wizard-built sequence with 4 template
+    // steps reported 4 "executed" steps on the very first outcome — the
+    // generator compared that against strategy.max_steps (also 4), saw zero
+    // remaining, and ended the enrollment with 'max_steps_reached' after a
+    // single touch. On a live pilot every lead that answered a call was
+    // dropped before its follow-up SMS could go out.
+    const executed = steps.filter(step => logMap.has(step.id));
+
+    return executed.map(step => {
         const log = logMap.get(step.id);
         let outcome: string | null = null;
         if (log) {
