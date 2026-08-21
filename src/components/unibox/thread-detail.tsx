@@ -9,6 +9,7 @@ import {
     Clock,
     Inbox,
     Mail,
+    MessageSquare,
     Pause,
     PhoneIncoming,
     PhoneOff,
@@ -21,7 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { endActiveCall } from "@/app/actions/call-actions";
-import { CHANNEL_LABEL, STATUS_META, type UniboxEvent, type UniboxThread } from "@/lib/unibox/types";
+import { STATUS_META, type UniboxEvent, type UniboxThread } from "@/lib/unibox/types";
 import {
     DISPOSITION_LABEL,
     channelLine,
@@ -277,6 +278,30 @@ function Stat({ label, value, hint, accent }: { label: string; value: string; hi
     );
 }
 
+type TimelineBlock =
+    | { kind: "voice"; event: UniboxEvent }
+    | { kind: "email"; event: UniboxEvent }
+    | { kind: "sms"; events: UniboxEvent[] };
+
+/**
+ * Consecutive texts collapse into one SMS card, so the timeline reads as a
+ * flow of channel boxes (call → texts → email …) rather than loose bubbles
+ * next to cards. A call or email in between splits the run, keeping order.
+ */
+function blocksFor(events: UniboxEvent[]): TimelineBlock[] {
+    const blocks: TimelineBlock[] = [];
+    for (const e of events) {
+        const last = blocks[blocks.length - 1];
+        if (e.kind === "sms") {
+            if (last?.kind === "sms") last.events.push(e);
+            else blocks.push({ kind: "sms", events: [e] });
+        } else {
+            blocks.push({ kind: e.kind, event: e });
+        }
+    }
+    return blocks;
+}
+
 function Timeline({ thread }: { thread: UniboxThread }) {
     const groups: Array<{ key: string; label: string; events: UniboxEvent[] }> = [];
     for (const e of thread.events) {
@@ -288,93 +313,123 @@ function Timeline({ thread }: { thread: UniboxThread }) {
 
     const leadInitials = initialsFor(thread.name);
     const leadFirstName = thread.name?.split(/\s+/)[0] ?? null;
+    const agentLabel = thread.agentName ?? "AI agent";
 
     return (
         <div className="space-y-6">
             {groups.map((g) => (
                 <div key={g.key} className="space-y-3">
-                    <div className="flex items-center gap-3">
-                        <div className="h-px flex-1 bg-gray-200/80" />
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400" suppressHydrationWarning>
-                            {g.label}
-                        </span>
-                        <div className="h-px flex-1 bg-gray-200/80" />
-                    </div>
-                    {g.events.map((e, i) => (
-                        <motion.div
-                            key={e.id}
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.2, delay: Math.min(i, 8) * 0.04 }}
-                            className="space-y-3"
-                        >
-                            <EventItem event={e} thread={thread} leadInitials={leadInitials} leadFirstName={leadFirstName} />
-                            {e.appointmentBooked && <Marker tone="emerald" icon={<CalendarCheck className="w-3 h-3" />} text="Meeting booked" />}
-                            {e.direction === "inbound" && e.intent === "stop" && (
-                                <Marker tone="red" icon={<Ban className="w-3 h-3" />} text="Opted out · all channels stopped" />
-                            )}
-                        </motion.div>
-                    ))}
+                    <DaySeparator label={g.label} />
+                    {blocksFor(g.events).map((block, i) => {
+                        const key = block.kind === "sms" ? block.events[0].id : block.event.id;
+                        return (
+                            <motion.div
+                                key={key}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.2, delay: Math.min(i, 8) * 0.04 }}
+                            >
+                                {block.kind === "voice" ? (
+                                    <VoiceCard
+                                        event={block.event}
+                                        agentLabel={block.event.agentName ?? agentLabel}
+                                        leadInitials={leadInitials}
+                                    />
+                                ) : block.kind === "email" ? (
+                                    <EmailCard event={block.event} agentLabel={agentLabel} leadFirstName={leadFirstName} />
+                                ) : (
+                                    <SmsCard
+                                        events={block.events}
+                                        agentLabel={agentLabel}
+                                        leadInitials={leadInitials}
+                                    />
+                                )}
+                            </motion.div>
+                        );
+                    })}
                 </div>
             ))}
         </div>
     );
 }
 
-function EventItem({
-    event,
-    thread,
-    leadInitials,
-    leadFirstName,
-}: {
-    event: UniboxEvent;
-    thread: UniboxThread;
-    leadInitials: string;
-    leadFirstName: string | null;
-}) {
-    const agentLabel = event.agentName ?? thread.agentName ?? "AI agent";
-    const isLead = event.direction === "inbound";
-    const who = isLead ? leadFirstName ?? "Lead" : agentLabel;
-
-    if (event.kind === "voice") return <VoiceCard event={event} agentLabel={agentLabel} leadInitials={leadInitials} />;
-
-    if (event.kind === "email") {
-        const meta = [CHANNEL_LABEL.email, who, timeLabel(event.at), event.outcome ? titleCase(event.outcome) : null]
-            .filter(Boolean)
-            .join(" · ");
-        return (
-            <div className={cn("flex", isLead ? "justify-start" : "justify-end")}>
-                <Card className="max-w-[85%] border-gray-100 overflow-hidden">
-                    <div className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-gray-400 mb-1.5" suppressHydrationWarning>
-                            <Mail className="w-3 h-3" />
-                            {meta}
-                        </div>
-                        {event.subject && <div className="text-[13px] font-semibold text-gray-900 mb-1">{event.subject}</div>}
-                        <p className="text-[13px] text-gray-600 whitespace-pre-wrap leading-relaxed">{event.body || "(no body)"}</p>
-                    </div>
-                </Card>
-            </div>
-        );
-    }
-
-    const detail = isLead
-        ? event.intent && event.intent !== "unknown"
-            ? titleCase(event.intent)
-            : null
-        : event.outcome
-          ? titleCase(event.outcome)
-          : null;
-    const meta = [CHANNEL_LABEL.sms, who, timeLabel(event.at), detail].filter(Boolean).join(" · ");
-
+function DaySeparator({ label }: { label: string }) {
     return (
-        <Bubble
-            speaker={isLead ? "lead" : "agent"}
-            text={event.body || "(empty message)"}
-            leadInitials={leadInitials}
-            meta={meta}
-        />
+        <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-gray-200/80" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400" suppressHydrationWarning>
+                {label}
+            </span>
+            <div className="h-px flex-1 bg-gray-200/80" />
+        </div>
     );
+}
+
+/** One header shape for every channel box: icon · title · who, then status · time on the right. */
+function ChannelHeader({
+    icon,
+    tone,
+    title,
+    subtitle,
+    right,
+}: {
+    icon: React.ReactNode;
+    tone: string;
+    title: string;
+    subtitle?: string | null;
+    right?: React.ReactNode;
+}) {
+    return (
+        <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-gray-50">
+            <div className="flex items-center gap-3 min-w-0">
+                <div className={cn("w-9 h-9 rounded-full flex items-center justify-center shrink-0", tone)}>{icon}</div>
+                <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-900">{title}</div>
+                    {subtitle && <div className="text-[11px] text-gray-400 truncate">{subtitle}</div>}
+                </div>
+            </div>
+            {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
+        </div>
+    );
+}
+
+function StatusChip({ label, tone, live }: { label: string; tone: string; live?: boolean }) {
+    return (
+        <span
+            className={cn(
+                "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide",
+                tone
+            )}
+        >
+            {live && <PulsingDot className="h-1.5 w-1.5" />}
+            {label}
+        </span>
+    );
+}
+
+function TimeStamp({ iso }: { iso: string }) {
+    return (
+        <span className="text-[11px] text-gray-400" suppressHydrationWarning>
+            {timeLabel(iso)}
+        </span>
+    );
+}
+
+const OUTCOME_TONE = {
+    replied: "bg-emerald-50 text-emerald-700",
+    ok: "bg-gray-100 text-gray-500",
+    pending: "bg-amber-50 text-amber-700",
+    failed: "bg-red-50 text-red-600",
+};
+
+const FAILED_OUTCOMES = new Set(["failed", "undelivered", "bounced", "error"]);
+const PENDING_OUTCOMES = new Set(["queued", "sending", "pending", "accepted", "scheduled"]);
+
+function outcomeTone(outcome: string): string {
+    if (outcome === "replied") return OUTCOME_TONE.replied;
+    if (FAILED_OUTCOMES.has(outcome)) return OUTCOME_TONE.failed;
+    if (PENDING_OUTCOMES.has(outcome)) return OUTCOME_TONE.pending;
+    return OUTCOME_TONE.ok;
 }
 
 /** Lead on the left, the AI agent on the right — the operator reads it like their own inbox. */
@@ -436,41 +491,30 @@ function VoiceCard({ event, agentLabel, leadInitials }: { event: UniboxEvent; ag
 
     return (
         <Card className="overflow-hidden border-gray-100">
-            <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-gray-50">
-                <div className="flex items-center gap-3 min-w-0">
-                    <div className={cn("w-9 h-9 rounded-full flex items-center justify-center shrink-0", iconTone)}>
-                        {isLive ? (
-                            <Radio className="w-4 h-4 animate-pulse" />
-                        ) : inbound ? (
-                            <PhoneIncoming className="w-4 h-4" />
-                        ) : (
-                            <PhoneOutgoing className="w-4 h-4" />
-                        )}
-                    </div>
-                    <div className="min-w-0">
-                        <div className="text-[13px] font-semibold text-gray-900">{inbound ? "Inbound call" : "Voice call"}</div>
-                        <div className="text-[11px] text-gray-400 truncate">{agentLabel}</div>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    <span
-                        className={cn(
-                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide",
-                            DISPOSITION_TONE[disposition]
-                        )}
-                    >
-                        {isLive && <PulsingDot className="h-1.5 w-1.5" />}
-                        {DISPOSITION_LABEL[disposition]}
-                    </span>
-                    <span className="text-[11px] text-gray-500 flex items-center gap-1 font-mono tabular-nums">
-                        <Clock className="w-3 h-3" />
-                        {isLive ? <LiveDuration startedAt={event.at} /> : formatDuration(event.durationSeconds)}
-                    </span>
-                    <span className="text-[11px] text-gray-400" suppressHydrationWarning>
-                        {timeLabel(event.at)}
-                    </span>
-                </div>
-            </div>
+            <ChannelHeader
+                icon={
+                    isLive ? (
+                        <Radio className="w-4 h-4 animate-pulse" />
+                    ) : inbound ? (
+                        <PhoneIncoming className="w-4 h-4" />
+                    ) : (
+                        <PhoneOutgoing className="w-4 h-4" />
+                    )
+                }
+                tone={iconTone}
+                title={inbound ? "Inbound call" : "Voice call"}
+                subtitle={agentLabel}
+                right={
+                    <>
+                        <StatusChip label={DISPOSITION_LABEL[disposition]} tone={DISPOSITION_TONE[disposition]} live={isLive} />
+                        <span className="text-[11px] text-gray-500 flex items-center gap-1 font-mono tabular-nums">
+                            <Clock className="w-3 h-3" />
+                            {isLive ? <LiveDuration startedAt={event.at} /> : formatDuration(event.durationSeconds)}
+                        </span>
+                        <TimeStamp iso={event.at} />
+                    </>
+                }
+            />
 
             {event.recordingUrl && !isLive && (
                 <div className="px-4 pt-3">
@@ -503,6 +547,94 @@ function VoiceCard({ event, agentLabel, leadInitials }: { event: UniboxEvent; ag
                         </span>
                     </div>
                 )}
+                {event.appointmentBooked && <Marker tone="emerald" icon={<CalendarCheck className="w-3 h-3" />} text="Meeting booked" />}
+            </div>
+        </Card>
+    );
+}
+
+function SmsCard({ events, agentLabel, leadInitials }: { events: UniboxEvent[]; agentLabel: string; leadInitials: string }) {
+    const replied = events.some((e) => e.direction === "inbound");
+    const last = events[events.length - 1];
+    const outcome = replied ? "replied" : (last.outcome ?? "sent").toLowerCase();
+
+    return (
+        <Card className="overflow-hidden border-gray-100">
+            <ChannelHeader
+                icon={<MessageSquare className="w-4 h-4" />}
+                tone={replied ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-500"}
+                title="Text messages"
+                subtitle={`${agentLabel} · ${events.length} message${events.length === 1 ? "" : "s"}`}
+                right={
+                    <>
+                        <StatusChip label={titleCase(outcome)} tone={outcomeTone(outcome)} />
+                        <TimeStamp iso={last.at} />
+                    </>
+                }
+            />
+            <div className="px-4 py-4 space-y-2.5">
+                {events.map((e) => {
+                    const isLead = e.direction === "inbound";
+                    const detail = isLead
+                        ? e.intent && e.intent !== "unknown"
+                            ? titleCase(e.intent)
+                            : null
+                        : e.outcome
+                          ? titleCase(e.outcome)
+                          : null;
+                    const meta = [timeLabel(e.at), detail].filter(Boolean).join(" · ");
+                    return (
+                        <div key={e.id} className="space-y-2.5">
+                            <Bubble
+                                speaker={isLead ? "lead" : "agent"}
+                                text={e.body || "(empty message)"}
+                                leadInitials={leadInitials}
+                                meta={meta}
+                            />
+                            {e.appointmentBooked && <Marker tone="emerald" icon={<CalendarCheck className="w-3 h-3" />} text="Meeting booked" />}
+                            {isLead && e.intent === "stop" && (
+                                <Marker tone="red" icon={<Ban className="w-3 h-3" />} text="Opted out · all channels stopped" />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </Card>
+    );
+}
+
+function EmailCard({
+    event,
+    agentLabel,
+    leadFirstName,
+}: {
+    event: UniboxEvent;
+    agentLabel: string;
+    leadFirstName: string | null;
+}) {
+    const isLead = event.direction === "inbound";
+    const outcome = (event.outcome ?? (isLead ? "replied" : "sent")).toLowerCase();
+
+    return (
+        <Card className="overflow-hidden border-gray-100">
+            <ChannelHeader
+                icon={<Mail className="w-4 h-4" />}
+                tone={isLead ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-500"}
+                title="Email"
+                subtitle={isLead ? `From ${leadFirstName ?? "the lead"}` : agentLabel}
+                right={
+                    <>
+                        <StatusChip label={titleCase(outcome)} tone={isLead ? OUTCOME_TONE.replied : outcomeTone(outcome)} />
+                        <TimeStamp iso={event.at} />
+                    </>
+                }
+            />
+            <div className="px-4 py-4 space-y-3">
+                <div>
+                    {event.subject && <div className="text-[13px] font-semibold text-gray-900 mb-1.5">{event.subject}</div>}
+                    <p className="text-[13px] text-gray-600 whitespace-pre-wrap leading-relaxed">{event.body || "(no body)"}</p>
+                </div>
+                {event.appointmentBooked && <Marker tone="emerald" icon={<CalendarCheck className="w-3 h-3" />} text="Meeting booked" />}
             </div>
         </Card>
     );
