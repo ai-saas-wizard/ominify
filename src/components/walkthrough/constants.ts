@@ -36,13 +36,13 @@ export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
         icon: "BarChart3",
     },
     {
-        id: "sidebar-logs",
+        id: "sidebar-unibox",
         type: "sidebar",
-        targetId: "nav-logs",
-        title: "Logs",
+        targetId: "nav-unibox",
+        title: "UNIBOX",
         description:
-            "Full call logs with transcripts, recordings, and AI-generated summaries for every conversation.",
-        icon: "FileText",
+            "Every call, text and email with each lead in one thread — recordings, transcripts, and who still needs a reply.",
+        icon: "Inbox",
     },
     {
         id: "sidebar-billing",

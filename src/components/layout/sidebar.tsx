@@ -10,7 +10,7 @@ import {
     Settings,
     Bot,
     GitBranch,
-    FileText,
+    Inbox,
     BarChart3,
     KanbanSquare
 } from "lucide-react";
@@ -34,7 +34,7 @@ const baseRoutes = [
     { label: "Contacts", icon: Users, href: "/contacts" },
     { label: "Pipeline", icon: KanbanSquare, href: "/pipeline" },
     { label: "Analytics", icon: BarChart3, href: "/analytics" },
-    { label: "Logs", icon: FileText, href: "/logs" },
+    { label: "UNIBOX", icon: Inbox, href: "/unibox" },
     { label: "Billing", icon: CreditCard, href: "/billing" },
 ];
 

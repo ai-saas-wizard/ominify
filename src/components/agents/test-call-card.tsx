@@ -160,10 +160,10 @@ export function TestCallCard({
                 )}
 
                 <Link
-                    href={`/client/${clientId}/logs?assistantId=${vapiAssistantId}`}
+                    href={`/client/${clientId}/unibox?agent=${vapiAssistantId}`}
                     className="flex items-center justify-center gap-1.5 w-full py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                 >
-                    View Call Logs
+                    View in UNIBOX
                     <ExternalLink className="w-3.5 h-3.5" />
                 </Link>
             </div>

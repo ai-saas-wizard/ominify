@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { listCalls } from "@/lib/vapi";
 import { getClientVapiKey } from "@/lib/client-secrets";
 
-// Agent record from Supabase (scoped to client). Mirrors ClientAgent in logs/page.
+// Agent record from Supabase (scoped to client). Mirrors the shape fetched by unibox/page.
 export interface ClientAgent {
     id: string;
     vapi_id: string;
