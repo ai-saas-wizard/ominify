@@ -28,6 +28,7 @@ import { getREStructuredOutputIdForClient } from "./umbrella-structured-outputs-
 import type { REInvestorFormData, SaaSFormData } from "@/lib/verticals/types";
 import type { DeploymentResult } from "@/components/onboarding-v2/types";
 import type { CreateAssistantPayload } from "@/lib/vapi";
+import { VOICEMAIL_DETECTION_TYPES, voicemailDetection, inboundVoicemailMessage, outboundVoicemailMessage } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // VERTICAL DEPLOYMENT
@@ -208,19 +209,10 @@ export async function deployVerticalAgents(
                     templateVersion: "vertical-re-v1",
                     appUrl,
                     reStructuredOutputId,
-                    voicemailDetection: isOutbound
-                        ? {
-                              provider: "twilio",
-                              enabled: true,
-                              voicemailDetectionTypes: [
-                                  "machine_end_beep",
-                                  "machine_end_silence",
-                              ],
-                          }
-                        : undefined,
+                    voicemailDetection: isOutbound ? voicemailDetection() : undefined,
                     voicemailMessage: isOutbound
-                        ? undefined
-                        : `You've reached ${formData.companyName}. Please leave a message and we will get back to you as soon as possible.`,
+                        ? outboundVoicemailMessage(formData.companyName)
+                        : inboundVoicemailMessage(formData.companyName),
                     endCallMessage: isOutbound
                         ? undefined
                         : "Thank you for calling. Have a great day!",
@@ -520,8 +512,7 @@ export async function deploySaaSAgents(
                     provider: "twilio",
                     enabled: true,
                     voicemailDetectionTypes: [
-                        "machine_end_beep",
-                        "machine_end_silence",
+                        ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
             }

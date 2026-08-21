@@ -33,6 +33,7 @@ import { getAppUrl } from "@/lib/app-url";
 import { formatVapiError } from "@/lib/vapi-errors";
 import type { REInvestorFormData, SaaSFormData } from "@/lib/verticals/types";
 import { revalidatePath } from "next/cache";
+import { VOICEMAIL_DETECTION_TYPES, voicemailDetection, inboundVoicemailMessage, outboundVoicemailMessage } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // SINGLE-AGENT CREATION
@@ -182,17 +183,11 @@ async function createGenericAgent(
                     ? {
                           endCallMessage:
                               "Thank you for calling. Have a great day!",
-                          voicemailMessage: `You've reached ${clientName}. Please leave a message and we will get back to you as soon as possible.`,
+                          voicemailMessage: inboundVoicemailMessage(clientName),
                       }
                     : {
-                          voicemailDetection: {
-                              provider: "twilio",
-                              enabled: true,
-                              voicemailDetectionTypes: [
-                                  "machine_end_beep",
-                                  "machine_end_silence",
-                              ],
-                          },
+                          voicemailDetection: voicemailDetection(),
+                          voicemailMessage: outboundVoicemailMessage(clientName),
                       }),
                 metadata: {
                     clientId,
@@ -229,17 +224,11 @@ async function createGenericAgent(
                     ? {
                           endCallMessage:
                               "Thank you for calling. Have a great day!",
-                          voicemailMessage: `You've reached ${clientName}. Please leave a message and we will get back to you as soon as possible.`,
+                          voicemailMessage: inboundVoicemailMessage(clientName),
                       }
                     : {
-                          voicemailDetection: {
-                              provider: "twilio",
-                              enabled: true,
-                              voicemailDetectionTypes: [
-                                  "machine_end_beep",
-                                  "machine_end_silence",
-                              ],
-                          },
+                          voicemailDetection: voicemailDetection(),
+                          voicemailMessage: outboundVoicemailMessage(clientName),
                       }),
                 serverUrl: `${appUrl}/api/webhooks/vapi`,
             },
@@ -540,8 +529,7 @@ async function createREOutboundAgent(
                     provider: "twilio",
                     enabled: true,
                     voicemailDetectionTypes: [
-                        "machine_end_beep",
-                        "machine_end_silence",
+                        ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
                 metadata: {
@@ -755,8 +743,7 @@ async function createSaaSOutboundAgent(
                     provider: "twilio",
                     enabled: true,
                     voicemailDetectionTypes: [
-                        "machine_end_beep",
-                        "machine_end_silence",
+                        ...VOICEMAIL_DETECTION_TYPES,
                     ],
                 },
                 metadata: {

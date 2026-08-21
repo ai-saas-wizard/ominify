@@ -17,6 +17,7 @@ import { getAllAgentDefaultSettings } from "./agent-default-settings-actions";
 import type { CreateAssistantPayload } from "@/lib/vapi";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 import { normalizeToE164 } from "@/lib/phone-utils";
+import { VOICEMAIL_DETECTION_TYPES } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // AGENT FLEET DEPLOYMENT
@@ -195,7 +196,7 @@ export async function deployAgentFleet(
                     ? {
                           provider: "twilio",
                           enabled: true,
-                          voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                          voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                       }
                     : undefined,
             });
@@ -528,7 +529,7 @@ export async function deployAgentFleetV2(
                     ? {
                           provider: "twilio",
                           enabled: true,
-                          voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                          voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                       }
                     : undefined,
             });

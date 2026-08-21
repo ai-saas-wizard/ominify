@@ -6,6 +6,7 @@ import { getClientVapiKey } from "@/lib/client-secrets";
 import { buildInboundPrompt, buildOutboundPrompt, TenantProfileData } from "@/lib/prompt-templates";
 import { buildAgentBlueprint } from "@/lib/agent-blueprint";
 import { buildCalendarTools } from "@/lib/calendar-tools";
+import { VOICEMAIL_DETECTION_TYPES, inboundVoicemailMessage } from "@/lib/voicemail-config";
 
 // ═══════════════════════════════════════════════════════════
 // AUTO-CREATE VAPI ASSISTANTS ON ONBOARDING COMPLETION
@@ -279,7 +280,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
                 maxDurationSeconds: 600,
                 backgroundSound: "office",
                 endCallMessage: "Thank you for calling. Have a great day!",
-                voicemailMessage: `You've reached ${client.name}. Please leave a message and we will get back to you as soon as possible.`,
+                voicemailMessage: inboundVoicemailMessage(client.name),
                 metadata: { clientId, agentType: "inbound", templateVersion: TEMPLATE_VERSION },
             },
             vapiKey
@@ -304,7 +305,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
                     maxDurationSeconds: 600,
                     backgroundSound: "office",
                     endCallMessage: "Thank you for calling. Have a great day!",
-                    voicemailMessage: `You've reached ${client.name}. Please leave a message and we will get back to you as soon as possible.`,
+                    voicemailMessage: inboundVoicemailMessage(client.name),
                     serverUrl: `${APP_URL}/api/webhooks/vapi`,
                 },
             });
@@ -363,7 +364,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
                 voicemailDetection: {
                     provider: "twilio",
                     enabled: true,
-                    voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                    voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                 },
                 metadata: { clientId, agentType: "outbound", templateVersion: TEMPLATE_VERSION },
             },
@@ -391,7 +392,7 @@ export async function createTenantAssistants(clientId: string): Promise<{
                     voicemailDetection: {
                         provider: "twilio",
                         enabled: true,
-                        voicemailDetectionTypes: ["machine_end_beep", "machine_end_silence"],
+                        voicemailDetectionTypes: [...VOICEMAIL_DETECTION_TYPES],
                     },
                     serverUrl: `${APP_URL}/api/webhooks/vapi`,
                 },
