@@ -631,7 +631,7 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
 
         const { data: paused, error: fetchErr } = await supabase
             .from("sequence_enrollments")
-            .select("id")
+            .select("id, current_step_order")
             .eq("sequence_id", sequenceId)
             .eq("status", "paused");
         if (fetchErr) return { success: false, error: fetchErr.message };
@@ -643,10 +643,47 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
         const intervalMs = pacing && pacing > 0 ? Math.floor(60_000 / pacing) : 0;
         const baseTime = Date.now();
 
+        // Deactivating nulls next_step_at, so the original schedule is gone.
+        // Firing everyone at "now" collapses the cadence: a lead who was three
+        // days from their next touch gets it seconds after the resume. That is
+        // how a live pilot sent 23 leads a second SMS within an hour of the
+        // first, against a step delay of 3.5 days. Rebuild each lead's due time
+        // from when their last step actually ran plus the next step's delay,
+        // and only fall back to now when that instant has already passed.
+        const stepDelays = new Map<number, number>();
+        {
+            const { data: steps } = await supabase
+                .from("sequence_steps")
+                .select("step_order, delay_minutes")
+                .eq("sequence_id", sequenceId)
+                .is("enrollment_id", null);
+            for (const st of steps || []) {
+                stepDelays.set(st.step_order as number, (st.delay_minutes as number) ?? 0);
+            }
+        }
+
         let resumed = 0;
         const errors: string[] = [];
         for (let i = 0; i < paused.length; i++) {
-            const nextStepAt = new Date(baseTime + i * intervalMs).toISOString();
+            const row = paused[i] as { id: string; current_step_order?: number | null };
+            const nextOrder = (row.current_step_order ?? 0) + 1;
+            const delayMs = (stepDelays.get(nextOrder) ?? 0) * 60_000;
+
+            let dueAt = baseTime;
+            if (delayMs > 0) {
+                const { data: lastRun } = await supabase
+                    .from("sequence_execution_log")
+                    .select("executed_at")
+                    .eq("enrollment_id", row.id)
+                    .order("executed_at", { ascending: false })
+                    .limit(1);
+                const lastAt = lastRun?.[0]?.executed_at
+                    ? new Date(lastRun[0].executed_at as string).getTime()
+                    : null;
+                if (lastAt) dueAt = Math.max(baseTime, lastAt + delayMs);
+            }
+
+            const nextStepAt = new Date(dueAt + i * intervalMs).toISOString();
             const { error } = await supabase
                 .from("sequence_enrollments")
                 .update({
