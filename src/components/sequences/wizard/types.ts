@@ -36,6 +36,8 @@ export interface WizardChannels {
 
 export interface ChannelConfig {
     channels: WizardChannels;
+    /** Channel the sequence opens on. null = let the AI infer it from the goal. */
+    firstTouch: "sms" | "email" | "voice" | null;
     cadence: number;
     duration: number;
 }

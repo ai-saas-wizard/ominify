@@ -769,7 +769,34 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
     // Voice generates only the opening line (first_message) and MERGES it
     // into the rendered content so vapi_assistant_id / system_prompt /
     // override_variables from the step survive.
-    if (step.step_brief) {
+    //
+    // EXCEPT on a lead's first voice touch. The bound agent's assistant carries
+    // a written opener — for a cold call that opener is doing real work (identity
+    // check, naming the cold call, asking for a specific number of seconds) and
+    // {{contact_name}} is substituted by VAPI, so it is already personalised.
+    // Generating a replacement threw all of that away and produced generic
+    // vendor lines ("I'm reaching out to help you capture new leads..."), which
+    // is what a cold-call script exists to avoid. Once there IS history, a
+    // generated opener earns its place: it can reference the prior text or call
+    // instead of re-introducing the company to someone who already heard it.
+    const priorInteractions = conversationCtx?.interaction_count?.total ?? 0;
+    const skipVoiceOpenerGeneration = dispatchChannel === 'voice' && priorInteractions === 0;
+    if (skipVoiceOpenerGeneration) {
+        // Drop the step's placeholder opener. Leaving it would (a) trip the
+        // placeholder guard below and withhold the call, and (b) count as a
+        // first-message override further down. Clearing it makes both paths do
+        // the right thing: nothing overrides, so VAPI speaks the assistant's
+        // own first message with {{contact_name}} substituted.
+        const vc = renderedContent as VoiceContent;
+        if (typeof vc.first_message === 'string' && vc.first_message.includes('[AI-generated at dispatch]')) {
+            renderedContent = { ...vc, first_message: '' } as VoiceContent;
+        }
+        console.log(
+            `[SCHEDULER] First voice touch for enrollment ${enrollment.id} — keeping the agent's scripted opener (no brief generation)`
+        );
+    }
+
+    if (step.step_brief && !skipVoiceOpenerGeneration) {
         try {
             console.log(`[SCHEDULER] Brief-based generation for step ${step.step_order} (${dispatchChannel}): "${step.step_brief.intent}"`);
             const generated = await generateOutboundContent({

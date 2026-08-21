@@ -10,6 +10,8 @@ interface SimulationInput {
     goal: string;
     customGoalDescription?: string;
     channels: { sms: boolean; email: boolean; voice: boolean };
+    /** Operator-chosen opening channel. Omitted/null = infer it from the goal. */
+    firstTouch?: "sms" | "email" | "voice" | null;
     cadence: number;
     duration: number;
     handoffRules: {
@@ -125,6 +127,38 @@ export async function generateSimulation(
             .map((c) => `- ${c.replace(/_/g, " ")}`)
             .join("\n");
 
+        // The operator can pin the opening channel. Only honor a pick that is
+        // actually enabled — otherwise fall back to inferring it from the goal.
+        const firstTouch =
+            input.firstTouch && enabledChannels.includes(input.firstTouch)
+                ? input.firstTouch
+                : null;
+
+        const firstTouchRule = firstTouch
+            ? `0. FIRST TOUCH CHANNEL (non-negotiable): the operator explicitly chose
+   "${firstTouch}" as the opening channel. The FIRST entry of the timeline MUST
+   be direction "outbound" with channel "${firstTouch}". Do NOT infer a
+   different opener from the goal text, the channel list order, or which
+   channel is cheaper. Other enabled channels may only appear as LATER steps,
+   under the rules below.`
+            : `0. FIRST TOUCH CHANNEL (decide this before anything else): the opening outbound
+   is whichever ENABLED channel the stated goal actually calls for. Read the
+   Goal text above and honour what it describes — if it talks about calling,
+   dialling, cold calling, or an agent speaking to the lead, open with "voice";
+   if it talks about texting, messaging, or a text-first nurture, open with
+   "sms"; if it describes emailing, open with "email". When the goal names a
+   later channel too ("call them, then text the link"), that later channel is a
+   FOLLOW-UP step, not the opener. Only when the goal implies no channel at all
+   should you infer one from the contact data available (phone-only lists
+   suggest voice or sms; email-only lists suggest email). There is no default
+   channel — never open with SMS merely because it is listed first or because
+   it is the lower-effort option. This timeline becomes the operator's real
+   campaign plan, so the opening channel must be the one they asked for.`;
+
+        const firstTouchExampleChannel = firstTouch
+            ? `"${firstTouch}"`
+            : `"<the first-touch channel you chose per rule 0 — NOT automatically sms>"`;
+
         const prompt = `You are generating a realistic simulation of an AI-powered lead follow-up sequence for a business owner to preview. The simulation MUST behave EXACTLY like the production sequencer — same channel selection, same opt-out handling, same handoff behavior. Owners watching this preview need to trust that the live system will act the same way.
 
 BUSINESS CONTEXT:
@@ -156,19 +190,7 @@ ${scenarioType === "handoff" ? "Lead's reply triggers one of the configured hand
 
 DECISION RULES (follow strictly — these match the production sequencer):
 
-0. FIRST TOUCH CHANNEL (decide this before anything else): the opening outbound
-   is whichever ENABLED channel the stated goal actually calls for. Read the
-   Goal text above and honour what it describes — if it talks about calling,
-   dialling, cold calling, or an agent speaking to the lead, open with "voice";
-   if it talks about texting, messaging, or a text-first nurture, open with
-   "sms"; if it describes emailing, open with "email". When the goal names a
-   later channel too ("call them, then text the link"), that later channel is a
-   FOLLOW-UP step, not the opener. Only when the goal implies no channel at all
-   should you infer one from the contact data available (phone-only lists
-   suggest voice or sms; email-only lists suggest email). There is no default
-   channel — never open with SMS merely because it is listed first or because
-   it is the lower-effort option. This timeline becomes the operator's real
-   campaign plan, so the opening channel must be the one they asked for.
+${firstTouchRule}
 
 1. CHANNEL STICKINESS (CRITICAL): If an inbound entry has channel "X", the very next outbound entry MUST also have channel "X". Do NOT switch channels while the lead is actively replying. This is non-negotiable — owners specifically asked for this.
 
@@ -206,7 +228,7 @@ Return ONLY valid JSON in this exact format:
     {
       "day": 1,
       "time": "10:02 AM",
-      "channel": "<the first-touch channel you chose per rule 0 — NOT automatically sms>",
+      "channel": ${firstTouchExampleChannel},
       "direction": "outbound",
       "content": "the actual message text",
       "ai_reasoning": "why the AI chose this approach",

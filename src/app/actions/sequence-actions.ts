@@ -2462,6 +2462,8 @@ interface WizardInput {
     /** The outbound agent that voices calls and drives the SMS persona. Required. */
     agentId: string;
     channels: { sms: boolean; email: boolean; voice: boolean };
+    /** Operator-chosen opening channel. null = the AI inferred it from the goal. */
+    firstTouch?: "sms" | "email" | "voice" | null;
     cadence: number;
     duration: number;
     handoffRules: {
@@ -2547,6 +2549,13 @@ export async function createSequenceFromWizard(
             goal: input.goal,
             custom_goal_description: input.customGoalDescription || null,
             available_channels: enabledChannels,
+            // Which channel the operator pinned as the opener (null = AI decided
+            // from the goal). Informational — the steps themselves already carry
+            // the channel — but regeneration needs to know it was a deliberate pick.
+            first_touch_channel:
+                input.firstTouch && enabledChannels.includes(input.firstTouch)
+                    ? input.firstTouch
+                    : null,
             cadence_per_week: input.cadence,
             duration_weeks: input.duration,
             max_steps: totalSteps,

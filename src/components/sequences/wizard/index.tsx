@@ -83,6 +83,7 @@ function getDefaultState(
                 email: readiness.email.ready,
                 voice: readiness.voice.ready && !!defaultAgent?.vapi_id,
             },
+            firstTouch: null,
             cadence: 3,
             duration: 3,
         },
@@ -199,6 +200,7 @@ export function SequenceWizard({
                     goal: state.goal!,
                     customGoalDescription: state.customGoalDescription,
                     channels: state.channelConfig.channels,
+                    firstTouch: state.channelConfig.firstTouch,
                     cadence: state.channelConfig.cadence,
                     duration: state.channelConfig.duration,
                     handoffRules: {
@@ -243,6 +245,7 @@ export function SequenceWizard({
                     goal: state.goal!,
                     customGoalDescription: state.customGoalDescription,
                     channels: state.channelConfig.channels,
+                    firstTouch: state.channelConfig.firstTouch,
                     cadence: state.channelConfig.cadence,
                     duration: state.channelConfig.duration,
                     handoffRules: {
@@ -285,6 +288,7 @@ export function SequenceWizard({
                 customGoalDescription: state.customGoalDescription,
                 agentId: state.agentId,
                 channels: state.channelConfig.channels,
+                firstTouch: state.channelConfig.firstTouch,
                 cadence: state.channelConfig.cadence,
                 duration: state.channelConfig.duration,
                 handoffRules: state.handoffRules,
@@ -515,6 +519,12 @@ export function SequenceWizard({
                                                         ...s.channelConfig.channels,
                                                         voice: s.channelConfig.channels.voice && voiceCapable,
                                                     },
+                                                    // Never leave voice as the opener once the
+                                                    // new agent can't place calls.
+                                                    firstTouch:
+                                                        s.channelConfig.firstTouch === "voice" && !voiceCapable
+                                                            ? null
+                                                            : s.channelConfig.firstTouch,
                                                 },
                                             };
                                         })

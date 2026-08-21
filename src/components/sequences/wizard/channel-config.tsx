@@ -7,6 +7,7 @@ import {
     Phone,
     AlertCircle,
     Bot,
+    Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
@@ -62,7 +63,13 @@ export function ChannelConfigScreen({
         const updated = { ...config.channels, [key]: !config.channels[key] };
         // Must have at least one channel
         if (!updated.sms && !updated.email && !updated.voice) return;
-        onChange({ ...config, channels: updated });
+        onChange({
+            ...config,
+            channels: updated,
+            // The opener can never be a channel that's switched off.
+            firstTouch:
+                !updated[key] && config.firstTouch === key ? null : config.firstTouch,
+        });
     }
 
     return (
@@ -168,6 +175,58 @@ export function ChannelConfigScreen({
                         );
                     })}
                 </div>
+            </div>
+
+            {/* First Touch */}
+            <div className="space-y-3">
+                <label className="text-sm font-medium text-gray-700">First touch</label>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={() => onChange({ ...config, firstTouch: null })}
+                        className={cn(
+                            "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium",
+                            seqFocusRing,
+                            config.firstTouch === null
+                                ? cn(seqOptionSelected, "text-emerald-800")
+                                : cn(seqOption, "text-gray-600")
+                        )}
+                    >
+                        <Sparkles
+                            className={cn(
+                                "h-4 w-4",
+                                config.firstTouch === null ? "text-emerald-600" : "text-gray-400"
+                            )}
+                        />
+                        Let the AI decide
+                    </button>
+                    {CHANNELS.filter((ch) => config.channels[ch.key]).map((ch) => (
+                        <button
+                            key={ch.key}
+                            onClick={() => onChange({ ...config, firstTouch: ch.key })}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium",
+                                seqFocusRing,
+                                config.firstTouch === ch.key
+                                    ? cn(seqOptionSelected, "text-emerald-800")
+                                    : cn(seqOption, "text-gray-600")
+                            )}
+                        >
+                            <ch.icon
+                                className={cn(
+                                    "h-4 w-4",
+                                    config.firstTouch === ch.key
+                                        ? "text-emerald-600"
+                                        : "text-gray-400"
+                                )}
+                            />
+                            {ch.label}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-xs text-gray-400">
+                    The channel your AI opens on. Later steps still adapt to how the
+                    lead replies.
+                </p>
             </div>
 
             {/* Cadence Slider */}
