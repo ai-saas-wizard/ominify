@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Ban,
@@ -110,26 +110,40 @@ export function ThreadDetail({ thread, clientId, now }: ThreadDetailProps) {
 
 /**
  * The timeline opens on the newest touch, like a chat — that is what the
- * operator came to see. Re-anchors when a new event lands (e.g. a live call).
+ * operator came to see. It stays pinned to the bottom while the content is
+ * still settling (fonts, late layout) or growing (a live transcript), and
+ * lets go the moment the operator scrolls up to read history.
  */
 function TimelineScroller({ thread }: { thread: UniboxThread }) {
-    const ref = useRef<HTMLDivElement>(null);
-    const lastEventId = thread.events[thread.events.length - 1]?.id;
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const toBottom = () => {
-            el.scrollTop = el.scrollHeight;
+    useLayoutEffect(() => {
+        const el = scrollRef.current;
+        const content = contentRef.current;
+        if (!el || !content) return;
+
+        let pinned = true;
+        const anchor = () => {
+            if (pinned) el.scrollTop = el.scrollHeight;
         };
-        toBottom();
-        const frame = requestAnimationFrame(toBottom);
-        return () => cancelAnimationFrame(frame);
-    }, [thread.id, lastEventId]);
+        const onScroll = () => {
+            pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+        };
+
+        anchor();
+        const observer = new ResizeObserver(anchor);
+        observer.observe(content);
+        el.addEventListener("scroll", onScroll, { passive: true });
+        return () => {
+            observer.disconnect();
+            el.removeEventListener("scroll", onScroll);
+        };
+    }, [thread.id]);
 
     return (
-        <div ref={ref} className="flex-1 min-h-0 overflow-y-auto">
-            <div className="max-w-2xl mx-auto px-6 py-6">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+            <div ref={contentRef} className="max-w-2xl mx-auto px-6 pt-6 pb-10">
                 <Timeline thread={thread} />
             </div>
         </div>
