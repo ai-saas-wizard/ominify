@@ -53,6 +53,40 @@ export function isContactOptedOut(contact: { opted_out_at?: string | null } | nu
 const STOPPABLE_STATUSES = ['active', 'paused', 'awaiting_outcome', 'generating_next_step'];
 
 /**
+ * Suppress a contact who told us they are not interested.
+ *
+ * "No thank you" is not a STOP keyword, so STOP_RE does not match it and the
+ * contact was left fully contactable — unenrolling only ended the campaign
+ * they happened to be in, and the next campaign would call them again. The
+ * FCC's revocation rule treats any reasonable expression of "don't contact me"
+ * as a revocation, not just the magic words, and commercially it is the same
+ * answer.
+ *
+ * Deliberately does NOT touch enrollment statuses: the caller records why this
+ * particular enrollment ended (`not_interested`), which keeps an inferred
+ * suppression distinguishable from an explicit STOP in reporting. Idempotent —
+ * an existing opt-out timestamp is never overwritten.
+ */
+export async function suppressContactNotInterested(
+    supabase: SupabaseClient,
+    contactId: string,
+    channel: 'sms' | 'voice' | 'email',
+    source: string
+): Promise<void> {
+    const { error } = await supabase
+        .from('contacts')
+        .update({ opted_out_at: new Date().toISOString(), opted_out_channel: channel })
+        .eq('id', contactId)
+        .is('opted_out_at', null);
+
+    if (error) {
+        console.error(`[OPT-OUT] Failed to suppress not-interested contact ${contactId}:`, error);
+        return;
+    }
+    console.log(`[OPT-OUT] Contact ${contactId} suppressed from future outbound — not interested via ${channel} (${source})`);
+}
+
+/**
  * Persist a contact-level opt-out and stop every in-flight enrollment
  * for that contact. Idempotent; keeps the earliest opted_out_at.
  */

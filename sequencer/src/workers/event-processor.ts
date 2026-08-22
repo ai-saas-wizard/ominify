@@ -40,6 +40,7 @@ import {
     isHelpMessage,
     isContactOptedOut,
     optOutContact,
+    suppressContactNotInterested,
     reoptInContact,
 } from '../lib/opt-out.js';
 import { getTenantCapableChannels } from '../lib/channel-capabilities.js';
@@ -939,7 +940,14 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
             if (unenrollErr) {
                 console.error(`[EVENT] Failed to unenroll ${enrollmentId} (not_interested):`, unenrollErr);
             }
-            console.log(`[EVENT] Enrollment ${enrollmentId} not interested, unenrolled`);
+            // Unenrolling only ends THIS campaign. Someone who replied "no
+            // thank you" has told us not to contact them, so suppress the
+            // contact from future outbound too — otherwise the next campaign
+            // dials them again.
+            if (contactId) {
+                await suppressContactNotInterested(supabase, contactId, 'sms', 'ei_intent_not_interested');
+            }
+            console.log(`[EVENT] Enrollment ${enrollmentId} not interested, unenrolled + contact suppressed`);
             break;
         }
 
@@ -1767,6 +1775,8 @@ async function handleEmailReply(event: EventJobPayload): Promise<void> {
                 if (unenrollErr) {
                     console.error(`[EVENT] Failed to unenroll ${enrollmentId} (not_interested):`, unenrollErr);
                 }
+                // Same as the SMS path: end the campaign AND stop future ones.
+                await suppressContactNotInterested(supabase, enroll.contact_id, 'email', 'ei_intent_not_interested');
             } else if (intent === 'interested' || intent === 'ready_to_buy') {
                 try { await computeStepAttribution(enrollmentId, 'replied'); } catch {}
             }
