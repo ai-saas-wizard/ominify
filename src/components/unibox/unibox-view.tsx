@@ -25,6 +25,7 @@ type SortKey = "activity" | "response" | "needs_reply" | "oldest";
 const STATUS_FILTERS: Array<{ key: StatusFilter; label: string }> = [
     { key: "all", label: "All threads" },
     { key: "needs_reply", label: "Needs reply" },
+    { key: "interested", label: "Interested" },
     { key: "responded", label: "Responded" },
     { key: "booked", label: "Booked" },
     { key: "awaiting_reply", label: "Awaiting reply" },

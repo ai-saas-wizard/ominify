@@ -49,7 +49,7 @@ async function fetchEnrollments(clientId: string, contactIds: string[]): Promise
             supabase
                 .from("sequence_enrollments")
                 .select(
-                    "id, contact_id, sequence_id, status, current_step_order, enrolled_at, appointment_booked, completed_reason, sequences ( name, agent_id )"
+                    "id, contact_id, sequence_id, status, current_step_order, enrolled_at, appointment_booked, is_hot_lead, completed_reason, sequences ( name, agent_id )"
                 )
                 .eq("tenant_id", clientId)
                 .in("contact_id", batch)

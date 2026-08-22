@@ -75,6 +75,7 @@ export interface EnrollmentRow {
     current_step_order: number | null;
     enrolled_at: string | null;
     appointment_booked: boolean | null;
+    is_hot_lead: boolean | null;
     completed_reason: string | null;
     sequences: { name: string | null; agent_id: string | null } | null;
 }
@@ -235,11 +236,13 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
     const latestEnrollment = new Map<string, EnrollmentRow>();
     const enrollmentBooked = new Set<string>();
     const enrollmentOptedOut = new Set<string>();
+    const enrollmentHot = new Set<string>();
     for (const e of enrollments) {
         const cur = latestEnrollment.get(e.contact_id);
         if (!cur || ms(e.enrolled_at ?? "0") > ms(cur.enrolled_at ?? "0")) latestEnrollment.set(e.contact_id, e);
         if (e.appointment_booked || e.status === "booked" || e.status === "converted") enrollmentBooked.add(e.contact_id);
         if ((e.completed_reason || "").includes("opted_out")) enrollmentOptedOut.add(e.contact_id);
+        if (e.is_hot_lead) enrollmentHot.add(e.contact_id);
     }
 
     const threads: UniboxThread[] = [];
@@ -273,9 +276,21 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
         const booked =
             events.some((e) => e.appointmentBooked) || (contact ? enrollmentBooked.has(contact.id) : false);
 
+        // Interest is read off the lead's *latest* engagement — an earlier
+        // "sounds good" is void once they say no — with the sequencer's
+        // hot-lead flag as a second source.
+        const saidNo = lastResponse?.intent === "not_interested" || lastResponse?.intent === "stop";
+        const interested =
+            !!lastResponse &&
+            !saidNo &&
+            (lastResponse.intent === "interested" ||
+                lastResponse.sentiment === "interested" ||
+                (contact ? enrollmentHot.has(contact.id) : false));
+
         let status: UniboxStatus;
         if (optedOut) status = "opted_out";
         else if (booked) status = "booked";
+        else if (interested) status = "interested";
         else if (lastResponse) status = stepAfterResponse ? "awaiting_reply" : "responded";
         else if (channelCounts.voice) status = "no_answer";
         else status = "awaiting_reply";

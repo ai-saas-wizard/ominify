@@ -53,6 +53,7 @@ export interface UniboxEvent {
 }
 
 export type UniboxStatus =
+    | "interested"
     | "responded"
     | "booked"
     | "awaiting_reply"
@@ -122,6 +123,12 @@ export const STATUS_META: Record<
         dot: "bg-blue-500",
         text: "text-blue-700",
         chip: "bg-blue-50 text-blue-700 border-blue-200",
+    },
+    interested: {
+        label: "Interested",
+        dot: "bg-violet-500",
+        text: "text-violet-700",
+        chip: "bg-violet-50 text-violet-700 border-violet-200",
     },
     awaiting_reply: {
         label: "Awaiting reply",
