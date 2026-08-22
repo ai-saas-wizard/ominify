@@ -101,6 +101,7 @@ import {
     reserveDailyCall,
     releaseDailyCall,
 } from '../lib/daily-call-cap.js';
+import { checkContactFatigue } from '../lib/contact-fatigue.js';
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
 const BATCH_SIZE = 100;
@@ -113,16 +114,6 @@ const BATCH_SIZE = 100;
 const CLAIM_LEASE_MS = 5 * 60 * 1000; // 5 minutes
 // Contact fatigue guard (see gate 3a). Same channel twice needs a real gap;
 // a different channel may follow quickly so voicemail-then-text still works.
-// `0` must DISABLE the guard — an operator killing it mid-incident should not
-// silently get the strictest setting instead.
-function gapEnv(name: string, fallback: number): number {
-    const raw = process.env[name];
-    if (raw === undefined || raw.trim() === '') return fallback;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-const MIN_SAME_CHANNEL_GAP_HOURS = gapEnv('MIN_SAME_CHANNEL_GAP_HOURS', 20);
-const MIN_CROSS_CHANNEL_GAP_MINUTES = gapEnv('MIN_CROSS_CHANNEL_GAP_MINUTES', 2);
 
 interface ContactFieldDef {
     field_key: string;
@@ -553,93 +544,33 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
         return;
     }
 
-    // 3a. Contact fatigue guard — the last line of defence before a real phone.
-    //
-    // Every gate above asks whether sending is ALLOWED right now (opt-out,
-    // business hours, TCPA, window, cap). None of them asks whether we just
-    // messaged this person. next_step_at is treated as gospel, so any bug that
-    // sets it wrong reaches the lead: a resume that rebuilt schedules from
-    // "now" once sent 23 leads a second SMS within an hour of the first,
-    // against a configured 3.5-day step delay.
-    //
-    // This checks the CONTACT, not the enrollment, so it also catches the same
-    // person being reached by two sequences at once.
-    //
-    // Same-channel repeats are held for MIN_SAME_CHANNEL_GAP_HOURS. A different
-    // channel is allowed after only a couple of minutes on purpose — the
-    // voicemail-then-text follow-up is designed behaviour and must survive.
-    // Key on the channel that will actually be dispatched, not the step's
-    // nominal one. getChannelOverride is a pure read of
-    // enrollment.channel_overrides (resolved again at dispatch); using
-    // step.channel here let a landline sms->voice override read a prior call as
-    // "cross-channel" and allow a second dial 10 minutes later, and inversely
-    // held a legal SMS for ~17h after a voice step.
+    // 3a. Contact fatigue guard — held here so a deferral is cheap (before any
+    // LLM work), but the authoritative check also runs in the sms and vapi
+    // workers, which is what covers the producers that bypass the scheduler
+    // entirely (self-healer, booking-link SMS). See lib/contact-fatigue.ts.
     const fatigueChannel = getChannelOverride(enrollment, step.channel) || step.channel;
     if (!isTestEnrollment && ['sms', 'voice', 'email'].includes(fatigueChannel)) {
-        // Two targeted queries instead of one limit(5): the newest outbound on
-        // THIS channel, and the newest on any other. A burst on one channel can
-        // no longer push the row that matters out of the window.
-        const lookbackFrom = new Date(
-            Date.now() - Math.max(MIN_SAME_CHANNEL_GAP_HOURS, 1) * 3600_000
-        ).toISOString();
-        const [sameRes, otherRes] = await Promise.all([
-            supabase
-                .from('contact_interactions')
-                .select('channel, created_at')
-                .eq('contact_id', contact.id)
-                .eq('direction', 'outbound')
-                .eq('channel', fatigueChannel)
-                .gte('created_at', lookbackFrom)
-                .order('created_at', { ascending: false })
-                .limit(1),
-            supabase
-                .from('contact_interactions')
-                .select('channel, created_at')
-                .eq('contact_id', contact.id)
-                .eq('direction', 'outbound')
-                .neq('channel', fatigueChannel)
-                .gte('created_at', lookbackFrom)
-                .order('created_at', { ascending: false })
-                .limit(1),
-        ]);
-        const recent = [...(sameRes.data || []), ...(otherRes.data || [])];
-
-        const now = Date.now();
-        let holdUntil = 0;
-        let why = '';
-        for (const r of recent || []) {
-            const at = new Date(r.created_at as string).getTime();
-            if (!at) continue;
-            const gapMs = now - at;
-            const sameChannel = r.channel === fatigueChannel;
-            const requiredMs = sameChannel
-                ? MIN_SAME_CHANNEL_GAP_HOURS * 3600_000
-                : MIN_CROSS_CHANNEL_GAP_MINUTES * 60_000;
-            if (gapMs < requiredMs && at + requiredMs > holdUntil) {
-                holdUntil = at + requiredMs;
-                why = `${sameChannel ? 'same-channel' : 'cross-channel'} ${fatigueChannel} ${Math.round(gapMs / 60000)}min ago`;
-            }
-        }
-
-        if (holdUntil > now) {
-            // Jitter exists to break up a batch landing on one instant (window
-            // reopens). A short cross-channel pacing hold is not that, and a
-            // flat 0-15min spread would delay the intended voicemail-then-text
-            // follow-up. Only jitter holds that are already long.
-            const holdMs = holdUntil - now;
-            const retryAt = holdMs > 30 * 60_000 ? withJitter(new Date(holdUntil), null) : new Date(holdUntil);
+        const fatigue = await checkContactFatigue({
+            contactId: contact.id,
+            channel: fatigueChannel as 'sms' | 'voice' | 'email',
+            isTest: isTestEnrollment,
+        });
+        if (fatigue.hold && fatigue.until) {
+            // Jitter only long holds; a short cross-channel pacing gap must not
+            // be smeared across 15 minutes or the voicemail-then-text follow-up
+            // this deliberately allows would be delayed past usefulness.
+            const holdMs = fatigue.until.getTime() - Date.now();
+            const retryAt = holdMs > 30 * 60_000 ? withJitter(fatigue.until, null) : fatigue.until;
             console.log(
-                `[SCHEDULER] Contact fatigue guard held enrollment ${enrollment.id} (${why}) — deferring to ${retryAt.toISOString()}`
+                `[SCHEDULER] Contact fatigue guard held enrollment ${enrollment.id} (${fatigue.reason}) — deferring to ${retryAt.toISOString()}`
             );
-            // Every other withholding gate writes a log row; without one a
-            // fatigue hold is invisible and a quiet lead looks like a bug.
             const { error: fatigueLogErr } = await supabase.from('sequence_execution_log').insert({
                 enrollment_id: enrollment.id,
                 step_id: step.id,
                 channel: fatigueChannel,
                 action: 'held_contact_fatigue',
                 provider_id: null,
-                provider_response: { reason: why, retry_at: retryAt.toISOString() },
+                provider_response: { reason: fatigue.reason, retry_at: retryAt.toISOString() },
                 call_status: 'skipped',
                 executed_at: new Date().toISOString(),
             });

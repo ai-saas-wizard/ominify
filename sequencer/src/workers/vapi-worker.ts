@@ -23,6 +23,7 @@ import { getCallTimeVariables } from '../lib/call-variables.js';
 import { handleFailure } from '../lib/self-healer.js';
 import { claimOnce, releaseClaim } from '../lib/idempotency.js';
 import { releaseDailyCall, reserveDailyCall, dailyCallCapKey } from '../lib/daily-call-cap.js';
+import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import { createNotification } from '../lib/emotional-intelligence.js';
 import { clampTestDelayMs } from '../lib/test-mode.js';
 import {
@@ -555,6 +556,27 @@ async function checkDialTimeGate(
         if (!isTCPACompliant(tz)) {
             await releaseDailyCall(payloadCapKey);
             return { ok: false, deferTo: withJitter(getNextTCPAWindow(tz)), reason: 'outside_tcpa_at_dial' };
+        }
+
+        // Contact fatigue, before the sequence-scoped checks so it also covers
+        // healer dials, which carry no sequence context of their own.
+        if (data.enrollmentId) {
+            const { data: enr } = await supabase
+                .from('sequence_enrollments')
+                .select('contact_id, is_test')
+                .eq('id', data.enrollmentId)
+                .maybeSingle();
+            if (enr?.contact_id) {
+                const fatigue = await checkContactFatigue({
+                    contactId: enr.contact_id as string,
+                    channel: 'voice',
+                    isTest: (enr as any).is_test === true,
+                });
+                if (fatigue.hold && fatigue.until) {
+                    await releaseDailyCall(payloadCapKey);
+                    return { ok: false, deferTo: fatigue.until, reason: `contact_fatigue:${fatigue.reason}` };
+                }
+            }
         }
 
         if (!data.sequenceId) return { ok: true, capKey: payloadCapKey };

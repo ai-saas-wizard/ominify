@@ -9,12 +9,13 @@ import 'dotenv/config';
 import Twilio from 'twilio';
 import { Worker, Job } from 'bullmq';
 import { supabase } from '../lib/db.js';
-import { redisConnection } from '../lib/redis.js';
+import { redisConnection, smsQueue } from '../lib/redis.js';
 import { decrypt } from '../lib/encryption.js';
 import { recordInteraction } from '../lib/conversation-memory.js';
 import { handleFailure } from '../lib/self-healer.js';
 import { claimOnce, releaseClaim } from '../lib/idempotency.js';
 import { isContactOptedOut } from '../lib/opt-out.js';
+import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
 import { resolveTwilioAccountSid } from '../lib/twilio-account.js';
 
@@ -311,6 +312,27 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         if (isContactOptedOut(contact)) {
             console.log(`[SMS] Contact ${enrollment.contact_id} is opted out — skipping send for enrollment ${enrollmentId}`);
             return { sid: '', status: 'skipped_opted_out' };
+        }
+
+        // Contact fatigue. Enforced HERE, not only in the scheduler, because
+        // the self-healer and the booking-link SMS enqueue directly and would
+        // otherwise stack a message onto a lead who was just contacted. Chatbot
+        // replies are exempt — they answer a message the lead just sent.
+        const fatigue = await checkContactFatigue({
+            contactId: enrollment.contact_id,
+            channel: 'sms',
+            metadataSource: (metadata as any)?.source,
+            isTest: (enrollment as any).is_test === true,
+        });
+        if (fatigue.hold && fatigue.until) {
+            const delayMs = Math.max(0, fatigue.until.getTime() - Date.now());
+            console.log(
+                `[SMS] Contact fatigue hold for enrollment ${enrollmentId} (${fatigue.reason}) — re-queueing in ${Math.round(delayMs / 60000)}min`
+            );
+            // Re-queue rather than drop: the message is still wanted, just not
+            // yet. dedupKey travels with it so the retry cannot double-send.
+            await smsQueue.add(job.name, job.data, { delay: delayMs });
+            return { sid: '', status: 'held_contact_fatigue' };
         }
     }
 
