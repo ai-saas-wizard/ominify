@@ -20,6 +20,7 @@ import { MutationBadge } from "@/components/sequences/mutation-badge";
 import { HealingBadge } from "@/components/sequences/healing-badge";
 import { getExecutionLog, listOutboundAgents, updateSequence } from "@/app/actions/sequence-actions";
 import { CallingScheduleCard } from "@/components/sequences/calling-schedule-card";
+import { NumberRotationCard } from "@/components/sequences/number-rotation-card";
 import { EnrollListCard } from "@/components/sequences/enroll-list-card";
 import { cn } from "@/lib/utils";
 
@@ -277,6 +278,16 @@ export function FlowSidebarPanel({
                             {/* Calling schedule (daily cap / window / release pace) */}
                             <CallingScheduleCard
                                 sequenceId={sequenceId}
+                                sequence={sequence}
+                                className="border-none p-0"
+                            />
+
+                            <Separator />
+
+                            {/* Rotate calls + texts across a hand-picked number pool */}
+                            <NumberRotationCard
+                                sequenceId={sequenceId}
+                                clientId={clientId}
                                 sequence={sequence}
                                 className="border-none p-0"
                             />

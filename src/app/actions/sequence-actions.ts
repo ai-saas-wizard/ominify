@@ -6,6 +6,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { canAccessClient } from "@/lib/auth";
 import { canPlaceCall } from "@/lib/access";
 import { autoAdvanceContactStage } from "@/app/actions/pipeline-actions";
+import { ensureNumbersInMessagingService } from "@/app/actions/twilio-actions";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
     upsertContactsFromRows,
@@ -212,6 +213,51 @@ export async function listOutboundAgents(
         return [];
     }
     return (data as { id: string; name: string }[]) || [];
+}
+
+export interface RotationPhoneOption {
+    id: string;
+    phone_number: string;
+    friendly_name: string | null;
+    vapi_phone_number_id: string | null;
+    /** Agent this number is dedicated to (inbound routing), if any. */
+    agent_name: string | null;
+}
+
+/**
+ * The account's active numbers, for the "Rotate numbers" picker. Same query
+ * as the outbound caller-ID settings page, plus the assigned-agent name so
+ * the operator can see which numbers double as an agent's inbound line.
+ */
+export async function listRotationPhoneOptions(
+    clientId: string
+): Promise<RotationPhoneOption[]> {
+    const access = await assertClientAccess(clientId);
+    if (!access.ok) return [];
+
+    const [{ data: phones, error }, { data: agents }] = await Promise.all([
+        supabase
+            .from("tenant_phone_numbers")
+            .select("id, phone_number, friendly_name, vapi_phone_number_id, agent_id")
+            .eq("client_id", clientId)
+            .eq("status", "active")
+            .order("created_at", { ascending: true }),
+        supabase.from("agents").select("id, name").eq("client_id", clientId),
+    ]);
+    if (error) {
+        console.error("listRotationPhoneOptions error:", error);
+        return [];
+    }
+    const agentNames = new Map<string, string>(
+        (agents ?? []).map((a) => [a.id as string, a.name as string])
+    );
+    return (phones ?? []).map((p) => ({
+        id: p.id as string,
+        phone_number: p.phone_number as string,
+        friendly_name: (p.friendly_name as string | null) ?? null,
+        vapi_phone_number_id: (p.vapi_phone_number_id as string | null) ?? null,
+        agent_name: p.agent_id ? agentNames.get(p.agent_id as string) ?? null : null,
+    }));
 }
 
 // ─── Update a sequence ─────────────────────────────────────────────────────────
@@ -1329,6 +1375,98 @@ export async function updateSequencePacing(
         return { success: true };
     } catch (error) {
         console.error("updateSequencePacing error:", error);
+        return { success: false, error: "Internal error" };
+    }
+}
+
+// ─── Update number rotation ──────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * "Rotate numbers": spread this sequence's calls + texts across a hand-picked
+ * pool of the account's numbers, sticky per enrollment (enforced by the
+ * sequencer's lib/outbound-phone.ts). Like updateSequencePacing this applies
+ * to dynamic sequences too, so it deliberately skips assertSequenceEditable.
+ *
+ * Picked numbers are synced into the tenant's Twilio Messaging Service BEFORE
+ * the write: the sms-worker sends `from` + messagingServiceSid, and Twilio
+ * rejects a From that isn't in the service's sender pool.
+ */
+export async function updateSequencePhoneRotation(
+    sequenceId: string,
+    settings: { rotate_phone_numbers: boolean; rotation_phone_number_ids: string[] }
+) {
+    try {
+        const { data: seq } = await supabase
+            .from("sequences")
+            .select("client_id")
+            .eq("id", sequenceId)
+            .single();
+        if (!seq) return { success: false, error: "Sequence not found" };
+
+        const access = await assertClientAccess(seq.client_id);
+        if (!access.ok) return { success: false, error: access.error };
+
+        const rotate = settings.rotate_phone_numbers === true;
+        const ids = [
+            ...new Set((settings.rotation_phone_number_ids ?? []).map((id) => String(id))),
+        ];
+        if (ids.some((id) => !UUID_RE.test(id))) {
+            return { success: false, error: "Invalid phone number id" };
+        }
+        if (rotate && ids.length === 0) {
+            return { success: false, error: "Pick at least one number to rotate across" };
+        }
+
+        if (ids.length > 0) {
+            const { data: phones } = await supabase
+                .from("tenant_phone_numbers")
+                .select("id, phone_number, status, vapi_phone_number_id")
+                .eq("client_id", seq.client_id)
+                .in("id", ids);
+            const byId = new Map((phones ?? []).map((p) => [p.id as string, p]));
+            for (const id of ids) {
+                const phone = byId.get(id);
+                if (!phone) {
+                    return {
+                        success: false,
+                        error: "One of the selected numbers no longer exists — reload and pick again",
+                    };
+                }
+                if (phone.status !== "active") {
+                    return { success: false, error: `${phone.phone_number} is not active` };
+                }
+                if (!phone.vapi_phone_number_id) {
+                    return {
+                        success: false,
+                        error: `${phone.phone_number} isn't registered with VAPI yet — sync it from the Phone Numbers page first`,
+                    };
+                }
+            }
+
+            if (rotate) {
+                const sync = await ensureNumbersInMessagingService(seq.client_id, ids);
+                if (!sync.success) return { success: false, error: sync.error };
+            }
+        }
+
+        const { error } = await supabase
+            .from("sequences")
+            .update({
+                rotate_phone_numbers: rotate,
+                rotation_phone_number_ids: ids.length > 0 ? ids : null,
+            })
+            .eq("id", sequenceId);
+        if (error) {
+            console.error("updateSequencePhoneRotation error:", error);
+            return { success: false, error: error.message };
+        }
+
+        revalidatePath(`/client/${seq.client_id}/sequences/${sequenceId}`);
+        return { success: true };
+    } catch (error) {
+        console.error("updateSequencePhoneRotation error:", error);
         return { success: false, error: "Internal error" };
     }
 }

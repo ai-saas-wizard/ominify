@@ -12,6 +12,7 @@ import {
     listPurchasedNumbers,
     createMessagingService,
     addNumberToMessagingService,
+    listMessagingServiceNumbers,
     validateTwilioCredentials,
     // TrustHub Customer Profile
     createSecondaryCustomerProfile,
@@ -402,6 +403,84 @@ export async function releasePhoneNumberForClient(clientId: string, phoneNumberI
     } catch (err: any) {
         console.error("releasePhoneNumberForClient error:", err);
         return { success: false, error: err.message || "Failed to release phone number" };
+    }
+}
+
+// ─── Messaging Service sender-pool sync ─────────────────────────────────────
+// A Messaging Service only sends from numbers in its sender pool. Numbers bought
+// before the service existed were never added, so a rotation pool naming them
+// would fail at send time (the sequencer sends `from` + messagingServiceSid).
+// Membership is checked by LISTING the pool rather than trusting Twilio's
+// "add" error codes (21712 means "in another service", not "already here").
+
+export async function ensureNumbersInMessagingService(
+    clientId: string,
+    phoneNumberDbIds: string[]
+): Promise<{ success: true; added: number } | { success: false; error: string }> {
+    try {
+        if (phoneNumberDbIds.length === 0) return { success: true, added: 0 };
+
+        const account = await getTwilioAccount(clientId);
+        if (!account) {
+            return { success: false, error: "Twilio account not connected." };
+        }
+        // No service → the sequencer sends straight from the number.
+        if (!account.messaging_service_sid) return { success: true, added: 0 };
+
+        const { sid, authToken } = getAccountCredentials(account);
+        if (!sid || !authToken) {
+            return { success: false, error: "Twilio credentials are incomplete for this account." };
+        }
+
+        const { data: phones, error } = await supabase
+            .from("tenant_phone_numbers")
+            .select("id, phone_number, phone_number_sid")
+            .eq("client_id", clientId)
+            .in("id", phoneNumberDbIds);
+        if (error) return { success: false, error: error.message };
+
+        const inService = new Set(
+            await listMessagingServiceNumbers(sid, authToken, account.messaging_service_sid)
+        );
+
+        let added = 0;
+        for (const phone of phones ?? []) {
+            if (inService.has(phone.phone_number)) continue;
+            if (!phone.phone_number_sid) {
+                return {
+                    success: false,
+                    error: `${phone.phone_number} has no Twilio SID on file, so it can't be added to your Messaging Service.`,
+                };
+            }
+            try {
+                await addNumberToMessagingService(
+                    sid,
+                    authToken,
+                    account.messaging_service_sid,
+                    phone.phone_number_sid
+                );
+                added++;
+            } catch (err) {
+                const twilioErr = err as { code?: number; message?: string };
+                if (twilioErr?.code === 21712) {
+                    return {
+                        success: false,
+                        error: `${phone.phone_number} belongs to a different Twilio Messaging Service — remove it there or pick another number.`,
+                    };
+                }
+                return {
+                    success: false,
+                    error: `Couldn't add ${phone.phone_number} to your Messaging Service: ${twilioErr?.message || "unknown error"}`,
+                };
+            }
+        }
+        return { success: true, added };
+    } catch (err) {
+        console.error("ensureNumbersInMessagingService error:", err);
+        return {
+            success: false,
+            error: (err as { message?: string })?.message || "Failed to sync numbers with the Messaging Service",
+        };
     }
 }
 

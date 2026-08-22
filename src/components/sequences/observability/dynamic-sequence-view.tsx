@@ -31,6 +31,7 @@ import {
     callingScheduleSummary,
 } from "@/components/sequences/calling-schedule-card";
 import { EnrollListCard } from "@/components/sequences/enroll-list-card";
+import { NumberRotationCard } from "@/components/sequences/number-rotation-card";
 import {
     toggleSequenceActive,
     deleteSequence,
@@ -357,6 +358,7 @@ export function DynamicSequenceView({
                     </div>
 
                     <CallingScheduleCard sequenceId={sequenceId} sequence={sequence} />
+                    <NumberRotationCard sequenceId={sequenceId} clientId={clientId} sequence={sequence} />
                     <EnrollListCard sequenceId={sequenceId} clientId={clientId} />
 
                     <div className={cn(seqCardStatic, "p-4")}>

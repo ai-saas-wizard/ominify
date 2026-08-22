@@ -16,6 +16,7 @@
 import 'dotenv/config';
 import { supabase } from '../lib/db.js';
 import { smsQueue, emailQueue, vapiQueue, closeConnections } from '../lib/redis.js';
+import { resolveVoiceCallerId } from '../lib/outbound-phone.js';
 import {
     getConversationContext,
     getConversationContext as getDynamicConversationContext,
@@ -1111,62 +1112,19 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
                 voiceContent.override_variables = overrides;
             }
 
-            // Resolve outbound caller ID. Priority order:
-            //   1. tenant_profiles.default_outbound_phone_id (operator's
-            //      explicit choice from /settings/outbound-caller-id)
-            //   2. Phone assigned to this specific agent (legacy per-agent
-            //      assignment, mostly used for inbound routing)
-            //   3. Any active phone for this tenant registered with VAPI
-            //      (last-resort fallback so test_now works before configuration)
+            // Resolve outbound caller ID — rotation (sticky per enrollment)
+            // when the sequence rotates numbers, else the legacy tenant-default
+            // → agent phone → any VAPI phone chain. See lib/outbound-phone.ts.
             // VAPI rejects /call/phone without phoneNumberId, so we MUST land
             // on something here.
-            let phoneNumberId: string | null = null;
             const stepWithAgent = step as SequenceStep & { voice_agent_id?: string };
-
-            const { data: tenantDefault } = await supabase
-                .from('tenant_profiles')
-                .select('default_outbound_phone_id')
-                .eq('client_id', enrollment.tenant_id)
-                .single();
-
-            if (tenantDefault?.default_outbound_phone_id) {
-                const { data: defaultPhone } = await supabase
-                    .from('tenant_phone_numbers')
-                    .select('vapi_phone_number_id, status')
-                    .eq('id', tenantDefault.default_outbound_phone_id)
-                    .single();
-                if (
-                    defaultPhone?.status === 'active' &&
-                    defaultPhone.vapi_phone_number_id
-                ) {
-                    phoneNumberId = defaultPhone.vapi_phone_number_id;
-                }
-            }
-
-            if (!phoneNumberId && stepWithAgent.voice_agent_id) {
-                const { data: phoneRow } = await supabase
-                    .from('tenant_phone_numbers')
-                    .select('vapi_phone_number_id')
-                    .eq('agent_id', stepWithAgent.voice_agent_id)
-                    .eq('status', 'active')
-                    .single();
-                phoneNumberId = phoneRow?.vapi_phone_number_id || null;
-            }
-
-            if (!phoneNumberId) {
-                const { data: fallbackPhone } = await supabase
-                    .from('tenant_phone_numbers')
-                    .select('vapi_phone_number_id')
-                    .eq('client_id', enrollment.tenant_id)
-                    .eq('status', 'active')
-                    .not('vapi_phone_number_id', 'is', null)
-                    .limit(1)
-                    .maybeSingle();
-                if (fallbackPhone?.vapi_phone_number_id) {
-                    phoneNumberId = fallbackPhone.vapi_phone_number_id;
-                    console.log(`[SCHEDULER] No tenant-default or agent-level phone for ${stepWithAgent.voice_agent_id || '<no agent>'}, falling back to tenant phone ${phoneNumberId}`);
-                }
-            }
+            const callerId = await resolveVoiceCallerId({
+                enrollmentId: enrollment.id,
+                tenantId: enrollment.tenant_id,
+                sequenceId: sequence.id,
+                voiceAgentId: stepWithAgent.voice_agent_id ?? null,
+            });
+            const phoneNumberId = callerId.phoneNumberId;
 
             // ── Blueprint-based dispatch: load blueprint and assemble inline
             // agent ONLY when the call genuinely diverges from the baked-in
@@ -1303,7 +1261,7 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             // Slot ownership now rides with the job — the worker releases it
             // if the call is never placed.
             pendingCapReservations.delete(enrollment.id);
-            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId})` : ''}${inlineAgent ? ' (blueprint inline)' : ' (legacy)'}`);
+            console.log(`[SCHEDULER] Dispatched VAPI call for enrollment ${enrollment.id}${phoneNumberId ? ` (caller ID: ${phoneNumberId} via ${callerId.source})` : ''}${inlineAgent ? ' (blueprint inline)' : ' (legacy)'}`);
             break;
         }
     }

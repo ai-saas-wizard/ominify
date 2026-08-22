@@ -201,6 +201,19 @@ export async function addNumberToMessagingService(
         .phoneNumbers.create({ phoneNumberSid });
 }
 
+/** E.164 numbers currently in a Messaging Service's sender pool. */
+export async function listMessagingServiceNumbers(
+    subaccountSid: string,
+    authToken: string,
+    messagingServiceSid: string
+): Promise<string[]> {
+    const subClient = getSubClient(subaccountSid, authToken);
+    const numbers = await subClient.messaging.v1
+        .services(messagingServiceSid)
+        .phoneNumbers.list();
+    return numbers.map((n) => n.phoneNumber);
+}
+
 // ─── A2P 10DLC — TrustHub Customer Profile ─────────────────────────────────
 
 const SECONDARY_CUSTOMER_PROFILE_POLICY_SID = "RNdfbf3fae0e1107f8aded0e7cead80bf5";

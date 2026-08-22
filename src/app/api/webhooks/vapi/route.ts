@@ -10,6 +10,7 @@ import { getClientVapiKey } from "@/lib/client-secrets";
 import { endCall } from "@/lib/vapi";
 import { auditLog } from "@/lib/audit";
 import { getCallTimeVariables } from "@/lib/call-variables";
+import { normalizeToE164 } from "@/lib/phone-utils";
 import crypto from "crypto";
 
 // When true, reject webhook requests that don't present a valid signature.
@@ -188,6 +189,99 @@ function extractStructuredData(
     if (!result.email && result.caller_email) result.email = result.caller_email;
 
     return result;
+}
+
+// Enrollment states in which a lead calling back is still "in" a campaign —
+// mirrors findEnrollmentByPhone in the sequencer's twilio-webhooks.ts.
+const LIVE_ENROLLMENT_STATUSES = ['active', 'paused', 'awaiting_outcome', 'generating_next_step'];
+
+type InboundAssistantSource = 'enrollment' | 'number_agent' | 'inbound_agent' | 'none';
+
+async function agentVapiId(agentId: string | null | undefined): Promise<string | null> {
+    if (!agentId) return null;
+    const { data } = await supabase.from('agents').select('vapi_id').eq('id', agentId).maybeSingle();
+    return data?.vapi_id || null;
+}
+
+/**
+ * Pick the assistant for an inbound call on a number that has no assistantId
+ * bound in VAPI. importPhoneNumberToVapi imports numbers with a serverUrl
+ * only, so every unassigned number — in particular a sequence's rotation pool
+ * — lands here, and without an assistant in the response VAPI can't answer.
+ * Answer with the agent that called the lead: their most recent live
+ * enrollment's bound agent; else the number's own agent; else the account's
+ * inbound agent. Never throws — nulls mean today's behavior (variables only).
+ */
+async function resolveInboundAssistant(call: NonNullable<VapiWebhookPayload['message']['call']>): Promise<{
+    clientId: string | null;
+    assistantId: string | null;
+    source: InboundAssistantSource;
+}> {
+    const none = { clientId: null, assistantId: null, source: 'none' as const };
+    try {
+        if (!call.phoneNumberId) return none;
+        const { data: number } = await supabase
+            .from('tenant_phone_numbers')
+            .select('client_id, agent_id')
+            .eq('vapi_phone_number_id', call.phoneNumberId)
+            .maybeSingle();
+        if (!number?.client_id) return none;
+        const clientId = number.client_id as string;
+
+        const raw = call.customer?.number;
+        if (raw) {
+            // E.164 plus the raw form, so legacy un-normalized contact rows still match.
+            const candidates = [...new Set([raw, normalizeToE164(raw)].filter((v): v is string => !!v))];
+            const { data: contact } = await supabase
+                .from('contacts')
+                .select('id')
+                .eq('client_id', clientId)
+                .in('phone', candidates)
+                .limit(1)
+                .maybeSingle();
+            if (contact?.id) {
+                const { data: enrollment } = await supabase
+                    .from('sequence_enrollments')
+                    .select('sequence_id')
+                    .eq('tenant_id', clientId)
+                    .eq('contact_id', contact.id)
+                    .in('status', LIVE_ENROLLMENT_STATUSES)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (enrollment?.sequence_id) {
+                    const { data: sequence } = await supabase
+                        .from('sequences')
+                        .select('agent_id')
+                        .eq('id', enrollment.sequence_id)
+                        .maybeSingle();
+                    const assistantId = await agentVapiId(sequence?.agent_id);
+                    if (assistantId) return { clientId, assistantId, source: 'enrollment' };
+                }
+            }
+        }
+
+        const numberAgent = await agentVapiId(number.agent_id);
+        if (numberAgent) return { clientId, assistantId: numberAgent, source: 'number_agent' };
+
+        const { data: inboundAgent } = await supabase
+            .from('agents')
+            .select('vapi_id')
+            .eq('client_id', clientId)
+            .eq('agent_type', 'inbound')
+            .not('vapi_id', 'is', null)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        if (inboundAgent?.vapi_id) {
+            return { clientId, assistantId: inboundAgent.vapi_id, source: 'inbound_agent' };
+        }
+
+        return { clientId, assistantId: null, source: 'none' };
+    } catch (error) {
+        console.error('[VAPI WEBHOOK] resolveInboundAssistant failed:', error);
+        return none;
+    }
 }
 
 // Helper to get Client ID from Vapi Org ID
@@ -967,6 +1061,15 @@ export async function POST(request: Request) {
         // IMPORTANT: For assistant-request, we must return context for the AI
         if (messageType === 'assistant-request') {
             console.log('[VAPI WEBHOOK] assistant-request - getting contact context for:', call.customer?.number);
+            // Numbers with no assistant bound in VAPI (rotation pools,
+            // unassigned numbers) need one picked here, or the call can't be
+            // answered. On assistant-request there is no message.assistant yet,
+            // so getClientIdByOrgId's umbrella step has nothing to go on —
+            // seeding _assistantId lets handleCallStarted / getContactContext /
+            // getCallTimeVariables resolve the client with no other changes.
+            const inbound = await resolveInboundAssistant(call);
+            if (inbound.assistantId && !call._assistantId) call._assistantId = inbound.assistantId;
+            console.log(`[VAPI WEBHOOK] assistant-request on ${call.phoneNumberId ?? '<no phoneNumberId>'}: ${inbound.source}${inbound.assistantId ? ` → ${inbound.assistantId}` : ''}`);
             await handleCallStarted(call);
             const context = await getContactContext(call);
             console.log('[VAPI WEBHOOK] Returning context:', context ? 'found' : 'none');
@@ -999,6 +1102,8 @@ export async function POST(request: Request) {
             };
 
             const responseBody: Record<string, any> = {
+                // Assistant for numbers with none bound in VAPI (see resolveInboundAssistant)
+                ...(inbound.assistantId ? { assistantId: inbound.assistantId } : {}),
                 // Legacy top-level shape (matches pre-existing behavior)
                 ...(context || {}),
                 variableValues: mergedVariableValues,

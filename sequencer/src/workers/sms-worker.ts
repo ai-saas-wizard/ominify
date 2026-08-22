@@ -18,6 +18,7 @@ import { isContactOptedOut } from '../lib/opt-out.js';
 import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
 import { resolveTwilioAccountSid } from '../lib/twilio-account.js';
+import { resolveRotationPhone } from '../lib/outbound-phone.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 
@@ -282,9 +283,11 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
     // Defense-in-depth opt-out gate (review C3): the scheduler checks too,
     // but ad-hoc dispatches (chatbot, healing) and races must never reach
     // an opted-out contact.
+    // sequence_id feeds the number-rotation pick below; is_test feeds the
+    // fatigue guard (it was read but never selected before).
     const { data: enrollment, error: enrollmentError } = await supabase
         .from('sequence_enrollments')
-        .select('contact_id, tenant_id')
+        .select('contact_id, tenant_id, sequence_id, is_test')
         .eq('id', enrollmentId)
         .single();
 
@@ -364,8 +367,20 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         statusCallback: `${WEBHOOK_BASE_URL}/webhooks/twilio/sms-status/${tenantId}`,
     };
 
-    // Use Messaging Service if available (for A2P), otherwise use direct number
-    if (config.messagingServiceSid) {
+    // Rotation (sticky per enrollment) wins when the sequence rotates numbers.
+    // Keep the Messaging Service SID alongside `from` so the A2P campaign and
+    // service features still apply — the number must be in the service's
+    // sender pool (updateSequencePhoneRotation ensures that at save time).
+    // Otherwise: Messaging Service if available (for A2P), else direct number.
+    const rotated = enrollment?.sequence_id
+        ? await resolveRotationPhone({ enrollmentId, tenantId, sequenceId: enrollment.sequence_id })
+        : null;
+    if (rotated) {
+        messageOptions.from = rotated.phone_number;
+        if (config.messagingServiceSid) {
+            messageOptions.messagingServiceSid = config.messagingServiceSid;
+        }
+    } else if (config.messagingServiceSid) {
         messageOptions.messagingServiceSid = config.messagingServiceSid;
     } else if (config.primaryPhoneNumber) {
         messageOptions.from = config.primaryPhoneNumber;
@@ -396,7 +411,7 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         throw error;
     }
 
-    console.log(`[SMS] Sent to ${contactPhone}, SID: ${message.sid}, Status: ${message.status}`);
+    console.log(`[SMS] Sent to ${contactPhone} from ${message.from ?? config.messagingServiceSid ?? 'unknown'}, SID: ${message.sid}, Status: ${message.status}`);
 
     // Log execution
     await logExecution({
@@ -409,6 +424,8 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
             sid: message.sid,
             status: message.status,
             to: message.to,
+            from: message.from ?? null,
+            messagingServiceSid: message.messagingServiceSid ?? null,
             dateCreated: message.dateCreated,
         },
         smsStatus: message.status,

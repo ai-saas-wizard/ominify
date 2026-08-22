@@ -23,6 +23,7 @@ import { getCallTimeVariables } from '../lib/call-variables.js';
 import { handleFailure } from '../lib/self-healer.js';
 import { claimOnce, releaseClaim } from '../lib/idempotency.js';
 import { releaseDailyCall, reserveDailyCall, dailyCallCapKey } from '../lib/daily-call-cap.js';
+import { resolveVoiceCallerId } from '../lib/outbound-phone.js';
 import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import { createNotification } from '../lib/emotional-intelligence.js';
 import { clampTestDelayMs } from '../lib/test-mode.js';
@@ -645,7 +646,7 @@ async function checkDialTimeGate(
  * VAPI Worker processor
  */
 async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: string; status: string }> {
-    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, phoneNumberId, inlineAgent } = job.data;
+    const { tenantId, contactPhone, assistantConfig, enrollmentId, stepId, urgencyPriority, retryCount = 0, inlineAgent } = job.data;
     // variantId/dedupKey/dailyCapKey are stamped by the scheduler (see lib/types.ts payload contract)
     const { variantId, dedupKey } = job.data;
 
@@ -775,6 +776,34 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
         return { callId: '', status: 'duplicate_skipped' };
     }
 
+    // Caller ID. The scheduler stamps phoneNumberId at enqueue; self-healer
+    // re-queues and pre-upgrade jobs carry none, and VAPI rejects a dial
+    // without one — resolve here (rotation-aware, then the legacy tiers).
+    // After the send claim, so a duplicate dispatch never burns a rotation slot.
+    let phoneNumberId = job.data.phoneNumberId;
+    if (!phoneNumberId) {
+        // Never throw from here: the concurrency slot is held and only the
+        // makeVapiCall error path below releases it. A lookup failure just
+        // dials without a caller ID, which VAPI rejects into that same path.
+        try {
+            const { data: stepRow } = await supabase
+                .from('sequence_steps')
+                .select('voice_agent_id')
+                .eq('id', stepId)
+                .maybeSingle();
+            const resolved = await resolveVoiceCallerId({
+                enrollmentId,
+                tenantId,
+                sequenceId: job.data.sequenceId ?? null,
+                voiceAgentId: stepRow?.voice_agent_id ?? null,
+            });
+            phoneNumberId = resolved.phoneNumberId ?? undefined;
+            console.log(`[VAPI] Resolved caller ID at dial time for enrollment ${enrollmentId}: ${phoneNumberId ?? 'none'} (${resolved.source})`);
+        } catch (err) {
+            console.error(`[VAPI] Dial-time caller ID resolution failed for enrollment ${enrollmentId}:`, err);
+        }
+    }
+
     // 3. Make the call. The try only wraps the VAPI API request so the slot
     //    is released exactly once: here on API failure (no call exists, so no
     //    webhook will ever release it), or by the call-outcome webhook after
@@ -835,7 +864,7 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
         channel: 'voice',
         action: 'call_initiated',
         providerId: result.callId,
-        providerResponse: result,
+        providerResponse: { ...result, phoneNumberId: phoneNumberId ?? null },
         callStatus: 'initiated',
         variantId: variantId ?? null,
     });

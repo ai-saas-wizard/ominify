@@ -169,6 +169,13 @@ export interface Sequence {
     // Days of week voice dialing is allowed ('sun'..'sat' keys, tenant tz).
     // null = every day. Enforced with the window in both dispatch gates.
     calling_days: string[] | null;
+    // Spread this sequence's calls + texts across a hand-picked pool of the
+    // tenant's numbers, sticky per enrollment (lib/outbound-phone.ts).
+    // false = legacy single-number resolution.
+    rotate_phone_numbers: boolean;
+    // tenant_phone_numbers.id[] in rotation order; only read when the toggle
+    // is on. May reference released numbers — filtered at dispatch.
+    rotation_phone_number_ids: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -336,6 +343,9 @@ export interface SequenceEnrollment {
     custom_variables: Record<string, any>;
     is_test: boolean;
     channel_overrides: Record<string, any>;
+    // Sticky outbound number when the sequence rotates numbers: NULL until the
+    // first touch, or after that number is released (ON DELETE SET NULL).
+    outbound_phone_id: string | null;
     // Phase 6: Dynamic (JIT) Step Generation
     outcome_timeout_at: string | null;
     created_at: string;
@@ -383,7 +393,10 @@ export interface VapiJobPayload {
     urgencyPriority: number;
     retryCount?: number;
     overrideVariables?: Record<string, string>;
-    phoneNumberId?: string;  // VAPI phone number ID for outbound caller ID
+    // VAPI phone number ID for outbound caller ID. Resolved at enqueue by
+    // lib/outbound-phone.ts (rotation-aware); absent on self-healer re-queues
+    // and pre-upgrade jobs, in which case the worker resolves it at dial time.
+    phoneNumberId?: string;
     // Blueprint-based inline agent: when present, vapi-worker uses this directly
     // instead of assistantConfig.vapi_assistant_id or hardcoded inline defaults
     inlineAgent?: InlineVapiAgent;
