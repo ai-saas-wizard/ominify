@@ -732,6 +732,31 @@ async function handleSmsReply(event: EventJobPayload): Promise<void> {
         }
 
         if (kwContactId) {
+            // Record the inbound message BEFORE any of the keyword branches
+            // return. Each of them short-circuits past the normal reply flow,
+            // which is what calls recordInteraction — so a lead who texted
+            // "Stop" had the opt-out applied and logged, but the message itself
+            // was never written to contact_interactions. It therefore never
+            // appeared in the UNIBOX thread (which is built from interactions),
+            // never entered cross-channel memory, and was invisible to reply
+            // analytics: the thread showed only our outbound texts next to an
+            // unexplained "opted out" badge.
+            if (kwTenantId) {
+                await recordInteraction({
+                    clientId: kwTenantId,
+                    contactId: kwContactId,
+                    enrollmentId: enrollmentId || undefined,
+                    channel: 'sms',
+                    direction: 'inbound',
+                    contentBody: messageBody,
+                    outcome: 'replied',
+                    // START/HELP have no intent of their own in the enum; only
+                    // STOP is a real intent signal, the rest are 'unknown'.
+                    intent: isStopMessage(messageBody) ? 'stop' : 'unknown',
+                    providerId: event.messageSid || undefined,
+                });
+            }
+
             if (isStopMessage(messageBody)) {
                 console.log(`[EVENT] STOP keyword detected — opting out contact ${kwContactId}`);
                 await optOutContact(supabase, kwContactId, 'sms', enrollmentId ? 'keyword' : 'keyword_untracked');
@@ -1653,6 +1678,31 @@ async function handleEmailReply(event: EventJobPayload): Promise<void> {
             // before any LLM call (CAN-SPAM/compliance cannot depend on GPT).
             // isStopEmailBody checks the first non-quoted line — real email
             // replies carry quoted text/signatures below the actual reply.
+            // Same as the SMS keyword block: every branch below returns before
+            // the normal reply flow records the interaction, so record the
+            // inbound email first or the thread shows an unexplained opt-out.
+            if (
+                isStopMessage(messageBody) ||
+                isStopEmailBody(messageBody) ||
+                isStartMessage(messageBody) ||
+                isHelpMessage(messageBody)
+            ) {
+                await recordInteraction({
+                    clientId: enroll.tenant_id,
+                    contactId: enroll.contact_id,
+                    enrollmentId,
+                    channel: 'email',
+                    direction: 'inbound',
+                    contentBody: messageBody,
+                    contentSubject: emailSubject || undefined,
+                    outcome: 'replied',
+                    intent:
+                        isStopMessage(messageBody) || isStopEmailBody(messageBody)
+                            ? 'stop'
+                            : 'unknown',
+                });
+            }
+
             if (isStopMessage(messageBody) || isStopEmailBody(messageBody)) {
                 console.log(`[EVENT] STOP keyword detected in email reply for enrollment ${enrollmentId} — opting out contact ${enroll.contact_id}`);
                 await optOutContact(supabase, enroll.contact_id, 'email', 'keyword');
