@@ -6,7 +6,11 @@ import { Loader2, Users, Check } from "lucide-react";
 import { listContactLists } from "@/app/actions/contact-list-actions";
 import { enrollListInSequence } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
-import { seqBtnPrimary, seqCardStatic } from "@/components/sequences/theme";
+import {
+    seqBtnPrimary,
+    seqCardStatic,
+    type SeqRailPanelProps,
+} from "@/components/sequences/theme";
 
 interface ListRow {
     id: string;
@@ -30,7 +34,8 @@ export function EnrollListCard({
     sequenceId,
     clientId,
     className,
-}: {
+    bare,
+}: Pick<SeqRailPanelProps, "bare"> & {
     sequenceId: string;
     clientId: string;
     className?: string;
@@ -84,17 +89,10 @@ export function EnrollListCard({
         }
     }
 
-    return (
-        <div className={cn(seqCardStatic, "p-4", className)}>
-            <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                <Users className="h-3.5 w-3.5 text-gray-400" />
-                Enroll a list
-            </h4>
-            <p className="mb-3 text-xs text-gray-500">
-                Adds every contact on a saved list to this sequence. Contacts already
-                enrolled, or who replied, booked or opted out, are skipped.
-            </p>
-
+    // Enrolling starts real outreach rather than editing a setting, so this
+    // panel keeps its own button even inside the rail's unified-save sidebar.
+    const body = (
+        <>
             {loading ? (
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -160,6 +158,34 @@ export function EnrollListCard({
                 </p>
             )}
             {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        </>
+    );
+
+    if (bare) {
+        return (
+            <div className={className}>
+                {body}
+                {!loading && lists.length > 0 && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+                        Contacts already enrolled, or who replied, booked or opted out, are
+                        skipped.
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className={cn(seqCardStatic, "p-4", className)}>
+            <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <Users className="h-3.5 w-3.5 text-gray-400" />
+                Enroll a list
+            </h4>
+            <p className="mb-3 text-xs text-gray-500">
+                Adds every contact on a saved list to this sequence. Contacts already
+                enrolled, or who replied, booked or opted out, are skipped.
+            </p>
+            {body}
         </div>
     );
 }

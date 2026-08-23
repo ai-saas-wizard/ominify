@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Shuffle } from "lucide-react";
@@ -11,7 +11,11 @@ import {
     type RotationPhoneOption,
 } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
-import { seqBtnPrimary, seqCardStatic } from "@/components/sequences/theme";
+import {
+    seqBtnPrimary,
+    seqCardStatic,
+    type SeqRailPanelProps,
+} from "@/components/sequences/theme";
 
 /** The sequence fields this card reads — a structural subset of the row. */
 export interface NumberRotationFields {
@@ -30,7 +34,10 @@ export function NumberRotationCard({
     clientId,
     sequence,
     className,
-}: {
+    bare,
+    onDirtyChange,
+    registerSave,
+}: SeqRailPanelProps & {
     sequenceId: string;
     clientId: string;
     sequence: NumberRotationFields | null | undefined;
@@ -122,41 +129,50 @@ export function NumberRotationCard({
         }
     }
 
-    return (
-        <div className={cn(seqCardStatic, "p-4", className)}>
-            <div className="mb-1 flex items-center justify-between">
-                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                    <Shuffle className="h-3.5 w-3.5 text-gray-400" />
-                    Rotate Numbers
-                </h4>
-                {saving && (
-                    <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Saving
-                    </span>
-                )}
-                {!saving && saved && (
-                    <span className="flex items-center gap-1 text-xs text-emerald-700">
-                        <Check className="h-3 w-3" />
-                        Saved
-                    </span>
-                )}
-            </div>
-            <p className="mb-3 text-xs text-gray-500">
-                Spread this sequence&apos;s calls and texts across several of your numbers.
-                Each lead keeps the same number for every touch.
-            </p>
+    // --- Rail integration -------------------------------------------------
+    // See SeqRailPanelProps: the sequence-detail rail shows one save bar for
+    // every config panel, so it needs the dirty flag and a commit function.
+    const draftIds = phones.filter((p) => selected.has(p.id)).map((p) => p.id);
+    const dirty = enabled !== serverEnabled || draftIds.join(",") !== serverIdsKey;
 
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
+
+    const draftIdsKey = draftIds.join(",");
+    const commit = useCallback(async (): Promise<string | null> => {
+        const ids = draftIdsKey ? draftIdsKey.split(",") : [];
+        if (enabled && ids.length === 0) return "Pick at least one number to rotate across";
+        const res = await updateSequencePhoneRotation(sequenceId, {
+            rotate_phone_numbers: enabled,
+            rotation_phone_number_ids: ids,
+        });
+        return res?.success ? null : res?.error || "Could not save number rotation";
+    }, [sequenceId, enabled, draftIdsKey]);
+
+    useEffect(() => {
+        if (!registerSave) return;
+        registerSave(dirty ? commit : null);
+        return () => registerSave(null);
+    }, [registerSave, commit, dirty]);
+
+    const body = (
+        <>
             <div className="flex items-center justify-between gap-2">
-                <label htmlFor="rotate-numbers" className="text-xs text-gray-600">
+                <label htmlFor="rotate-numbers" className="min-w-0 text-xs text-gray-600">
                     Rotate numbers
+                    {bare && (
+                        <span className="mt-0.5 block text-[10.5px] text-gray-400">
+                            each lead keeps one number
+                        </span>
+                    )}
                 </label>
                 <Switch
                     id="rotate-numbers"
                     checked={enabled}
                     onCheckedChange={handleToggle}
                     disabled={saving || loading}
-                    className="h-5 w-9 data-[state=checked]:bg-emerald-600"
+                    className="h-5 w-9 shrink-0 data-[state=checked]:bg-emerald-600"
                 />
             </div>
 
@@ -236,6 +252,42 @@ export function NumberRotationCard({
                     )}
                 </div>
             )}
+
+        </>
+    );
+
+    // Inside the sequence-detail rail the accordion header carries the title and
+    // the rail's save bar carries the commit, so only the controls belong here.
+    if (bare) {
+        return <div className={cn("space-y-2.5", className)}>{body}</div>;
+    }
+
+    return (
+        <div className={cn(seqCardStatic, "p-4", className)}>
+            <div className="mb-1 flex items-center justify-between">
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <Shuffle className="h-3.5 w-3.5 text-gray-400" />
+                    Rotate Numbers
+                </h4>
+                {saving && (
+                    <span className="flex items-center gap-1 text-xs text-gray-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Saving
+                    </span>
+                )}
+                {!saving && saved && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-700">
+                        <Check className="h-3 w-3" />
+                        Saved
+                    </span>
+                )}
+            </div>
+            <p className="mb-3 text-xs text-gray-500">
+                Spread this sequence&apos;s calls and texts across several of your numbers.
+                Each lead keeps the same number for every touch.
+            </p>
+
+            {body}
 
             {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 

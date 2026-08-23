@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock, Check, Loader2 } from "lucide-react";
 import { updateSequencePacing } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
-import { seqBtnPrimary, seqCardStatic } from "@/components/sequences/theme";
+import {
+    seqBtnPrimary,
+    seqCardStatic,
+    type SeqRailPanelProps,
+} from "@/components/sequences/theme";
 
 /** The sequence fields this card reads — a structural subset of the row. */
 export interface CallingScheduleFields {
@@ -74,7 +78,10 @@ export function CallingScheduleCard({
     sequenceId,
     sequence,
     className,
-}: {
+    bare,
+    onDirtyChange,
+    registerSave,
+}: SeqRailPanelProps & {
     sequenceId: string;
     sequence: CallingScheduleFields | null | undefined;
     className?: string;
@@ -152,6 +159,43 @@ export function CallingScheduleCard({
         }
     }
 
+    // --- Rail integration -------------------------------------------------
+    // The rail renders one save bar for the whole sidebar, so it needs to know
+    // when this panel holds edits and how to commit them. Both are no-ops for
+    // the standalone card.
+    const draftDays = DAY_KEYS.filter((d) => selectedDays.has(d)).join(",");
+    const dirty =
+        dailyCap !== serverCap ||
+        windowStart !== serverStart ||
+        windowEnd !== serverEnd ||
+        pacing !== serverPacing ||
+        draftDays !== serverDays;
+
+    useEffect(() => {
+        onDirtyChange?.(dirty);
+    }, [dirty, onDirtyChange]);
+
+    /** Same write as handleSave, but reports failure to the caller instead of
+     *  painting inline state — the rail's save bar owns the messaging. */
+    const commit = useCallback(async (): Promise<string | null> => {
+        if (selectedDays.size === 0) return "Select at least one calling day";
+        const res = await updateSequencePacing(sequenceId, {
+            daily_call_cap: dailyCap.trim() === "" ? null : Number(dailyCap),
+            calling_window_start: windowStart || null,
+            calling_window_end: windowEnd || null,
+            calling_days:
+                selectedDays.size === 7 ? null : DAY_KEYS.filter((d) => selectedDays.has(d)),
+            pacing_per_minute: pacing.trim() === "" ? null : Number(pacing),
+        });
+        return res?.success ? null : res?.error || "Could not save the calling schedule";
+    }, [sequenceId, dailyCap, windowStart, windowEnd, pacing, selectedDays]);
+
+    useEffect(() => {
+        if (!registerSave) return;
+        registerSave(dirty ? commit : null);
+        return () => registerSave(null);
+    }, [registerSave, commit, dirty]);
+
     function onChange(setter: (v: string) => void) {
         return (e: React.ChangeEvent<HTMLInputElement>) => {
             setter(e.target.value);
@@ -160,32 +204,11 @@ export function CallingScheduleCard({
         };
     }
 
-    return (
-        <div className={cn(seqCardStatic, "p-4", className)}>
-            <div className="mb-1 flex items-center justify-between">
-                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                    <CalendarClock className="h-3.5 w-3.5 text-gray-400" />
-                    Calling Schedule
-                </h4>
-                {saving && (
-                    <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Saving
-                    </span>
-                )}
-                {!saving && saved && (
-                    <span className="flex items-center gap-1 text-xs text-emerald-700">
-                        <Check className="h-3 w-3" />
-                        Saved
-                    </span>
-                )}
-            </div>
-            <p className="mb-3 text-xs text-gray-500">
-                Voice calls only, in your business timezone — layered on top of business
-                hours and the 8am–9pm rule.
-            </p>
+    const footnote =
+        "Voice calls only, in your business timezone — layered on top of business hours and the 8am\u20139pm rule.";
 
-            <div className="space-y-3">
+    const fields = (
+        <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
                     <label htmlFor="daily-call-cap" className="text-xs text-gray-600">
                         Calls per day
@@ -274,7 +297,43 @@ export function CallingScheduleCard({
                         className={cn(inputClass, "w-24 text-right tabular-nums")}
                     />
                 </div>
+        </div>
+    );
+
+    // Inside the sequence-detail rail the accordion header carries the title and
+    // the rail's save bar carries the commit, so only the fields belong here.
+    if (bare) {
+        return (
+            <div className={cn("space-y-3", className)}>
+                {fields}
+                <p className="text-[11px] leading-relaxed text-gray-400">{footnote}</p>
             </div>
+        );
+    }
+
+    return (
+        <div className={cn(seqCardStatic, "p-4", className)}>
+            <div className="mb-1 flex items-center justify-between">
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <CalendarClock className="h-3.5 w-3.5 text-gray-400" />
+                    Calling Schedule
+                </h4>
+                {saving && (
+                    <span className="flex items-center gap-1 text-xs text-gray-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Saving
+                    </span>
+                )}
+                {!saving && saved && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-700">
+                        <Check className="h-3 w-3" />
+                        Saved
+                    </span>
+                )}
+            </div>
+            <p className="mb-3 text-xs text-gray-500">{footnote}</p>
+
+            {fields}
 
             {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 

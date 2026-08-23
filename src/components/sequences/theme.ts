@@ -47,3 +47,25 @@ export const SEQ_STATUS = {
 } as const;
 
 export type SeqStatusKey = keyof typeof SEQ_STATUS;
+
+/**
+ * Contract that lets the config cards live inside the sequence detail rail's
+ * accordion instead of standing alone as cards.
+ *
+ * `bare` drops the card chrome + title + own save button (the accordion header
+ * carries the title and the rail carries one save bar); `onDirtyChange` and
+ * `registerSave` let the rail's single save bar count and commit the edits.
+ * All optional — omitting them leaves the card exactly as it behaves today in
+ * the flow sidebar.
+ */
+export interface SeqRailPanelProps {
+    /** Render without the card wrapper, heading, and per-panel save button. */
+    bare?: boolean;
+    /** Fires whenever the panel gains or loses unsaved edits. */
+    onDirtyChange?: (dirty: boolean) => void;
+    /**
+     * Hands the parent a save function to call from a unified save bar, or
+     * null on unmount. Resolves to an error string when the save fails.
+     */
+    registerSave?: (fn: (() => Promise<string | null>) | null) => void;
+}

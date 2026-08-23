@@ -1,22 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft,
     Brain,
-    Trash2,
-    Zap,
-    Users,
-    Bot,
     Loader2,
+    Pause,
+    Play,
+    Trash2,
     UserMinus,
-    FlaskConical,
-    CalendarClock,
+    Zap,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
     Tooltip,
     TooltipContent,
@@ -24,46 +20,29 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { TestNowDialog } from "@/components/sequences/flow/panels/test-now-dialog";
-import { StrategyOverviewCard } from "./strategy-overview-card";
 import { LeadJourneyTimeline } from "./lead-journey-timeline";
-import {
-    CallingScheduleCard,
-    callingScheduleSummary,
-} from "@/components/sequences/calling-schedule-card";
-import { EnrollListCard } from "@/components/sequences/enroll-list-card";
-import { NumberRotationCard } from "@/components/sequences/number-rotation-card";
+import { EnrolledLeadsPanel, leadName } from "./enrolled-leads-panel";
+import { SequenceConfigRail } from "./sequence-config-rail";
+import { ENROLLMENT_STATUS, STATUS_LABELS, isInFlight } from "./enrollment-status";
+import { callingScheduleSummary } from "@/components/sequences/calling-schedule-card";
 import {
     toggleSequenceActive,
     deleteSequence,
     unenrollContact,
     resumeSequenceEnrollments,
-    listOutboundAgents,
-    updateSequence,
 } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
-import { seqFocusRing, seqBtnPrimary, seqBtnSecondary, seqCardStatic } from "@/components/sequences/theme";
+import { seqFocusRing } from "@/components/sequences/theme";
 
-// Dynamic enrollments spend most of their life awaiting an outcome or
-// generating the next step — those are in-flight (sky). Terminal outcomes
-// stay neutral ink; only paused/failed carry warning/error color.
-const ENROLLMENT_STATUS: Record<string, { dot: string; text: string }> = {
-    active: { dot: "bg-sky-500", text: "text-sky-700" },
-    awaiting_outcome: { dot: "bg-sky-500", text: "text-sky-700" },
-    generating_next_step: { dot: "bg-sky-500", text: "text-sky-700" },
-    paused: { dot: "bg-amber-500", text: "text-amber-700" },
-    completed: { dot: "bg-gray-900", text: "text-gray-700" },
-    replied: { dot: "bg-gray-900", text: "text-gray-700" },
-    booked: { dot: "bg-gray-900", text: "text-gray-700" },
-    failed: { dot: "bg-red-500", text: "text-red-700" },
-    unenrolled: { dot: "bg-gray-300", text: "text-gray-500" },
-    manual_stop: { dot: "bg-gray-300", text: "text-gray-500" },
+const CHANNEL_TAB_LABELS: Record<string, string> = {
+    voice: "Voice",
+    sms: "SMS",
+    email: "Email",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-    awaiting_outcome: "awaiting outcome",
-    generating_next_step: "thinking...",
-    manual_stop: "stopped",
-};
+/** Header chip button — the three actions share one shape. */
+const headerBtn =
+    "inline-flex h-[30px] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-900 transition-colors hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50";
 
 interface DynamicSequenceViewProps {
     clientId: string;
@@ -74,11 +53,11 @@ interface DynamicSequenceViewProps {
 }
 
 /**
- * Read-only observability view for AI-driven (generation_mode='dynamic')
- * sequences: the strategy the AI follows, plus a per-lead timeline of what it
- * actually decided and did. There is no step authoring here by design — steps
- * are generated per lead at runtime. Operational controls (activate, test,
- * agent binding, unenroll, delete) remain available.
+ * Observability + operations view for AI-driven (generation_mode='dynamic')
+ * sequences, laid out as three fixed columns: who is enrolled, what happened to
+ * the selected lead, and how the campaign is configured. There is no step
+ * authoring here by design — steps are generated per lead at runtime, so any
+ * shared step graph would be fiction.
  */
 export function DynamicSequenceView({
     clientId,
@@ -94,23 +73,10 @@ export function DynamicSequenceView({
     const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(
         enrollments[0]?.id ?? null
     );
-    const [unenrollingId, setUnenrollingId] = useState<string | null>(null);
+    const [unenrolling, setUnenrolling] = useState(false);
     const [resuming, setResuming] = useState(false);
     const [resumeMsg, setResumeMsg] = useState<string | null>(null);
-
-    // Bound-agent picker (operational, not authoring — same optimistic pattern
-    // as the flow sidebar's Info tab).
-    const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
-    const [agentsLoaded, setAgentsLoaded] = useState(false);
-    const [boundAgentId, setBoundAgentId] = useState<string>(sequence.agent_id || "");
-    const [savingAgent, setSavingAgent] = useState(false);
-
-    useEffect(() => {
-        listOutboundAgents(clientId).then((list) => {
-            setAgents(list);
-            setAgentsLoaded(true);
-        });
-    }, [clientId]);
+    const [journeyFilter, setJourneyFilter] = useState("All");
 
     async function handleToggleActive() {
         setToggling(true);
@@ -125,7 +91,8 @@ export function DynamicSequenceView({
     }
 
     async function handleDelete() {
-        if (!confirm("Are you sure you want to delete this sequence? This cannot be undone.")) return;
+        if (!confirm("Are you sure you want to delete this sequence? This cannot be undone."))
+            return;
         setDeleting(true);
         try {
             await deleteSequence(sequenceId);
@@ -133,20 +100,6 @@ export function DynamicSequenceView({
         } catch (err) {
             console.error("Delete error:", err);
             setDeleting(false);
-        }
-    }
-
-    async function handleAgentChange(newAgentId: string) {
-        const prev = boundAgentId;
-        setBoundAgentId(newAgentId); // optimistic
-        setSavingAgent(true);
-        const fd = new FormData();
-        fd.set("agent_id", newAgentId); // "" → unbind
-        const res = await updateSequence(sequenceId, fd);
-        setSavingAgent(false);
-        if (!res?.success) {
-            setBoundAgentId(prev);
-            alert(res?.error || "Failed to update the bound agent");
         }
     }
 
@@ -175,9 +128,9 @@ export function DynamicSequenceView({
 
     async function handleUnenroll(enrollmentId: string) {
         if (!confirm("Are you sure you want to unenroll this contact?")) return;
-        setUnenrollingId(enrollmentId);
+        setUnenrolling(true);
         const res = await unenrollContact(enrollmentId);
-        setUnenrollingId(null);
+        setUnenrolling(false);
         if (res.success) {
             router.refresh();
         } else {
@@ -189,342 +142,397 @@ export function DynamicSequenceView({
     // dynamic enrollments spend most of their life in awaiting_outcome /
     // generating_next_step, which must count as active or a live sequence
     // shows "Active: 0".
-    const IN_FLIGHT = ["active", "awaiting_outcome", "generating_next_step"];
-    const stats = {
-        active: enrollments.filter((e) => IN_FLIGHT.includes(e.status)).length,
-        paused: enrollments.filter((e) => e.status === "paused").length,
-        completed: enrollments.filter((e) => e.status === "completed").length,
-        replied: enrollments.filter((e) => e.status === "replied").length,
-        booked: enrollments.filter((e) => e.status === "booked").length,
-        failed: enrollments.filter((e) => e.status === "failed").length,
-        total: enrollments.length,
-    };
+    const stats = useMemo(() => {
+        const by = (fn: (e: any) => boolean) => enrollments.filter(fn).length;
+        return {
+            total: enrollments.length,
+            active: by((e) => isInFlight(e.status)),
+            paused: by((e) => e.status === "paused"),
+            completed: by((e) => e.status === "completed"),
+            replied: by((e) => e.status === "replied"),
+            booked: by((e) => e.status === "booked"),
+            failed: by((e) => e.status === "failed"),
+        };
+    }, [enrollments]);
 
-    const selectedEnrollment = enrollments.find((e) => e.id === selectedEnrollmentId);
-    const scheduleSummary = callingScheduleSummary(sequence);
+    /** "45" over "50" → "90%"; blank when there is nothing to divide by. */
+    function share(n: number): string {
+        if (!stats.total || n === 0) return "—";
+        return `${Math.round((n / stats.total) * 100)}%`;
+    }
+
+    const kpis = [
+        { label: "Enrolled", value: stats.total, sub: "leads", dot: "bg-gray-300" },
+        { label: "Active", value: stats.active, sub: share(stats.active), dot: "bg-sky-500" },
+        { label: "Replied", value: stats.replied, sub: share(stats.replied), dot: "bg-gray-900" },
+        { label: "Booked", value: stats.booked, sub: share(stats.booked), dot: "bg-emerald-500" },
+        {
+            label: "Completed",
+            value: stats.completed,
+            sub: share(stats.completed),
+            dot: "bg-gray-300",
+        },
+        { label: "Failed", value: stats.failed, sub: share(stats.failed), dot: "bg-red-500" },
+    ];
+
+    const strategy = sequence.sequence_strategy || {};
+    const channels: string[] = strategy.available_channels || [];
+    const maxTouches = Math.max(Number(strategy.max_steps) || 4, 1);
+
+    // "50/day · 09:00–16:00 · Weekdays" split back into its own segments so the
+    // numeric ones can carry tabular figures.
+    const scheduleParts = (callingScheduleSummary(sequence) || "").split(" · ").filter(Boolean);
+    const channelSummary = channels
+        .map((c) => CHANNEL_TAB_LABELS[c])
+        .filter(Boolean)
+        .join(" + ");
+
+    const headerMeta: Array<{ text: string; mono?: boolean }> = [
+        ...scheduleParts.map((p) => ({ text: p, mono: /\d/.test(p) })),
+        ...(channelSummary ? [{ text: channelSummary }] : []),
+        ...(strategy.max_steps != null
+            ? [{ text: `up to ${strategy.max_steps} touchpoints` }]
+            : []),
+    ];
+
+    const journeyTabs = ["All", ...channels.map((c) => CHANNEL_TAB_LABELS[c]).filter(Boolean), "AI"];
+
+    const selected = enrollments.find((e) => e.id === selectedEnrollmentId);
+    const selectedStatus = selected
+        ? ENROLLMENT_STATUS[selected.status] || ENROLLMENT_STATUS.active
+        : null;
+    const canUnenroll =
+        selected && (isInFlight(selected.status) || selected.status === "paused");
 
     return (
         <TooltipProvider delayDuration={200}>
             <div className="flex h-full w-full flex-col bg-gray-50">
-                {/* Header bar */}
-                <div className="flex-shrink-0 border-b border-gray-200 bg-white px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                        <Link
-                            href={`/client/${clientId}/sequences`}
-                            className={cn(
-                                "rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
-                                seqFocusRing
-                            )}
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                        </Link>
-                        <h2 className="max-w-[280px] truncate text-sm font-semibold text-gray-900">
-                            {sequence.name}
-                        </h2>
-                        <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-500">
-                            <Brain className="h-3 w-3 text-gray-400" />
-                            AI-driven
-                        </span>
+                {/* ---- Header ---- */}
+                <header className="flex flex-none items-start gap-3.5 border-b border-gray-200 bg-white py-3 pl-4 pr-5">
+                    <Link
+                        href={`/client/${clientId}/sequences`}
+                        aria-label="Back to sequences"
+                        className={cn(
+                            "mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-md border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900",
+                            seqFocusRing
+                        )}
+                    >
+                        <ArrowLeft className="h-[15px] w-[15px]" />
+                    </Link>
 
-                        <Separator orientation="vertical" className="h-5" />
-
-                        {/* Active toggle */}
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <button
-                                    onClick={handleToggleActive}
-                                    disabled={toggling}
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                            <h1 className="truncate text-[17px] font-semibold tracking-[-0.015em] text-gray-900">
+                                {sequence.name}
+                            </h1>
+                            <span
+                                className={cn(
+                                    "inline-flex h-[21px] flex-none items-center gap-1.5 rounded px-2 text-[11px] font-semibold",
+                                    isActive
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "bg-gray-100 text-gray-500"
+                                )}
+                            >
+                                <span
                                     className={cn(
-                                        "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50",
-                                        seqFocusRing
+                                        "h-[5px] w-[5px] rounded-full",
+                                        isActive ? "bg-emerald-500" : "bg-gray-400"
                                     )}
-                                >
-                                    <div className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-gray-300"}`} />
-                                    {toggling ? "..." : isActive ? "Active" : "Inactive"}
-                                </button>
-                            </TooltipTrigger>
-                            <TooltipContent>Toggle sequence active/inactive</TooltipContent>
-                        </Tooltip>
+                                />
+                                {isActive ? "Active" : "Inactive"}
+                            </span>
+                        </div>
 
-                        {/* Test now */}
+                        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11.5px] text-gray-500">
+                            <span className="inline-flex items-center gap-1.5">
+                                <Brain className="h-3.5 w-3.5 text-emerald-600" />
+                                AI-driven
+                            </span>
+                            {headerMeta.map((m) => (
+                                <span key={m.text} className="flex items-center gap-2.5">
+                                    <span className="text-gray-300">·</span>
+                                    <span className={cn(m.mono && "font-mono tabular-nums")}>
+                                        {m.text}
+                                    </span>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="mt-0.5 flex flex-none items-center gap-2">
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <button
+                                    type="button"
                                     onClick={() => setTestOpen(true)}
-                                    className={cn(seqBtnSecondary, "px-2.5 py-1 text-xs")}
+                                    className={cn(headerBtn, seqFocusRing)}
                                 >
-                                    <Zap className="h-3.5 w-3.5 text-gray-400" />
+                                    <Zap className="h-3.5 w-3.5 text-emerald-600" />
                                     Test now
                                 </button>
                             </TooltipTrigger>
-                            <TooltipContent>Fire a test to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
+                            <TooltipContent>
+                                Fire a test to a phone number — bypasses pacing &amp; quiet-hours
+                            </TooltipContent>
                         </Tooltip>
 
-                        {/* Read-only calling-schedule summary */}
-                        {scheduleSummary && (
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-medium tabular-nums text-gray-600">
-                                        <CalendarClock className="h-3 w-3 text-gray-400" />
-                                        {scheduleSummary}
-                                    </span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    Voice dialing limit &amp; window (business timezone)
-                                </TooltipContent>
-                            </Tooltip>
-                        )}
-
-                        <div className="flex-1" />
-
-                        {/* Learning Dashboard */}
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Link
                                     href={`/client/${clientId}/sequences/${sequenceId}/learning`}
+                                    className={cn(headerBtn, seqFocusRing)}
+                                >
+                                    <Brain className="h-3.5 w-3.5 text-gray-500" />
+                                    Learning
+                                </Link>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Learning dashboard — what is working across this sequence
+                            </TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={handleToggleActive}
+                                    disabled={toggling}
+                                    className={cn(headerBtn, "text-gray-600", seqFocusRing)}
+                                >
+                                    {toggling ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : isActive ? (
+                                        <Pause className="h-3.5 w-3.5" />
+                                    ) : (
+                                        <Play className="h-3.5 w-3.5" />
+                                    )}
+                                    {isActive ? "Pause" : "Activate"}
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {isActive
+                                    ? "Stop dispatching — in-flight leads are parked as paused"
+                                    : "Resume dispatching on the sequence schedule"}
+                            </TooltipContent>
+                        </Tooltip>
+
+                        <div className="h-5 w-px bg-gray-200" />
+
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={handleDelete}
+                                    disabled={deleting}
+                                    aria-label="Delete sequence"
                                     className={cn(
-                                        "flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900",
+                                        "grid h-[30px] w-[30px] place-items-center rounded-md border border-gray-200 bg-white text-gray-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50",
                                         seqFocusRing
                                     )}
                                 >
-                                    <Brain className="h-4 w-4" />
-                                </Link>
-                            </TooltipTrigger>
-                            <TooltipContent>Learning Dashboard</TooltipContent>
-                        </Tooltip>
-
-                        {/* Delete */}
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={handleDelete}
-                                    disabled={deleting}
-                                    className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-700"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                             </TooltipTrigger>
                             <TooltipContent>Delete sequence</TooltipContent>
                         </Tooltip>
                     </div>
+                </header>
+
+                {/* ---- KPI strip ---- */}
+                <div className="grid flex-none grid-cols-6 border-b border-gray-200 bg-white">
+                    {kpis.map((k) => (
+                        <div
+                            key={k.label}
+                            className="flex flex-col gap-1.5 border-r border-gray-100 px-4 py-3 last:border-r-0"
+                        >
+                            <div className="flex items-center gap-1.5">
+                                <span className={cn("h-[5px] w-[5px] rounded-full", k.dot)} />
+                                <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-gray-500">
+                                    {k.label}
+                                </span>
+                            </div>
+                            <div className="flex items-baseline gap-2">
+                                <span
+                                    className={cn(
+                                        "font-mono text-[21px] font-medium tabular-nums tracking-[-0.02em]",
+                                        k.value === 0 ? "text-gray-400" : "text-gray-900"
+                                    )}
+                                >
+                                    {k.value}
+                                </span>
+                                <span className="font-mono text-[10.5px] tabular-nums text-gray-400">
+                                    {k.sub}
+                                </span>
+                            </div>
+                        </div>
+                    ))}
                 </div>
 
-                {/* Info strip: strategy + agent + stats */}
-                <div className="grid flex-shrink-0 grid-cols-1 gap-4 px-4 pt-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <StrategyOverviewCard sequence={sequence} />
-
-                    <div className={cn(seqCardStatic, "p-4")}>
-                        <div className="mb-1 flex items-center justify-between">
-                            <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                                <Bot className="h-3.5 w-3.5 text-gray-400" />
-                                Bound Agent
-                            </h4>
-                            {savingAgent && (
-                                <span className="flex items-center gap-1 text-xs text-gray-500">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    Saving
-                                </span>
-                            )}
-                        </div>
-                        <p className="mb-2 text-xs text-gray-500">
-                            Drives voice calls and the SMS persona for this sequence&apos;s texts.
-                        </p>
-                        {/* AI sequences require an agent — swapping is allowed,
-                            unbinding is not (also enforced in updateSequenceCore). */}
-                        <select
-                            value={boundAgentId}
-                            onChange={(e) => e.target.value && handleAgentChange(e.target.value)}
-                            disabled={savingAgent || !agentsLoaded}
+                {/* Deactivating parks in-flight leads at status=paused and re-activating
+                    deliberately does not undo it, so paused leads need an explicit way
+                    back into rotation. */}
+                {stats.paused > 0 && (
+                    <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-100 bg-amber-50/70 px-4 py-2 text-[11.5px] text-amber-900">
+                        <span className="flex items-center gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                            <span className="font-mono tabular-nums">{stats.paused}</span> lead
+                            {stats.paused === 1 ? "" : "s"} paused — outreach is stopped for them.
+                        </span>
+                        <button
+                            type="button"
+                            onClick={handleResume}
+                            disabled={resuming}
                             className={cn(
-                                "w-full rounded-md border border-gray-200 bg-white p-2 text-sm text-gray-900 outline-none transition-colors hover:border-gray-300 focus:ring-2 focus:ring-emerald-600/50 disabled:opacity-60"
+                                "rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50",
+                                seqFocusRing
                             )}
                         >
-                            {!boundAgentId && (
-                                <option value="" disabled>
-                                    Select an agent
-                                </option>
-                            )}
-                            {boundAgentId && !agents.some((a) => a.id === boundAgentId) && (
-                                <option value={boundAgentId}>Current agent</option>
-                            )}
-                            {agents.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                    {a.name}
-                                </option>
-                            ))}
-                        </select>
+                            {resuming ? "Resuming…" : "Put them back in rotation"}
+                        </button>
+                        {resumeMsg && <span className="text-amber-800">{resumeMsg}</span>}
                     </div>
+                )}
 
-                    <CallingScheduleCard sequenceId={sequenceId} sequence={sequence} />
-                    <NumberRotationCard sequenceId={sequenceId} clientId={clientId} sequence={sequence} />
-                    <EnrollListCard sequenceId={sequenceId} clientId={clientId} />
+                {/* ---- Leads | Journey | Config ---- */}
+                <div className="grid min-h-0 flex-1 grid-cols-[288px_minmax(0,1fr)_372px]">
+                    <EnrolledLeadsPanel
+                        enrollments={enrollments}
+                        maxTouches={maxTouches}
+                        selectedId={selectedEnrollmentId}
+                        onSelect={setSelectedEnrollmentId}
+                    />
 
-                    <div className={cn(seqCardStatic, "p-4")}>
-                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                            Enrollment Stats
-                        </h4>
-                        <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-3">
-                            {[
-                                { label: "Active", value: stats.active, dot: "bg-sky-500" },
-                                { label: "Paused", value: stats.paused, dot: "bg-amber-500" },
-                                { label: "Completed", value: stats.completed },
-                                { label: "Replied", value: stats.replied },
-                                { label: "Booked", value: stats.booked },
-                                { label: "Failed", value: stats.failed, dot: "bg-red-500" },
-                            ].map((stat) => (
-                                <div key={stat.label}>
-                                    <p className="flex items-center gap-1.5 text-xs text-gray-500">
-                                        {stat.dot && (
-                                            <span className={cn("h-1.5 w-1.5 rounded-full", stat.dot)} />
-                                        )}
-                                        {stat.label}
-                                    </p>
-                                    <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">
-                                        {stat.value}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Deactivating parks in-flight leads at status=paused and
-                            re-activating deliberately does not undo it, so paused
-                            leads need an explicit way back into rotation. */}
-                        {stats.paused > 0 && (
-                            <div className="mt-4 border-t border-gray-100 pt-3">
-                                <button
-                                    type="button"
-                                    onClick={handleResume}
-                                    disabled={resuming}
-                                    className={cn(seqBtnPrimary, "w-full px-3 py-1.5 text-xs")}
-                                >
-                                    {resuming
-                                        ? "Resuming..."
-                                        : `Resume ${stats.paused} paused lead${stats.paused === 1 ? "" : "s"}`}
-                                </button>
-                                <p className="mt-2 text-xs text-gray-500">
-                                    Puts them back in rotation, re-staggered by your release
-                                    pace. Outreach continues on the sequence schedule.
-                                </p>
-                                {resumeMsg && (
-                                    <p className="mt-2 text-xs text-gray-700">{resumeMsg}</p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Master/detail: lead list + journey timeline */}
-                <div className="flex min-h-0 flex-1 gap-4 p-4">
-                    {/* Lead list */}
-                    <div className={cn(seqCardStatic, "flex w-80 flex-shrink-0 flex-col overflow-hidden")}>
-                        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-                            <h3 className="text-sm font-semibold text-gray-900">Leads</h3>
-                            <span className="text-xs tabular-nums text-gray-400">{enrollments.length}</span>
-                        </div>
-                        <div className="flex-1 divide-y divide-gray-100 overflow-y-auto">
-                            {enrollments.length === 0 && (
-                                <div className="px-4 py-12 text-center text-gray-400">
-                                    <Users className="mx-auto mb-2 h-8 w-8 text-gray-300" />
-                                    <p className="text-sm">No leads enrolled yet.</p>
-                                    <p className="mt-1 text-xs">
-                                        Each lead&apos;s AI journey will appear here once enrolled.
-                                    </p>
-                                </div>
-                            )}
-                            {enrollments.map((e) => {
-                                const isSelected = e.id === selectedEnrollmentId;
-                                const contact = e.contacts;
-                                const status = ENROLLMENT_STATUS[e.status] || ENROLLMENT_STATUS.active;
-                                return (
-                                    <button
-                                        key={e.id}
-                                        onClick={() => setSelectedEnrollmentId(e.id)}
-                                        className={cn(
-                                            "w-full border-l-2 px-4 py-3 text-left transition-colors",
-                                            isSelected
-                                                ? "border-l-gray-900 bg-gray-50"
-                                                : "border-l-transparent hover:bg-gray-50"
-                                        )}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className="truncate text-sm font-medium text-gray-900">
-                                                {contact?.name || contact?.phone || `Lead ${e.id.substring(0, 8)}`}
-                                            </p>
-                                            <span
-                                                className={cn(
-                                                    "inline-flex shrink-0 items-center gap-1.5 text-xs font-medium",
-                                                    status.text
-                                                )}
-                                            >
-                                                <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
-                                                {STATUS_LABELS[e.status] || e.status}
+                    <section className="flex min-w-0 flex-col bg-gray-50">
+                        {selected ? (
+                            <>
+                                <div className="flex flex-none items-end gap-4 border-b border-gray-200 bg-white px-4.5 py-3">
+                                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                        <div className="flex items-center gap-2.5">
+                                            <span className="truncate text-[14.5px] font-semibold tracking-[-0.01em] text-gray-900">
+                                                {leadName(selected)}
                                             </span>
-                                        </div>
-                                        <div className="mt-1 flex items-center justify-between">
-                                            <span className="text-xs tabular-nums text-gray-400">
-                                                Touch #{e.current_step_order || 1}
-                                                {e.is_test && (
-                                                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1 py-px text-xs font-medium text-amber-700">
-                                                        <FlaskConical className="h-2.5 w-2.5" />
-                                                        Test
-                                                    </span>
-                                                )}
-                                            </span>
-                                            {(e.status === "active" ||
-                                                e.status === "paused" ||
-                                                e.status === "awaiting_outcome") && (
+                                            {selectedStatus && (
                                                 <span
-                                                    role="button"
-                                                    onClick={(ev) => {
-                                                        ev.stopPropagation();
-                                                        handleUnenroll(e.id);
-                                                    }}
-                                                    className="inline-flex items-center gap-1 text-xs text-red-500 transition-colors hover:text-red-700"
-                                                >
-                                                    {unenrollingId === e.id ? (
-                                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                                    ) : (
-                                                        <UserMinus className="h-3 w-3" />
+                                                    className={cn(
+                                                        "inline-flex flex-none items-center gap-1 text-[10.5px] font-semibold",
+                                                        selectedStatus.text
                                                     )}
-                                                    Unenroll
+                                                >
+                                                    <span
+                                                        className={cn(
+                                                            "h-[5px] w-[5px] rounded-full",
+                                                            selectedStatus.dot
+                                                        )}
+                                                    />
+                                                    {STATUS_LABELS[selected.status] || selected.status}
                                                 </span>
                                             )}
                                         </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-gray-500">
+                                            {selected.contacts?.phone && (
+                                                <span className="font-mono tabular-nums">
+                                                    {selected.contacts.phone}
+                                                </span>
+                                            )}
+                                            {selected.contacts?.email && (
+                                                <>
+                                                    <span className="text-gray-300">·</span>
+                                                    <span className="truncate">
+                                                        {selected.contacts.email}
+                                                    </span>
+                                                </>
+                                            )}
+                                            {selected.next_step_at && (
+                                                <>
+                                                    <span className="text-gray-300">·</span>
+                                                    <span>
+                                                        Next:{" "}
+                                                        <span className="font-medium text-gray-900">
+                                                            {new Date(
+                                                                selected.next_step_at
+                                                            ).toLocaleString()}
+                                                        </span>
+                                                    </span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
 
-                    {/* Journey timeline */}
-                    <div className={cn(seqCardStatic, "flex min-w-0 flex-1 flex-col overflow-hidden")}>
-                        <div className="border-b border-gray-100 px-4 py-3">
-                            <h3 className="text-sm font-semibold text-gray-900">
-                                {selectedEnrollment
-                                    ? `Journey — ${
-                                          selectedEnrollment.contacts?.name ||
-                                          selectedEnrollment.contacts?.phone ||
-                                          "Lead"
-                                      }`
-                                    : "Journey"}
-                            </h3>
-                            <p className="mt-0.5 text-xs text-gray-400">
-                                What the AI decided and did for this lead, step by step.
-                            </p>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4">
-                            {selectedEnrollmentId ? (
-                                <LeadJourneyTimeline enrollmentId={selectedEnrollmentId} />
-                            ) : (
-                                <div className="py-16 text-center text-gray-400">
-                                    <Brain className="mx-auto mb-2 h-8 w-8 text-gray-300" />
-                                    <p className="text-sm">Select a lead to see its AI journey.</p>
+                                    <div className="flex flex-none items-center gap-1.5">
+                                        <div
+                                            className="flex gap-0.5 rounded-md bg-gray-100 p-0.5"
+                                            role="group"
+                                            aria-label="Filter journey by channel"
+                                        >
+                                            {journeyTabs.map((t) => {
+                                                const on = journeyFilter === t;
+                                                return (
+                                                    <button
+                                                        key={t}
+                                                        type="button"
+                                                        aria-pressed={on}
+                                                        onClick={() => setJourneyFilter(t)}
+                                                        className={cn(
+                                                            "h-6 rounded px-2.5 text-[11px] font-medium transition-colors",
+                                                            seqFocusRing,
+                                                            on
+                                                                ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(16,24,40,0.08)]"
+                                                                : "text-gray-500 hover:text-gray-700"
+                                                        )}
+                                                    >
+                                                        {t}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        {canUnenroll && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleUnenroll(selected.id)}
+                                                disabled={unenrolling}
+                                                className={cn(
+                                                    "inline-flex h-7 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-[11.5px] font-medium text-gray-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50",
+                                                    seqFocusRing
+                                                )}
+                                            >
+                                                {unenrolling ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <UserMinus className="h-3 w-3" />
+                                                )}
+                                                Unenroll
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-                            )}
-                        </div>
-                    </div>
+
+                                <div className="min-h-0 flex-1 overflow-y-auto px-4.5 pb-7 pt-4.5">
+                                    <LeadJourneyTimeline
+                                        enrollmentId={selected.id}
+                                        channelFilter={journeyFilter}
+                                        nextTouchAt={selected.next_step_at}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <div className="grid flex-1 place-items-center px-6 text-center text-gray-400">
+                                <div>
+                                    <Brain className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                                    <p className="text-sm">
+                                        {enrollments.length === 0
+                                            ? "Nothing enrolled yet — enroll a list to start."
+                                            : "Select a lead to see its AI journey."}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+
+                    <SequenceConfigRail
+                        clientId={clientId}
+                        sequenceId={sequenceId}
+                        sequence={sequence}
+                    />
                 </div>
 
                 <TestNowDialog
