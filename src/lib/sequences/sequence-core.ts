@@ -16,7 +16,7 @@ import type {
  * (server actions, which parse FormData then delegate here) and the internal
  * MCP/admin HTTP routes (which pass typed JSON) share one implementation.
  *
- * These functions take plain typed inputs and never import next/cache — the
+ * These functions take plain typed inputs and never import next/cache, the
  * caller injects revalidatePath via opts.revalidate when UI cache-busting is
  * wanted. Behavior is intended to be byte-identical to the original actions.
  */
@@ -47,7 +47,7 @@ export async function assertOutboundAgent(
 
 /**
  * Gate: step authoring is only allowed on static sequences. Dynamic sequences'
- * steps are generated per lead by the AI — hand-editing them would corrupt
+ * steps are generated per lead by the AI, hand-editing them would corrupt
  * per-enrollment histories. Enforced here (not just in the UI) so the MCP
  * route and stale clients can't write either.
  */
@@ -205,7 +205,7 @@ export async function updateSequenceCore(
                 // Mirror the create-time invariant: AI sequences act as an agent.
                 return {
                     success: false,
-                    error: "AI sequences require an outbound agent — bind a different agent instead of unassigning.",
+                    error: "AI sequences require an outbound agent. Bind a different agent instead of unassigning.",
                 };
             }
             updates.agent_id = input.agentId || null;
@@ -373,23 +373,23 @@ export async function addStepsBatchCore(
     return { success: true, stepIds };
 }
 
-/** Create a sequence and (optionally) its steps in one call — the MCP one-shot path. */
+/** Create a sequence and (optionally) its steps in one call, the MCP one-shot path. */
 export async function createSequenceWithStepsCore(
     clientId: string,
     input: CreateSequenceInput,
     steps: StepInput[] | undefined,
     opts?: CoreOpts
 ): Promise<CoreResult> {
-    // Steps on an explicitly-dynamic sequence are a contradiction — reject
+    // Steps on an explicitly-dynamic sequence are a contradiction, reject
     // BEFORE the sequence insert so no orphan row is left behind when the
     // step-authoring gate would refuse them anyway.
     if (input.generation_mode === "dynamic" && steps && steps.length > 0) {
         return {
             success: false,
-            error: "Steps cannot be provided for an AI-managed (dynamic) sequence — its steps are generated per lead. Omit steps, or pass generation_mode: \"static\".",
+            error: "Steps cannot be provided for an AI-managed (dynamic) sequence, its steps are generated per lead. Omit steps, or pass generation_mode: \"static\".",
         };
     }
-    // A caller authoring fixed steps is authoring a static sequence — infer it
+    // A caller authoring fixed steps is authoring a static sequence, infer it
     // so the dynamic default doesn't reject step-ful MCP payloads for missing
     // an agent, then fail the step inserts on the editable gate.
     if (!input.generation_mode && steps && steps.length > 0) {
@@ -412,11 +412,11 @@ export async function createSequenceWithStepsCore(
 }
 
 /**
- * Activate or deactivate a sequence — the REAL kill switch.
+ * Activate or deactivate a sequence, the REAL kill switch.
  *
  * The scheduler's claim RPC (claim_due_enrollments) filters only on enrollment
  * status='active' + next_step_at; it never checks sequences.is_active. So
- * flipping is_active=false ALONE does not stop in-flight enrollments — they keep
+ * flipping is_active=false ALONE does not stop in-flight enrollments, they keep
  * getting dialed/texted. Deactivation here also pauses active enrollments
  * (status='paused', next_step_at=null) so dispatch truly halts, mirroring the
  * pattern already used in deleteSequence.
@@ -424,7 +424,7 @@ export async function createSequenceWithStepsCore(
  * Re-activating sets is_active=true but does NOT auto-resume paused enrollments
  * (errs toward not dialing); new enrollments flow normally.
  *
- * NOTE: the spend gate is intentionally NOT here — it lives in the admin/MCP
+ * NOTE: the spend gate is intentionally NOT here, it lives in the admin/MCP
  * route layer so the autonomous path is gated while the human dashboard toggle
  * keeps its current behavior (plus this kill-switch fix).
  */
@@ -454,7 +454,7 @@ export async function setSequenceActiveCore(
         }
 
         // Deactivate, then halt in-flight enrollments so the scheduler stops.
-        // Dynamic enrollments live in awaiting_outcome/generating_next_step —
+        // Dynamic enrollments live in awaiting_outcome/generating_next_step , 
         // without pausing those too, the outcome-timeout poll self-resumes
         // them and the "kill switch" doesn't kill.
         const { error: deErr } = await supabase

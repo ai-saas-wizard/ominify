@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, FileText, Loader2, Phone, Plus } from "lucide-react";
+import { CreditCard, Download, FileText, Loader2, Phone, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { seqFocusRing } from "@/components/sequences/theme";
 import type {
@@ -229,7 +229,11 @@ export function BillingClient({
     return (
         <div className="flex h-full min-h-0 min-w-[900px] flex-col bg-gray-50">
             {/* ---- Header ---- */}
-            <header className="flex flex-none items-center gap-4 border-b border-gray-200 bg-white px-6 pb-3 pt-3.5">
+            <header className="flex flex-none items-center gap-2.5 border-b border-gray-200 bg-white px-6 pb-3 pt-3.5">
+                {/* Section tile, matching the UNIBOX header treatment. */}
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                    <CreditCard className="h-4 w-4" />
+                </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <h1 className="text-[17px] font-semibold tracking-[-0.015em] text-gray-900">
                         Billing &amp; usage

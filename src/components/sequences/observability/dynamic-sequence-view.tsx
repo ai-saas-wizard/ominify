@@ -7,6 +7,7 @@ import {
     ArrowLeft,
     Brain,
     Loader2,
+    Pencil,
     Pause,
     Play,
     Trash2,
@@ -29,6 +30,7 @@ import {
     toggleSequenceActive,
     deleteSequence,
     unenrollContact,
+    renameSequence,
     resumeSequenceEnrollments,
 } from "@/app/actions/sequence-actions";
 import { cn } from "@/lib/utils";
@@ -77,6 +79,29 @@ export function DynamicSequenceView({
     const [resuming, setResuming] = useState(false);
     const [resumeMsg, setResumeMsg] = useState<string | null>(null);
     const [journeyFilter, setJourneyFilter] = useState("All");
+    // Wizard-created sequences are named after the first 50 characters of their
+    // goal, so the title is often a truncated sentence. Editing it here saves a
+    // trip back to the list.
+    const [renaming, setRenaming] = useState(false);
+    const [draftName, setDraftName] = useState(sequence.name);
+    const [savingName, setSavingName] = useState(false);
+
+    async function handleRename() {
+        const trimmed = draftName.trim();
+        if (!trimmed || trimmed === sequence.name.trim()) {
+            setRenaming(false);
+            return;
+        }
+        setSavingName(true);
+        const res = await renameSequence(sequenceId, trimmed);
+        setSavingName(false);
+        if (res?.success) {
+            setRenaming(false);
+            router.refresh();
+        } else {
+            alert(res?.error || "Could not rename this sequence");
+        }
+    }
 
     async function handleToggleActive() {
         setToggling(true);
@@ -245,11 +270,46 @@ export function DynamicSequenceView({
                         <ArrowLeft className="h-[15px] w-[15px]" />
                     </Link>
 
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="group/title flex min-w-0 flex-1 flex-col gap-1">
                         <div className="flex min-w-0 items-center gap-2.5">
-                            <h1 className="truncate text-[17px] font-semibold tracking-[-0.015em] text-gray-900">
-                                {sequence.name}
-                            </h1>
+                            {renaming ? (
+                                <input
+                                    autoFocus
+                                    value={draftName}
+                                    disabled={savingName}
+                                    aria-label="Sequence name"
+                                    onChange={(e) => setDraftName(e.target.value)}
+                                    onBlur={handleRename}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") handleRename();
+                                        if (e.key === "Escape") {
+                                            setDraftName(sequence.name);
+                                            setRenaming(false);
+                                        }
+                                    }}
+                                    className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 text-[17px] font-semibold tracking-[-0.015em] text-gray-900 outline-none focus:border-emerald-600 focus:ring-[3px] focus:ring-emerald-600/10 disabled:opacity-60"
+                                />
+                            ) : (
+                                <>
+                                    <h1 className="truncate text-[17px] font-semibold tracking-[-0.015em] text-gray-900">
+                                        {sequence.name}
+                                    </h1>
+                                    <button
+                                        type="button"
+                                        aria-label="Rename sequence"
+                                        onClick={() => {
+                                            setDraftName(sequence.name);
+                                            setRenaming(true);
+                                        }}
+                                        className={cn(
+                                            "grid h-6 w-6 flex-none place-items-center rounded text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 focus-visible:opacity-100 group-hover/title:opacity-100",
+                                            seqFocusRing
+                                        )}
+                                    >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                </>
+                            )}
                             <span
                                 className={cn(
                                     "inline-flex h-[21px] flex-none items-center gap-1.5 rounded px-2 text-[11px] font-semibold",

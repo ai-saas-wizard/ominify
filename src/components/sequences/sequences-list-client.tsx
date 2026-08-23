@@ -8,10 +8,12 @@ import {
     Brain,
     ChevronDown,
     ChevronRight,
+    GitBranch,
     MessageSquare,
     MoreVertical,
     Phone,
     Plus,
+    Pencil,
     Power,
     Rocket,
     Search,
@@ -37,6 +39,7 @@ import { TestNowDialog } from "@/components/sequences/flow/panels/test-now-dialo
 import { SequenceWizard } from "@/components/sequences/wizard";
 import {
     deleteSequence,
+    renameSequence,
     toggleSequenceActive,
     type ChannelReadiness,
 } from "@/app/actions/sequence-actions";
@@ -140,6 +143,19 @@ function relativeTime(dateStr: string): string {
     return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/**
+ * The line under the name, or null when it would just repeat it. The wizard
+ * names a custom sequence with the first 50 characters of its goal, so the
+ * description almost always starts with the name verbatim.
+ */
+function secondaryLine(s: SequenceCardData): string | null {
+    const desc = (s.description || "").trim();
+    if (!desc) return null;
+    const name = s.name.trim();
+    if (desc === name || desc.startsWith(name)) return null;
+    return desc;
+}
+
 function pct(part: number, whole: number): number {
     if (!whole) return 0;
     return Math.round((part / whole) * 100);
@@ -163,28 +179,126 @@ function ColLabel({ children, right }: { children?: React.ReactNode; right?: boo
     );
 }
 
+/**
+ * In-place rename. Editing happens in the row itself rather than a dialog, so
+ * the name stays next to the numbers that give it context.
+ */
+function RenameField({
+    sequenceId,
+    initial,
+    onDone,
+}: {
+    sequenceId: string;
+    initial: string;
+    onDone: () => void;
+}) {
+    const router = useRouter();
+    const [value, setValue] = useState(initial);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function save() {
+        const trimmed = value.trim();
+        if (!trimmed || trimmed === initial.trim()) {
+            onDone();
+            return;
+        }
+        setSaving(true);
+        setError(null);
+        const res = await renameSequence(sequenceId, trimmed);
+        setSaving(false);
+        if (res?.success) {
+            onDone();
+            router.refresh();
+        } else {
+            setError(res?.error || "Could not rename this sequence");
+        }
+    }
+
+    return (
+        <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+                <input
+                    autoFocus
+                    value={value}
+                    disabled={saving}
+                    aria-label="Sequence name"
+                    onChange={(e) => setValue(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") save();
+                        if (e.key === "Escape") onDone();
+                    }}
+                    className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-colors focus:border-emerald-600 focus:ring-[3px] focus:ring-emerald-600/10 disabled:opacity-60"
+                />
+                <button
+                    type="button"
+                    onClick={save}
+                    disabled={saving}
+                    className={cn(
+                        "inline-flex h-8 items-center rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50",
+                        seqFocusRing
+                    )}
+                >
+                    {saving ? "Saving" : "Save"}
+                </button>
+                <button
+                    type="button"
+                    onClick={onDone}
+                    disabled={saving}
+                    className={cn(headerBtn, "text-gray-600", seqFocusRing)}
+                >
+                    Cancel
+                </button>
+            </div>
+            {error && <p className="text-[11.5px] text-red-600">{error}</p>}
+            <p className="text-[11px] text-gray-500">
+                Only the label changes. The brief the AI follows stays as it is.
+            </p>
+        </div>
+    );
+}
+
 // ── Row ──────────────────────────────────────────────────────────────────────
 
 function SequenceRow({
     sequence,
     clientId,
+    renaming,
+    onStartRename,
+    onFinishRename,
     onDelete,
     onToggleActive,
     onTest,
 }: {
     sequence: SequenceCardData;
     clientId: string;
+    renaming: boolean;
+    onStartRename: (id: string) => void;
+    onFinishRename: () => void;
     onDelete: (id: string) => void;
     onToggleActive: (id: string, active: boolean) => void;
     onTest: (id: string) => void;
 }) {
     const status = STATUS_STYLE[statusOf(sequence)];
+    const subtitle = secondaryLine(sequence);
     const done = sequence.completed_count;
     const total = sequence.total_enrolled;
     const rate = pct(done, total);
     const hasVoice = sequence.channels.includes("voice");
     const hasSms = sequence.channels.includes("sms");
     const isAi = sequence.generation_mode === "dynamic";
+
+    if (renaming) {
+        return (
+            <div className="border-b border-gray-100 bg-emerald-50/30 px-5 py-3">
+                <RenameField
+                    sequenceId={sequence.id}
+                    initial={sequence.name}
+                    onDone={onFinishRename}
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="group relative border-b border-gray-100">
@@ -201,9 +315,9 @@ function SequenceRow({
                     <span className="truncate text-[13px] font-medium tracking-[-0.005em] text-gray-900">
                         {sequence.name}
                     </span>
-                    <span className="truncate text-[11.5px] text-gray-500">
-                        {sequence.description || "No description"}
-                    </span>
+                    {subtitle && (
+                        <span className="truncate text-[11.5px] text-gray-500">{subtitle}</span>
+                    )}
                 </div>
 
                 {/* Status */}
@@ -323,6 +437,10 @@ function SequenceRow({
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => onStartRename(sequence.id)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Rename
+                        </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => onTest(sequence.id)}>
                             <Zap className="mr-2 h-3.5 w-3.5" />
                             Test
@@ -376,6 +494,7 @@ export function SequencesListClient({
     const [query, setQuery] = useState("");
     const [filter, setFilter] = useState<Filter>("All");
     const [sort, setSort] = useState<SortId>("activity");
+    const [renamingId, setRenamingId] = useState<string | null>(null);
 
     const hasOutboundAgent = outboundAgents.length > 0;
 
@@ -506,7 +625,11 @@ export function SequencesListClient({
                 horizontally rather than crushing them. */}
             <div className="flex h-full min-h-0 min-w-[1040px] flex-col bg-white">
                 {/* ---- Header ---- */}
-                <header className="flex flex-none items-center gap-4 border-b border-gray-200 bg-white px-5 pb-3 pt-3.5">
+                <header className="flex flex-none items-center gap-2.5 border-b border-gray-200 bg-white px-5 pb-3 pt-3.5">
+                    {/* Section tile, matching the UNIBOX header treatment. */}
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                        <GitBranch className="h-4 w-4" />
+                    </div>
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <h1 className="text-[17px] font-semibold tracking-[-0.015em] text-gray-900">
                             Sequences
@@ -735,6 +858,9 @@ export function SequencesListClient({
                                 key={sequence.id}
                                 sequence={sequence}
                                 clientId={clientId}
+                                renaming={renamingId === sequence.id}
+                                onStartRename={setRenamingId}
+                                onFinishRename={() => setRenamingId(null)}
                                 onDelete={handleDeleteSequence}
                                 onToggleActive={handleToggleActive}
                                 onTest={setTestSequenceId}

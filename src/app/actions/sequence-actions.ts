@@ -182,7 +182,7 @@ export async function createSequence(clientId: string, formData: FormData, agent
             trigger_type: (formData.get("trigger_type") as string) || undefined,
             urgency_tier: (formData.get("urgency_tier") as string) || undefined,
             trigger_conditions,
-            // The manual dialog is the explicit Advanced/static path — pin
+            // The manual dialog is the explicit Advanced/static path, pin
             // static so it's unaffected by the core's dynamic default.
             generation_mode: (formData.get("generation_mode") as string) || "static",
             max_touchpoints:
@@ -291,6 +291,27 @@ export async function updateSequence(sequenceId: string, formData: FormData) {
         },
         { revalidate: revalidatePath }
     );
+}
+
+/**
+ * Rename a sequence.
+ *
+ * Wizard-created sequences take their name from the first 50 characters of the
+ * AI goal, so the list ends up showing a truncated paragraph twice: once as the
+ * name and once as the description under it. This lets an operator give the
+ * campaign a short human name without touching the brief the AI actually runs.
+ */
+export async function renameSequence(sequenceId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return { success: false, error: "Give the sequence a name" };
+    if (trimmed.length > 120) {
+        return { success: false, error: "Keep the name under 120 characters" };
+    }
+    // Only `name` is set, so updateSequenceCore leaves the description, the
+    // trigger and the bound agent untouched.
+    const fd = new FormData();
+    fd.set("name", trimmed);
+    return updateSequence(sequenceId, fd);
 }
 
 // ─── Toggle sequence active/inactive ───────────────────────────────────────────
@@ -441,7 +462,7 @@ export async function deleteSequenceStep(stepId: string) {
             .eq("id", stepId)
             .single();
 
-        // Guard: dynamic sequences' steps are AI-generated per lead — deleting
+        // Guard: dynamic sequences' steps are AI-generated per lead, deleting
         // (and renumbering) them by hand would corrupt enrollment histories.
         // This action bypasses sequence-core, so the gate lives here too.
         if (step) {
@@ -465,7 +486,7 @@ export async function deleteSequenceStep(stepId: string) {
             return { success: false, error: error.message };
         }
 
-        // Re-order remaining steps. Scoped to shared template rows — per-lead
+        // Re-order remaining steps. Scoped to shared template rows, per-lead
         // JIT rows (enrollment_id set) keep their own numbering.
         if (step) {
             const { data: remainingSteps } = await supabase
@@ -643,14 +664,14 @@ export async function unenrollContact(enrollmentId: string) {
  * Put a sequence's paused enrollments back into rotation.
  *
  * Deactivating a sequence sweeps every in-flight enrollment to
- * status='paused', next_step_at=null (setSequenceActiveCore) — that sweep is
+ * status='paused', next_step_at=null (setSequenceActiveCore), that sweep is
  * what actually halts dispatch. Re-activating deliberately does NOT undo it,
  * so without this the leads stay parked forever. `paused` has exactly one
  * writer (that sweep), so resuming the whole set is unambiguous.
  *
  * next_step_at is re-staggered by the sequence's pacing_per_minute. Without
  * that, every resumed lead becomes due on the same tick and the batch
- * stampedes the moment the window opens — the exact thing the pacing controls
+ * stampedes the moment the window opens, the exact thing the pacing controls
  * exist to prevent.
  */
 export async function resumeSequenceEnrollments(sequenceId: string) {
@@ -671,7 +692,7 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
         if (!seq.is_active) {
             return {
                 success: false,
-                error: "Activate the sequence first — resuming while it is inactive would start outreach anyway.",
+                error: "Activate the sequence first. Resuming while it is inactive would start outreach anyway.",
             };
         }
 
@@ -699,8 +720,8 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
         // it (scheduler-worker fetchStep): step_order = current_step_order + 1,
         // preferring this enrollment's OWN generated row over a shared template
         // row at the same order. A template-only lookup silently returned
-        // undefined for dynamic enrollments — the exact population this exists
-        // to protect — and fell straight back to "now".
+        // undefined for dynamic enrollments, the exact population this exists
+        // to protect, and fell straight back to "now".
         const templateDelays = new Map<number, number>();
         {
             const { data: steps } = await supabase
@@ -773,7 +794,7 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("id", paused[i].id)
-                // Only move rows still paused — never revive one that changed
+                // Only move rows still paused, never revive one that changed
                 // underneath us (opted out, unenrolled) while we iterated.
                 .eq("status", "paused");
             if (error) errors.push(error.message);
@@ -848,7 +869,7 @@ export async function getEnrollmentExecutionLog(enrollmentId: string) {
 // ─── Per-lead journey for the dynamic observability view ──────────────────────
 //
 // One lazy bundle per enrollment: execution-log rows (with the generating
-// step's full shape joined by the log row's step_id — this also resolves the
+// step's full shape joined by the log row's step_id, this also resolves the
 // wizard's shared template row for first touches, which has enrollment_id
 // NULL) enriched with mutations/healing, plus the contact_interactions
 // recorded against this enrollment. The client interleaves both by timestamp.
@@ -878,7 +899,7 @@ export async function getEnrollmentJourney(enrollmentId: string) {
         const logs = logResult.data || [];
 
         // Enrich with mutation + healing data (match on enrollment_id + step_id,
-        // same as getExecutionLog — static steps reuse step_id across leads).
+        // same as getExecutionLog, static steps reuse step_id across leads).
         let mutations: any[] = [];
         let healings: any[] = [];
         if (logs.length > 0) {
@@ -972,7 +993,7 @@ export async function getExecutionLog(sequenceId: string) {
         }
 
         // Attach mutation + healing info to matching log entries. Match on BOTH
-        // enrollment_id and step_id — static sequences reuse the same step_id
+        // enrollment_id and step_id, static sequences reuse the same step_id
         // across many enrollments, so a step_id-only match would cross-attach.
         const enrichedData = (data || []).map((log: any) => {
             const mutation = mutations.find(
@@ -1154,7 +1175,7 @@ const CALLING_DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as co
  * True when dialing is possible at all given the calling window, the allowed
  * days, and the tenant's business hours. Without this a window (or day set)
  * entirely outside business hours makes the sequencer's gates defer in
- * alternation forever — the campaign never dials and nothing surfaces why.
+ * alternation forever, the campaign never dials and nothing surfaces why.
  * Reads the onboarding shape ({mon..sun: {open, close, closed}}) and the
  * ops-script shape ({weekdays/saturday/sunday: {start, end}}); unparseable or
  * empty hours count as "no restriction" (possible = true), matching the
@@ -1228,8 +1249,8 @@ function dialingPossibleWithBusinessHours(
 
 /**
  * Dial-pacing levers for a sequence. Unlike step authoring, these apply to
- * AI-managed (dynamic) sequences too — bulk voice campaigns are exactly the
- * shape that needs them — so this deliberately does NOT go through
+ * AI-managed (dynamic) sequences too, bulk voice campaigns are exactly the
+ * shape that needs them, so this deliberately does NOT go through
  * assertSequenceEditable.
  *
  * daily_call_cap + calling_window_* are enforced by the sequencer's scheduler
@@ -1353,7 +1374,7 @@ export async function updateSequencePacing(
                     return {
                         success: false,
                         error:
-                            "With these calling days and window, every allowed time falls outside your business hours — no calls would ever go out. Adjust the days/window, your business hours, or turn off business-hours enforcement for this sequence.",
+                            "With these calling days and window, every allowed time falls outside your business hours, no calls would ever go out. Adjust the days/window, your business hours, or turn off business-hours enforcement for this sequence.",
                     };
                 }
             }
@@ -1431,7 +1452,7 @@ export async function updateSequencePhoneRotation(
                 if (!phone) {
                     return {
                         success: false,
-                        error: "One of the selected numbers no longer exists — reload and pick again",
+                        error: "One of the selected numbers no longer exists. Reload and pick again.",
                     };
                 }
                 if (phone.status !== "active") {
@@ -1440,7 +1461,7 @@ export async function updateSequencePhoneRotation(
                 if (!phone.vapi_phone_number_id) {
                     return {
                         success: false,
-                        error: `${phone.phone_number} isn't registered with VAPI yet — sync it from the Phone Numbers page first`,
+                        error: `${phone.phone_number} isn't registered with VAPI yet, sync it from the Phone Numbers page first`,
                     };
                 }
             }
@@ -1844,7 +1865,7 @@ export async function getChannelReadiness(clientId: string) {
     return getChannelCapabilities(clientId);
 }
 // ═══════════════════════════════════════════════════════════════════
-// Phase 4: Test Mode — "Test on Myself"
+// Phase 4: Test Mode, "Test on Myself"
 // ═══════════════════════════════════════════════════════════════════
 
 // ─── Create a test enrollment for the logged-in user ─────────────────────────────
@@ -2037,7 +2058,7 @@ async function enrollUpsertedRows(
 
             if (existingEnrollment && ENGAGED.has(existingEnrollment.status)) {
                 errors.push(
-                    `Row ${row.rowIndex}: Contact (${row.phone}) has status ${existingEnrollment.status} — won't re-dial someone who already engaged`,
+                    `Row ${row.rowIndex}: Contact (${row.phone}) has status ${existingEnrollment.status}, won't re-dial someone who already engaged`,
                 );
                 continue;
             }
@@ -2066,7 +2087,7 @@ async function enrollUpsertedRows(
                     })
                     .eq("id", existingEnrollment.id);
                 if (updateErr) {
-                    errors.push(`Row ${row.rowIndex}: Re-enroll failed — ${updateErr.message}`);
+                    errors.push(`Row ${row.rowIndex}: Re-enroll failed, ${updateErr.message}`);
                     continue;
                 }
             } else {
@@ -2095,7 +2116,7 @@ async function enrollUpsertedRows(
                     channel_overrides: {},
                 });
                 if (enrollErr) {
-                    errors.push(`Row ${row.rowIndex}: Enrollment failed — ${enrollErr.message}`);
+                    errors.push(`Row ${row.rowIndex}: Enrollment failed, ${enrollErr.message}`);
                     continue;
                 }
             }
@@ -2194,7 +2215,7 @@ export async function enrollListInSequence(
             return { success: true, data: { enrolled: 0, errors: ["List has no members"] } };
         }
 
-        // Build UpsertedRow shape directly from list members — contacts already
+        // Build UpsertedRow shape directly from list members, contacts already
         // exist; we don't need upsertContactsFromRows here. Note: we still
         // construct customVariables off the saved source_row using the list's
         // column_mapping so each enrollment row matches the original CSV.
@@ -2262,7 +2283,7 @@ interface TestEnrollInput {
     phone: string;
     name?: string;
     /**
-     * Optional. Without it, email steps are silently skipped at dispatch —
+     * Optional. Without it, email steps are silently skipped at dispatch , 
      * the scheduler advances past them without even writing a log row.
      */
     email?: string;
@@ -2312,13 +2333,13 @@ export async function enrollTestPhones(
                     continue;
                 }
 
-                // A bad email shouldn't drop the row — warn and continue
+                // A bad email shouldn't drop the row, warn and continue
                 // phone-only, so SMS/voice steps still get tested.
                 let email: string | null = null;
                 if (input.email?.trim()) {
                     email = normalizeEmail(input.email);
                     if (!email) {
-                        errors.push(`${label}: invalid email "${input.email}" — enrolled without it`);
+                        errors.push(`${label}: invalid email "${input.email}", enrolled without it`);
                     }
                 }
 
@@ -2342,7 +2363,7 @@ export async function enrollTestPhones(
                             .eq("id", contactId);
                         if (emailErr) {
                             errors.push(
-                                `${label}: couldn't update email — ${emailErr.message}`
+                                `${label}: couldn't update email, ${emailErr.message}`
                             );
                         }
                     }
@@ -2361,7 +2382,7 @@ export async function enrollTestPhones(
                         .single();
                     if (contactErr || !created) {
                         errors.push(
-                            `${label}: contact upsert failed — ${contactErr?.message || "unknown"}`
+                            `${label}: contact upsert failed, ${contactErr?.message || "unknown"}`
                         );
                         continue;
                     }
@@ -2381,7 +2402,7 @@ export async function enrollTestPhones(
                     if (rest.length) customVariables.last_name = rest.join(" ");
                 }
 
-                // (sequence_id, contact_id) is unique — if a row already
+                // (sequence_id, contact_id) is unique, if a row already
                 // exists (e.g. completed by the off-by-one bug, or active from
                 // a prior CSV upload), reset it instead of failing on the
                 // unique constraint.
@@ -2402,7 +2423,7 @@ export async function enrollTestPhones(
                     ]);
                     if (ENGAGED.has(existingEnroll.status)) {
                         errors.push(
-                            `${label}: contact has status ${existingEnroll.status} — won't retest someone who already engaged`
+                            `${label}: contact has status ${existingEnroll.status}, won't retest someone who already engaged`
                         );
                         continue;
                     }
@@ -2423,7 +2444,7 @@ export async function enrollTestPhones(
                         .eq("id", existingEnroll.id);
                     if (updateErr) {
                         errors.push(
-                            `${label}: re-test reset failed — ${updateErr.message}`
+                            `${label}: re-test reset failed, ${updateErr.message}`
                         );
                         continue;
                     }
@@ -2466,7 +2487,7 @@ export async function enrollTestPhones(
                     .single();
 
                 if (enrollErr || !createdEnroll) {
-                    errors.push(`${label}: enroll failed — ${enrollErr?.message || "unknown"}`);
+                    errors.push(`${label}: enroll failed, ${enrollErr?.message || "unknown"}`);
                     continue;
                 }
                 enrolled++;
@@ -2493,7 +2514,7 @@ export async function enrollTestPhones(
 // Used by the "Test now → From sequence" path. Picks live enrollments that
 // were created by CSV upload (or any other source), flips is_test=true and
 // schedules next_step_at=NOW() so the scheduler-worker dispatches them on
-// the next 5s tick — bypassing pacing + business-hours + TCPA gates per
+// the next 5s tick, bypassing pacing + business-hours + TCPA gates per
 // the worker's isTestEnrollment branch.
 //
 // Only converts enrollments in active/paused state. Completed/failed flows
@@ -2533,11 +2554,11 @@ export async function convertEnrollmentsToTest(
         }
 
         const skipped: { id: string; reason: string }[] = [];
-        const continuable: string[] = []; // active/paused — flip + reschedule
-        const restartable: string[] = []; // completed/failed — reset to step 0
+        const continuable: string[] = []; // active/paused, flip + reschedule
+        const restartable: string[] = []; // completed/failed, reset to step 0
         let sequenceId: string | null = null;
 
-        // Don't re-test contacts who already engaged — that would be spam.
+        // Don't re-test contacts who already engaged, that would be spam.
         const ENGAGED = new Set([
             "replied",
             "booked",
@@ -2554,7 +2575,7 @@ export async function convertEnrollmentsToTest(
             if (ENGAGED.has(row.status)) {
                 skipped.push({
                     id: row.id,
-                    reason: `status is ${row.status} — won't retest a contact who already engaged`,
+                    reason: `status is ${row.status}, won't retest a contact who already engaged`,
                 });
                 continue;
             }
@@ -2571,7 +2592,7 @@ export async function convertEnrollmentsToTest(
                 skipped.push({
                     id: row.id,
                     reason:
-                        "not a test contact — converting a real lead to test mode would bypass business hours, TCPA, the calling window and the daily cap",
+                        "not a test contact. Converting a real lead to test mode would bypass business hours, TCPA, the calling window and the daily cap",
                 });
                 continue;
             }
@@ -2637,6 +2658,20 @@ export async function convertEnrollmentsToTest(
 
 // ─── Create sequence from Goal-First Wizard ──────────────────────────────────
 
+/**
+ * A short, readable default name from a free-text goal: the first sentence when
+ * that is short enough, otherwise a word-boundary cut. Slicing at a fixed 50
+ * characters used to leave names cut mid-word.
+ */
+function shortNameFromGoal(goal: string | null | undefined): string {
+    const text = (goal || "").trim().replace(/\s+/g, " ");
+    if (!text) return "Custom sequence";
+    const firstSentence = text.split(/(?<=[.!?])\s/)[0];
+    const base = firstSentence.length <= 60 ? firstSentence : text;
+    const cut = base.length <= 60 ? base : base.slice(0, 60).replace(/\s+\S*$/, "");
+    return cut.replace(/[.,;:\s]+$/, "") || "Custom sequence";
+}
+
 const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string; trigger_type: string; urgency_tier: string }> = {
     missed_call_followup: {
         name: "Missed Call Follow-up",
@@ -2669,13 +2704,13 @@ const GOAL_TO_SEQUENCE_META: Record<string, { name: string; description: string;
         urgency_tier: "medium",
     },
     meta_ads_lead: {
-        name: "Meta Ads — New Lead",
+        name: "Meta Ads, New Lead",
         description: "Multi-channel outreach for leads captured by Meta Lead Ads",
         trigger_type: "meta_ads_lead",
         urgency_tier: "high",
     },
     google_ads_lead: {
-        name: "Google Ads — New Lead",
+        name: "Google Ads, New Lead",
         description: "Multi-channel outreach for leads captured by Google Lead Form Assets",
         trigger_type: "google_ads_lead",
         urgency_tier: "high",
@@ -2706,7 +2741,7 @@ export async function createSequenceFromWizard(
     input: WizardInput
 ): Promise<{ success: boolean; sequenceId?: string; error?: string; replacedSequenceName?: string }> {
     try {
-        // AI sequences act as the agent — an outbound agent binding is required.
+        // AI sequences act as the agent, an outbound agent binding is required.
         if (!input.agentId) {
             return { success: false, error: "An outbound agent is required. Deploy one from the Agents page first." };
         }
@@ -2714,7 +2749,7 @@ export async function createSequenceFromWizard(
         if (!agentGate.ok) return { success: false, error: agentGate.error };
 
         const meta = GOAL_TO_SEQUENCE_META[input.goal] || {
-            name: input.customGoalDescription?.slice(0, 50) || "Custom Sequence",
+            name: shortNameFromGoal(input.customGoalDescription),
             description: input.customGoalDescription || "AI-powered custom outreach sequence",
             trigger_type: "manual",
             urgency_tier: "medium",
@@ -2723,7 +2758,7 @@ export async function createSequenceFromWizard(
         // Ad-platform triggers are mutually exclusive per client: only one
         // active sequence may listen to "meta_ads_lead" or "google_ads_lead"
         // at a time. If one already exists, deactivate it before activating
-        // the new one — otherwise a single ad lead would fan out into
+        // the new one, otherwise a single ad lead would fan out into
         // duplicate outreach.
         let replacedSequenceName: string | undefined;
         if (meta.trigger_type === "meta_ads_lead" || meta.trigger_type === "google_ads_lead") {
@@ -2776,8 +2811,8 @@ export async function createSequenceFromWizard(
             custom_goal_description: input.customGoalDescription || null,
             available_channels: enabledChannels,
             // Which channel the operator pinned as the opener (null = AI decided
-            // from the goal). Informational — the steps themselves already carry
-            // the channel — but regeneration needs to know it was a deliberate pick.
+            // from the goal). Informational, the steps themselves already carry
+            // the channel, but regeneration needs to know it was a deliberate pick.
             first_touch_channel:
                 input.firstTouch && enabledChannels.includes(input.firstTouch)
                     ? input.firstTouch
@@ -2836,7 +2871,7 @@ export async function createSequenceFromWizard(
         // Enforce the operator's first-touch pick. Until now it was a prompt
         // directive only: the briefs come from whatever timeline the model
         // returned, so if it opened on a different channel the pin was silently
-        // lost and the campaign's first real touch went out on the wrong one —
+        // lost and the campaign's first real touch went out on the wrong one , 
         // which is exactly how a calling campaign shipped as four SMS steps.
         // Reorder rather than rewrite: promoting an existing brief keeps its
         // intent and CTA intact, so nothing is fabricated.
@@ -2847,7 +2882,7 @@ export async function createSequenceFromWizard(
                 const [promoted] = capableBriefs.splice(idx, 1);
                 capableBriefs.unshift(promoted);
                 console.warn(
-                    `[WIZARD] Simulation opened on "${promoted.channel === pinned ? "?" : capableBriefs[1]?.channel}" despite a "${pinned}" first-touch pin — promoted the ${pinned} step to first.`
+                    `[WIZARD] Simulation opened on "${promoted.channel === pinned ? "?" : capableBriefs[1]?.channel}" despite a "${pinned}" first-touch pin, promoted the ${pinned} step to first.`
                 );
             } else {
                 console.warn(
@@ -2879,7 +2914,7 @@ export async function createSequenceFromWizard(
                     delay_type: idx === 0 ? "immediate" : "fixed_delay",
                     content,
                     // The scheduler's intent-guided generation path keys off
-                    // step_brief — without it, the placeholder content above
+                    // step_brief, without it, the placeholder content above
                     // is dispatched verbatim as the lead's first touch.
                     step_brief: {
                         intent: brief.intent || input.customGoalDescription || meta.description,
@@ -2901,7 +2936,7 @@ export async function createSequenceFromWizard(
 
             if (stepsError) {
                 console.error("createSequenceFromWizard steps error:", stepsError);
-                // Sequence still created, steps failed — non-fatal for dynamic mode
+                // Sequence still created, steps failed, non-fatal for dynamic mode
             }
         }
 
@@ -2978,7 +3013,7 @@ export async function getSequenceTestPreflight(
 
         if (generationMode === "dynamic") {
             // NOTE: available_channels is a snapshot taken when the sequence
-            // was created. It can be stale — the AI may be barred from a
+            // was created. It can be stale, the AI may be barred from a
             // channel that has since been provisioned (or vice versa). The
             // warnings below surface that drift rather than hiding it.
             const raw = (sequence.sequence_strategy as any)?.available_channels;
@@ -3099,15 +3134,15 @@ export async function getSequenceTestPreflight(
                 fixLabel,
             };
 
-            // If EVERY channel is dead nothing can fire — that's a blocker.
+            // If EVERY channel is dead nothing can fire, that's a blocker.
             // Otherwise the test still exercises the working channels.
             const allDead = channels.every((c) => !readiness[c].ready);
             (allDead ? blockers : warnings).push(issue);
         }
 
         if (!sequence.is_active) {
-            // Test enrollments still fire — the scheduler gates on enrollment
-            // status, not sequences.is_active — so this is informational.
+            // Test enrollments still fire, the scheduler gates on enrollment
+            // status, not sequences.is_active, so this is informational.
             warnings.push({
                 kind: "sequence",
                 title: "Sequence is inactive",
@@ -3162,7 +3197,7 @@ function explainEvent(
                 return {
                     severity: "ok",
                     explanation: providerId
-                        ? `SMS sent — Twilio SID ${providerId}`
+                        ? `SMS sent, Twilio SID ${providerId}`
                         : "SMS sent",
                 };
             }
@@ -3173,7 +3208,7 @@ function explainEvent(
             return {
                 severity: "ok",
                 explanation: providerId
-                    ? `Call placed — VAPI call ${providerId}`
+                    ? `Call placed, VAPI call ${providerId}`
                     : "Call placed",
             };
         case "failed":
@@ -3186,7 +3221,7 @@ function explainEvent(
                 severity: "error",
                 explanation:
                     reason === "no_minutes"
-                        ? "Call blocked — you have 0 voice minutes left."
+                        ? "Call blocked: you have 0 voice minutes left."
                         : `Call blocked: ${reason || "no access"}`,
                 fixHref: `/client/${clientId}/billing`,
                 fixLabel: "Add minutes",
@@ -3195,7 +3230,7 @@ function explainEvent(
             return {
                 severity: "warn",
                 explanation:
-                    "No free VAPI call slot after 3 retries — the call was dropped. Try again in a minute.",
+                    "No free VAPI call slot after 3 retries. The call was dropped, try again in a minute.",
             };
         case "skipped_opt_out":
             return {
@@ -3251,7 +3286,7 @@ export async function getTestRunStatus(
 
         if (rowErr) return { success: false, error: rowErr.message };
 
-        // Service-role client bypasses RLS — scope explicitly.
+        // Service-role client bypasses RLS, scope explicitly.
         const scoped = (rows || []).filter((r: any) => r.tenant_id === clientId);
         const scopedIds = scoped.map((r: any) => r.id);
 
