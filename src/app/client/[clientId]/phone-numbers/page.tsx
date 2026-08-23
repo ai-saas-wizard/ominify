@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
-import { getTwilioAccount, getPhoneNumbers, checkA2PStatus } from "@/app/actions/twilio-actions";
+import {
+    getTwilioAccount,
+    getPhoneNumbers,
+    checkA2PStatus,
+    listUnlinkedTwilioNumbers,
+} from "@/app/actions/twilio-actions";
 import { getTenantProfile } from "@/app/actions/tenant-profile-actions";
 import { PhoneNumbersManager } from "@/components/phone-numbers/phone-numbers-manager";
 
@@ -35,6 +40,10 @@ export default async function PhoneNumbersPage(props: {
     const phoneNumbers = await getPhoneNumbers(clientId);
     const a2pResult = await checkA2PStatus(clientId);
     const tenantProfile = await getTenantProfile(clientId);
+    // Numbers bought straight in the Twilio console are invisible to us until
+    // adopted, so the page offers them explicitly instead of pretending the
+    // account only holds what we sold.
+    const unlinked = await listUnlinkedTwilioNumbers(clientId);
 
     // Fetch all agents for this client (for assignment dropdown + name display)
     const { data: allAgents } = await supabase
@@ -55,6 +64,7 @@ export default async function PhoneNumbersPage(props: {
                 twilioAccount={twilioAccount}
                 initialPhoneNumbers={phoneNumbers}
                 a2pRegistration={a2pResult?.data || null}
+                unlinkedNumbers={unlinked?.data || []}
                 tenantProfile={tenantProfile}
                 agentMap={agentMap}
                 agents={agents}

@@ -364,6 +364,140 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
     }
 }
 
+/**
+ * Numbers that exist on the Twilio account but that Omnify has no row for.
+ *
+ * Buying a number inside Twilio's own console is completely normal, and until
+ * now those numbers were invisible here: the page listed tenant_phone_numbers
+ * and nothing else, so a number the tenant is already paying for could not be
+ * used for calling or put into sequence rotation.
+ *
+ * Read only, and it fails soft: an unreachable Twilio must not blank the page.
+ */
+export async function listUnlinkedTwilioNumbers(clientId: string) {
+    try {
+        const account = await getTwilioAccount(clientId);
+        if (!account) return { success: true, data: [] };
+
+        const { sid, authToken } = getAccountCredentials(account);
+        const [remote, { data: local }] = await Promise.all([
+            listPurchasedNumbers(sid, authToken),
+            supabase
+                .from("tenant_phone_numbers")
+                .select("phone_number, phone_number_sid")
+                .eq("client_id", clientId),
+        ]);
+
+        // Match on both keys: a number adopted by hand may carry the E.164 but
+        // no SID, and matching on one alone would offer it for adoption twice.
+        const linkedSids = new Set((local || []).map((r) => r.phone_number_sid).filter(Boolean));
+        const linkedNumbers = new Set((local || []).map((r) => r.phone_number).filter(Boolean));
+
+        const unlinked = remote
+            .filter((n) => !linkedSids.has(n.sid) && !linkedNumbers.has(n.phoneNumber))
+            .map((n) => ({
+                sid: n.sid,
+                phoneNumber: n.phoneNumber,
+                friendlyName: n.friendlyName,
+                capabilities: {
+                    voice: !!n.capabilities?.voice,
+                    sms: !!n.capabilities?.sms,
+                },
+                dateCreated: n.dateCreated ? new Date(n.dateCreated).toISOString() : null,
+            }));
+
+        return { success: true, data: unlinked };
+    } catch (err: any) {
+        console.error("listUnlinkedTwilioNumbers error:", err);
+        return { success: true, data: [], error: err.message };
+    }
+}
+
+/**
+ * Adopt a number that already exists on the tenant's Twilio account.
+ *
+ * Same tail as a purchase: store it, attach it to the messaging service, and
+ * register it with VAPI so its voice webhook points at VAPI rather than
+ * Twilio's default routing. It skips the buy, since the tenant already owns
+ * and pays for the number.
+ *
+ * The SID is re-resolved against Twilio rather than trusted from the client,
+ * so a forged payload cannot insert a number the account does not own.
+ */
+export async function adoptTwilioNumber(clientId: string, phoneNumberSid: string) {
+    try {
+        const account = await getTwilioAccount(clientId);
+        if (!account) {
+            return { success: false, error: "Twilio account not connected." };
+        }
+
+        const { sid, authToken } = getAccountCredentials(account);
+        const remote = await listPurchasedNumbers(sid, authToken);
+        const match = remote.find((n) => n.sid === phoneNumberSid);
+        if (!match) {
+            return { success: false, error: "That number is not on this Twilio account." };
+        }
+
+        const { data: already } = await supabase
+            .from("tenant_phone_numbers")
+            .select("id")
+            .eq("client_id", clientId)
+            .or(`phone_number_sid.eq.${match.sid},phone_number.eq.${match.phoneNumber}`)
+            .maybeSingle();
+        if (already) {
+            return { success: false, error: "That number is already connected." };
+        }
+
+        const { data: insertedRow, error } = await supabase
+            .from("tenant_phone_numbers")
+            .insert({
+                client_id: clientId,
+                phone_number: match.phoneNumber,
+                phone_number_sid: match.sid,
+                friendly_name: match.friendlyName,
+                capabilities: {
+                    sms: !!match.capabilities?.sms,
+                    voice: !!match.capabilities?.voice,
+                },
+                status: "active",
+            })
+            .select("id")
+            .single();
+
+        if (error || !insertedRow) {
+            console.error("adoptTwilioNumber DB error:", error);
+            return { success: false, error: error?.message || "Failed to store the number" };
+        }
+
+        if (account.messaging_service_sid) {
+            try {
+                await addNumberToMessagingService(
+                    sid,
+                    authToken,
+                    account.messaging_service_sid,
+                    match.sid
+                );
+            } catch (err) {
+                // Messaging service membership only affects SMS, so a failure
+                // here must not undo an otherwise good voice connection.
+                console.error("adoptTwilioNumber messaging service error:", err);
+            }
+        }
+
+        const importResult = await importPhoneNumberToVapi(clientId, insertedRow.id);
+
+        revalidatePath(`/client/${clientId}/phone-numbers`);
+
+        if (!importResult.success) {
+            return { success: true, warning: importResult.error };
+        }
+        return { success: true };
+    } catch (err: any) {
+        console.error("adoptTwilioNumber error:", err);
+        return { success: false, error: err.message || "Failed to connect the number" };
+    }
+}
+
 export async function releasePhoneNumberForClient(clientId: string, phoneNumberId: string) {
     try {
         // Get the phone number record with Twilio account info

@@ -10,6 +10,7 @@ import {
     Plus,
     Search,
     Shield,
+    Link2,
     Trash2,
     X,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import {
     purchasePhoneNumberForClient,
     releasePhoneNumberForClient,
     searchAvailableNumbers,
+    adoptTwilioNumber,
 } from "@/app/actions/twilio-actions";
 import {
     assignPhoneNumberToAgent,
@@ -38,6 +40,16 @@ interface Props {
     tenantProfile: any;
     agentMap?: Record<string, string>;
     agents?: { id: string; name: string }[];
+    /** On the Twilio account but with no row of ours yet. */
+    unlinkedNumbers?: UnlinkedNumber[];
+}
+
+export interface UnlinkedNumber {
+    sid: string;
+    phoneNumber: string;
+    friendlyName: string | null;
+    capabilities: { voice: boolean; sms: boolean };
+    dateCreated: string | null;
 }
 
 // ── Shared bits, matching the other rebuilt pages ────────────────────────────
@@ -83,12 +95,14 @@ export function PhoneNumbersManager({
     tenantProfile,
     agentMap = {},
     agents = [],
+    unlinkedNumbers = [],
 }: Props) {
     const router = useRouter();
     const [buyOpen, setBuyOpen] = useState(false);
     const [regOpen, setRegOpen] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [connecting, setConnecting] = useState<string | null>(null);
 
     const hasAccount = !!twilioAccount;
     const isBYOT = twilioAccount?.account_type === "type_a_byoa";
@@ -125,7 +139,17 @@ export function PhoneNumbersManager({
 
     const activeNumbers = numbers.filter((n: any) => n.status === "active");
     const stats = [
-        { label: "Numbers", value: String(numbers.length), sub: "on this account", dot: "bg-gray-400", tone: "text-gray-900" },
+        {
+            label: "Numbers",
+            value: String(numbers.length),
+            // Saying "on this account" while unadopted numbers sit below would
+            // contradict the section under the table.
+            sub: unlinkedNumbers.length
+                ? `${unlinkedNumbers.length} not connected`
+                : "on this account",
+            dot: "bg-gray-400",
+            tone: "text-gray-900",
+        },
         { label: "Voice ready", value: String(activeNumbers.length), sub: activeNumbers.length === numbers.length ? "all numbers" : "of " + numbers.length, dot: "bg-emerald-500", tone: "text-gray-900" },
         {
             label: "SMS ready",
@@ -176,6 +200,26 @@ export function PhoneNumbersManager({
             setBusyId(null);
             if (res?.success) router.refresh();
             else setError(res?.error || "Could not release that number");
+        },
+        [clientId, router]
+    );
+
+    const handleConnect = useCallback(
+        async (sid: string) => {
+            setConnecting(sid);
+            setError(null);
+            const res = await adoptTwilioNumber(clientId, sid);
+            setConnecting(null);
+            if (res?.success) {
+                if (res.warning) {
+                    setError(
+                        `Connected, but VAPI registration failed: ${res.warning}. Calls to it will not route until that is retried.`
+                    );
+                }
+                router.refresh();
+            } else {
+                setError(res?.error || "Could not connect that number");
+            }
         },
         [clientId, router]
     );
@@ -417,6 +461,70 @@ export function PhoneNumbersManager({
                         </>
                     )}
                 </section>
+
+                {/* ---- On Twilio but not connected ---- */}
+                {unlinkedNumbers.length > 0 && (
+                    <section className={CARD}>
+                        <div className="flex items-baseline gap-2.5 border-b border-gray-100 px-3.5 pb-2.5 pt-3">
+                            <span className="text-[13px] font-semibold text-gray-900">
+                                Available on Twilio
+                            </span>
+                            <span className="text-[11.5px] text-gray-500">
+                                {unlinkedNumbers.length === 1
+                                    ? "1 number on your Twilio account is not connected to Omnify yet."
+                                    : `${unlinkedNumbers.length} numbers on your Twilio account are not connected to Omnify yet.`}
+                            </span>
+                        </div>
+                        {unlinkedNumbers.map((n) => (
+                            <div
+                                key={n.sid}
+                                className="flex items-center gap-3 border-b border-gray-50 px-3.5 py-2.5 transition-colors hover:bg-gray-50"
+                            >
+                                <span className="w-[148px] flex-none text-[13px] font-medium tabular-nums text-gray-900">
+                                    {n.phoneNumber}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-[12.5px] text-gray-600">
+                                    {n.friendlyName || prettyNumber(n.phoneNumber)}
+                                </span>
+                                <span className="flex flex-none items-center gap-2.5 text-[11.5px] text-gray-500">
+                                    {n.capabilities.voice && (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Phone className="h-3.5 w-3.5" />
+                                            Voice
+                                        </span>
+                                    )}
+                                    {n.capabilities.sms && (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <MessageSquare className="h-3.5 w-3.5" />
+                                            SMS
+                                        </span>
+                                    )}
+                                </span>
+                                <span className="w-[92px] flex-none text-right text-xs tabular-nums text-gray-500">
+                                    {shortDate(n.dateCreated)}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => handleConnect(n.sid)}
+                                    disabled={!!connecting}
+                                    className={cn(BTN_PRIMARY, "flex-none", seqFocusRing)}
+                                >
+                                    {connecting === n.sid ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <Link2 className="h-3.5 w-3.5" />
+                                    )}
+                                    Connect with Omnify
+                                </button>
+                            </div>
+                        ))}
+                        <p className="px-3.5 py-2.5 text-[11px] leading-relaxed text-gray-500">
+                            Connecting registers the number with VAPI so calls route correctly,
+                            adds it to your messaging service, and makes it selectable for
+                            sequence number rotation.
+                        </p>
+                    </section>
+                )}
 
                 {/* ---- A2P entry ---- */}
                 <section className={cn(CARD, "flex items-start gap-3.5 p-3.5")}>
