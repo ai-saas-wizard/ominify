@@ -66,7 +66,9 @@ export function WorkspaceDisplay({
         );
     }
 
-    const displayName = (currentClient?.business_name || currentClient?.name || "Workspace").toUpperCase();
+    // Shown as the business writes it. The old toUpperCase() shouted every
+    // workspace name and made mixed case brands unreadable.
+    const displayName = currentClient?.business_name || currentClient?.name || "Workspace";
     const hasMultipleClients = allClients.length > 1;
 
     return (
@@ -80,11 +82,11 @@ export function WorkspaceDisplay({
             >
                 <div className="flex min-w-0 items-center gap-2.5">
                     <Image
-                        src="/omnify-logo.png"
+                        src="/omnify-mark.png"
                         alt="Omnify"
                         width={32}
                         height={32}
-                        className="h-8 w-8 flex-none rounded object-contain"
+                        className="h-8 w-8 flex-none object-contain"
                         priority
                     />
                     {/* One line now that the bell has moved out of this row, so a
@@ -112,7 +114,7 @@ export function WorkspaceDisplay({
                                 <div className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-gray-600 font-semibold text-xs">
                                     {(client.business_name || client.name)?.charAt(0).toUpperCase() || 'C'}
                                 </div>
-                                <span className="text-sm text-gray-700 truncate">{(client.business_name || client.name || '').toUpperCase()}</span>
+                                <span className="text-sm text-gray-700 truncate">{client.business_name || client.name || ""}</span>
                             </Link>
                         ))}
                 </div>

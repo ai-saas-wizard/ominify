@@ -56,11 +56,11 @@ export const AdminSidebar = () => {
             <div className="p-4 border-b border-gray-100">
                 <Link href="/admin/clients" className="flex items-center gap-2.5">
                     <Image
-                        src="/omnify-logo.png"
+                        src="/omnify-mark.png"
                         alt="Omnify CRM"
                         width={32}
                         height={32}
-                        className="rounded-lg"
+                        className="object-contain"
                     />
                     <div>
                         <h1 className="text-base font-bold tracking-tight text-gray-900 leading-none">
