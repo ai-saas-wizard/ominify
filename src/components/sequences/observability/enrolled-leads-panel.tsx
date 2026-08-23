@@ -73,7 +73,7 @@ export function EnrolledLeadsPanel({
     }, [enrollments, query, filter]);
 
     return (
-        <section className="flex min-w-0 flex-col border-r border-gray-200 bg-white">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
             <div className="flex flex-none flex-col gap-2.5 border-b border-gray-100 px-3.5 py-3">
                 <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-gray-500">

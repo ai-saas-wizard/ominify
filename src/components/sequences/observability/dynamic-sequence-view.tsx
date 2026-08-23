@@ -393,8 +393,12 @@ export function DynamicSequenceView({
                     </div>
                 )}
 
-                {/* ---- Leads | Journey | Config ---- */}
-                <div className="grid min-h-0 flex-1 grid-cols-[288px_minmax(0,1fr)_372px]">
+                {/* ---- Leads | Journey | Config ----
+                    grid-rows-[minmax(0,1fr)] pins the single row to the container's
+                    height instead of letting it size to the tallest column. Without
+                    it the lead list grows to its full content height and the whole
+                    page scrolls, rather than each column scrolling on its own. */}
+                <div className="grid min-h-0 flex-1 grid-cols-[288px_minmax(0,1fr)_372px] grid-rows-[minmax(0,1fr)] overflow-hidden">
                     <EnrolledLeadsPanel
                         enrollments={enrollments}
                         maxTouches={maxTouches}
@@ -402,7 +406,7 @@ export function DynamicSequenceView({
                         onSelect={setSelectedEnrollmentId}
                     />
 
-                    <section className="flex min-w-0 flex-col bg-gray-50">
+                    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-gray-50">
                         {selected ? (
                             <>
                                 <div className="flex flex-none items-end gap-4 border-b border-gray-200 bg-white px-4.5 py-3">

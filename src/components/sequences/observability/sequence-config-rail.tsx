@@ -234,7 +234,7 @@ export function SequenceConfigRail({
         : "Off — single number";
 
     return (
-        <aside className="flex min-w-0 flex-col border-l border-gray-200 bg-white">
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-gray-200 bg-white">
             <div className="min-h-0 flex-1 overflow-y-auto">
                 {/* AI strategy — read-only; the brief is authored in the wizard. */}
                 <div className="flex flex-col gap-2.5 border-b border-gray-100 px-4 py-3.5">
