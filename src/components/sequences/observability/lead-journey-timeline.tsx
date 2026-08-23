@@ -271,7 +271,7 @@ export function LeadJourneyTimeline({
 
     if (error) {
         return (
-            <div className="py-16 text-center text-gray-400">
+            <div className="py-16 text-center text-gray-500">
                 <Activity className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                 <p className="text-sm text-red-600">{error}</p>
                 <p className="mt-1 text-xs">Select the lead again to retry.</p>
@@ -281,7 +281,7 @@ export function LeadJourneyTimeline({
 
     if (events.length === 0) {
         return (
-            <div className="py-16 text-center text-gray-400">
+            <div className="py-16 text-center text-gray-500">
                 <Activity className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                 <p className="text-sm">No activity yet for this lead.</p>
                 <p className="mt-1 text-xs">
@@ -294,7 +294,7 @@ export function LeadJourneyTimeline({
     return (
         <div className="max-w-[760px]">
             {shown.length === 0 && (
-                <p className="py-10 text-center text-[12px] text-gray-400">
+                <p className="py-10 text-center text-[12px] text-gray-500">
                     Nothing on this lead&apos;s timeline matches the {channelFilter} filter.
                 </p>
             )}
@@ -355,7 +355,7 @@ export function LeadJourneyTimeline({
                                     </p>
                                 )}
 
-                                <div className="mt-2 flex items-center gap-2 text-[10.5px] tabular-nums text-gray-400">
+                                <div className="mt-2 flex items-center gap-2 text-[10.5px] tabular-nums text-gray-500">
                                     <span>{new Date(log.executed_at).toLocaleString()}</span>
                                     {delay && (
                                         <>
@@ -442,7 +442,7 @@ export function LeadJourneyTimeline({
                                     {isOutbound ? "Sent" : "Lead replied"}
                                 </span>
                                 {interaction.appointment_booked && <Chip>Booked</Chip>}
-                                <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-gray-400">
+                                <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-gray-500">
                                     {new Date(interaction.created_at).toLocaleString()}
                                 </span>
                             </div>

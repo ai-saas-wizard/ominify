@@ -127,7 +127,7 @@ export function EnrolledLeadsPanel({
 
             <div className="min-h-0 flex-1 overflow-y-auto">
                 {enrollments.length === 0 ? (
-                    <div className="px-4 py-12 text-center text-gray-400">
+                    <div className="px-4 py-12 text-center text-gray-500">
                         <Users className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                         <p className="text-sm">No leads enrolled yet.</p>
                         <p className="mt-1 text-xs">
@@ -135,7 +135,7 @@ export function EnrolledLeadsPanel({
                         </p>
                     </div>
                 ) : shown.length === 0 ? (
-                    <p className="px-4 py-10 text-center text-[11.5px] text-gray-400">
+                    <p className="px-4 py-10 text-center text-[11.5px] text-gray-500">
                         No leads match that search.
                     </p>
                 ) : (
@@ -203,7 +203,7 @@ export function EnrolledLeadsPanel({
                                         Touch {touch}/{maxTouches}
                                     </span>
                                     {last && (
-                                        <span className="ml-auto text-[10.5px] tabular-nums text-gray-400">
+                                        <span className="ml-auto text-[10.5px] tabular-nums text-gray-500">
                                             {last}
                                         </span>
                                     )}

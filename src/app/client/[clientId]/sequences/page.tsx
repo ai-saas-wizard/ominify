@@ -4,6 +4,7 @@ import {
     SequencesListClient,
     type SequenceCardData,
 } from "@/components/sequences/sequences-list-client";
+import { IN_FLIGHT_STATUSES } from "@/components/sequences/observability/enrollment-status";
 
 async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
     const { data, error } = await supabase
@@ -44,9 +45,14 @@ async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
             step_count: steps.length,
             channels: steps.map((s: any) => s.channel).filter(Boolean),
             ai_mutation_steps: steps.filter((s: any) => s.enable_ai_mutation).length,
-            enrolled_count: enrollments.filter(
-                (e: any) => e.status === "active" || e.status === "paused"
+            // Same in-flight definition the detail page uses: a dynamic
+            // enrollment lives most of its life in awaiting_outcome /
+            // generating_next_step, so counting only status='active' made this
+            // list report far fewer running leads than the sequence itself.
+            active_count: enrollments.filter((e: any) =>
+                (IN_FLIGHT_STATUSES as readonly string[]).includes(e.status)
             ).length,
+            paused_count: enrollments.filter((e: any) => e.status === "paused").length,
             completed_count: enrollments.filter(
                 (e: any) => e.status === "completed" || e.status === "booked"
             ).length,

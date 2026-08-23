@@ -228,7 +228,9 @@ export function DynamicSequenceView({
 
     return (
         <TooltipProvider delayDuration={200}>
-            <div className="flex h-full w-full flex-col bg-gray-50">
+            {/* min-w is the sum of the three column floors: the layout's <main> scrolls
+                horizontally rather than squeezing the journey into a gutter. */}
+            <div className="flex h-full w-full min-w-[1100px] flex-col bg-gray-50">
                 {/* ---- Header ---- */}
                 <header className="flex flex-none items-start gap-3.5 border-b border-gray-200 bg-white py-3 pl-4 pr-5">
                     <Link
@@ -382,7 +384,7 @@ export function DynamicSequenceView({
                                 >
                                     {k.value}
                                 </span>
-                                <span className="text-[10.5px] tabular-nums text-gray-400">
+                                <span className="text-[10.5px] tabular-nums text-gray-500">
                                     {k.sub}
                                 </span>
                             </div>
@@ -420,7 +422,7 @@ export function DynamicSequenceView({
                     height instead of letting it size to the tallest column. Without
                     it the lead list grows to its full content height and the whole
                     page scrolls, rather than each column scrolling on its own. */}
-                <div className="grid min-h-0 flex-1 grid-cols-[288px_minmax(0,1fr)_372px] grid-rows-[minmax(0,1fr)] overflow-hidden">
+                <div className="grid min-h-0 flex-1 grid-cols-[288px_minmax(440px,1fr)_372px] grid-rows-[minmax(0,1fr)] overflow-hidden">
                     <EnrolledLeadsPanel
                         enrollments={enrollments}
                         maxTouches={maxTouches}
@@ -541,7 +543,7 @@ export function DynamicSequenceView({
                                 </div>
                             </>
                         ) : (
-                            <div className="grid flex-1 place-items-center px-6 text-center text-gray-400">
+                            <div className="grid flex-1 place-items-center px-6 text-center text-gray-500">
                                 <div>
                                     <Brain className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                                     <p className="text-sm">
