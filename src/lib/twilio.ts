@@ -5,12 +5,12 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const TWILIO_WEBHOOK_BASE_URL = process.env.TWILIO_WEBHOOK_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "https://app.ominify.com";
 
-// Main account client — used for subaccount creation
+// Main account client, used for subaccount creation
 function getMainClient() {
     return Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
-// Subaccount client — used for operations on a specific tenant's subaccount
+// Subaccount client, used for operations on a specific tenant's subaccount
 function getSubClient(subaccountSid: string, authToken: string) {
     return Twilio(subaccountSid, authToken);
 }
@@ -214,7 +214,7 @@ export async function listMessagingServiceNumbers(
     return numbers.map((n) => n.phoneNumber);
 }
 
-// ─── A2P 10DLC — TrustHub Customer Profile ─────────────────────────────────
+// ─── A2P 10DLC, TrustHub Customer Profile ─────────────────────────────────
 
 const SECONDARY_CUSTOMER_PROFILE_POLICY_SID = "RNdfbf3fae0e1107f8aded0e7cead80bf5";
 const A2P_TRUST_PRODUCT_POLICY_SID = "RNb0d4771c2c98518d916a3d4cd70a8f8b";
@@ -377,7 +377,7 @@ export async function checkCustomerProfileStatus(
     return { sid: profile.sid, status: profile.status };
 }
 
-// ─── A2P 10DLC — Trust Product ──────────────────────────────────────────────
+// ─── A2P 10DLC, Trust Product ──────────────────────────────────────────────
 
 // Create A2P Trust Product (links customer profile to A2P use case)
 export async function createA2PTrustProduct(
@@ -473,7 +473,7 @@ export async function checkTrustProductStatus(
     return { sid: product.sid, status: product.status };
 }
 
-// ─── A2P 10DLC — Brand Registration ────────────────────────────────────────
+// ─── A2P 10DLC, Brand Registration ────────────────────────────────────────
 
 export async function registerBrand(
     subaccountSid: string,
@@ -507,6 +507,97 @@ export async function checkBrandStatus(
         status: brand.status,
         brandSid: brand.sid,
     };
+}
+
+// ─── A2P 10DLC, Discovery of registrations we did not create ──────────────
+
+export interface DiscoveredA2P {
+    brandSid: string | null;
+    brandStatus: string | null;
+    campaignSid: string | null;
+    campaignStatus: string | null;
+    messagingServiceSid: string | null;
+    customerProfileSid: string | null;
+}
+
+/**
+ * Ask Twilio what A2P registration already exists on this account.
+ *
+ * A business can complete 10DLC directly with Twilio, before or outside of
+ * Omnify, which leaves us with no local row and makes the UI claim they are
+ * unregistered while they are perfectly able to send. That is most common for
+ * BYOT tenants who connect an account they have been using for years.
+ *
+ * Read only: this never creates anything, so it is safe to call against an
+ * account whose registration we do not own.
+ */
+export async function discoverA2PRegistration(
+    subaccountSid: string,
+    authToken: string
+): Promise<DiscoveredA2P> {
+    const subClient = getSubClient(subaccountSid, authToken);
+    const found: DiscoveredA2P = {
+        brandSid: null,
+        brandStatus: null,
+        campaignSid: null,
+        campaignStatus: null,
+        messagingServiceSid: null,
+        customerProfileSid: null,
+    };
+
+    // Brands first. Prefer an approved one, since an account can carry a failed
+    // attempt alongside the registration that actually works.
+    try {
+        const brands = await subClient.messaging.v1.brandRegistrations.list({ limit: 50 });
+        const approved = brands.find((b) => String(b.status).toUpperCase() === "APPROVED");
+        const chosen = approved || brands[0];
+        if (chosen) {
+            found.brandSid = chosen.sid;
+            found.brandStatus = String(chosen.status);
+        }
+    } catch (err) {
+        console.error("[A2P] discover brands failed:", err);
+    }
+
+    // Campaigns hang off a messaging service, and an account may have several,
+    // so every service is checked until a verified campaign turns up.
+    try {
+        const services = await subClient.messaging.v1.services.list({ limit: 50 });
+        for (const service of services) {
+            try {
+                const campaigns = await subClient.messaging.v1
+                    .services(service.sid)
+                    .usAppToPerson.list({ limit: 20 });
+                if (campaigns.length === 0) continue;
+
+                const verified = campaigns.find(
+                    (c) => String(c.campaignStatus).toUpperCase() === "VERIFIED"
+                );
+                const chosen = verified || campaigns[0];
+                found.campaignSid = chosen.sid;
+                found.campaignStatus = String(chosen.campaignStatus);
+                found.messagingServiceSid = service.sid;
+                // A verified campaign is the answer; anything else keeps looking
+                // in case a later service holds the real one.
+                if (verified) break;
+            } catch {
+                // A service we cannot read tells us nothing, so move on.
+            }
+        }
+    } catch (err) {
+        console.error("[A2P] discover campaigns failed:", err);
+    }
+
+    try {
+        const profiles = await subClient.trusthub.v1.customerProfiles.list({ limit: 50 });
+        const approved = profiles.find((p) => String(p.status) === "twilio-approved");
+        const chosen = approved || profiles[0];
+        if (chosen) found.customerProfileSid = chosen.sid;
+    } catch (err) {
+        console.error("[A2P] discover customer profiles failed:", err);
+    }
+
+    return found;
 }
 
 // ─── A2P 10DLC Campaign Registration ───────────────────────────────────────

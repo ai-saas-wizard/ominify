@@ -1,9 +1,10 @@
+import { isCampaignApproved } from "@/lib/a2p-status";
 import "server-only";
 import { supabase } from "@/lib/supabase";
 import { resolveTwilioAccountSid } from "@/lib/twilio-account";
 
 /**
- * Tenant channel capability — the single source of truth for which outreach
+ * Tenant channel capability, the single source of truth for which outreach
  * channels (sms / email / voice) a tenant can ACTUALLY send on, derived from
  * provisioning state instead of hardcoded lists.
  *
@@ -15,7 +16,7 @@ import { resolveTwilioAccountSid } from "@/lib/twilio-account";
  *           than offer a channel that may bounce)
  * - voice → an outbound agent with a VAPI assistant
  *
- * KEEP IN SYNC with sequencer/src/lib/channel-capabilities.ts — the sequencer
+ * KEEP IN SYNC with sequencer/src/lib/channel-capabilities.ts, the sequencer
  * is a separate build and duplicates these queries for its runtime guard.
  */
 
@@ -39,7 +40,7 @@ async function checkSmsCapability(
         .eq("status", "active")
         .maybeSingle();
 
-    // BYOA tenants keep their SID in external_account_sid — see lib/twilio-account.ts.
+    // BYOA tenants keep their SID in external_account_sid, see lib/twilio-account.ts.
     // Split the two failures: "no account SID" and "no token" are different fixes,
     // and the old single message ("No active Twilio subaccount provisioned") was
     // actively wrong for BYOA.
@@ -68,8 +69,11 @@ async function checkSmsCapability(
         }
     }
 
-    // A2P status is informational only — the sms-worker still sends while a
-    // campaign is pending (at reduced throughput), so it must not gate the channel.
+    // A2P status is informational only. The sms-worker still sends while a
+    // campaign is pending (at reduced throughput), so it must not gate the
+    // channel. It must also not cry wolf: this used to compare against a
+    // lowercase "approved" while Twilio returns VERIFIED, so fully registered
+    // tenants were permanently annotated as if something were wrong.
     const { data: a2p } = await supabase
         .from("tenant_a2p_registrations")
         .select("campaign_status")
@@ -78,7 +82,7 @@ async function checkSmsCapability(
         .limit(1)
         .maybeSingle();
 
-    if (a2p && a2p.campaign_status !== "approved") {
+    if (a2p && !isCampaignApproved(a2p.campaign_status)) {
         return { ready: true, reason: `A2P campaign status: ${a2p.campaign_status}` };
     }
 

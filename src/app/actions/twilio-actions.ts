@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { isA2PRegistered } from "@/lib/a2p-status";
 import { encrypt, decrypt } from "@/lib/encryption";
 import { resolveTwilioAccountSid } from "@/lib/twilio-account";
 import {
@@ -34,6 +35,7 @@ import {
     registerCampaign,
     checkBrandStatus,
     checkCampaignStatus,
+    discoverA2PRegistration,
 } from "@/lib/twilio";
 import { deleteVapiPhoneNumber } from "@/lib/vapi";
 import { getClientVapiKey } from "@/lib/client-secrets";
@@ -252,7 +254,7 @@ export async function getPhoneNumbers(clientId: string) {
 
 export async function searchAvailableNumbers(areaCode?: string, country?: string, clientId?: string) {
     try {
-        // If clientId provided, check if BYOT account — search on their account
+        // If clientId provided, check if BYOT account, search on their account
         if (clientId) {
             const account = await getTwilioAccount(clientId);
             if (account && account.account_type === "type_a_byoa") {
@@ -351,7 +353,7 @@ export async function purchasePhoneNumberForClient(clientId: string, phoneNumber
         revalidatePath(`/client/${clientId}/phone-numbers`);
 
         if (!importResult.success) {
-            // Don't fail the purchase — the Twilio number is real and billed.
+            // Don't fail the purchase, the Twilio number is real and billed.
             // Surface the VAPI error so the UI can prompt the user to retry.
             return { success: true, warning: importResult.error };
         }
@@ -465,7 +467,7 @@ export async function ensureNumbersInMessagingService(
                 if (twilioErr?.code === 21712) {
                     return {
                         success: false,
-                        error: `${phone.phone_number} belongs to a different Twilio Messaging Service — remove it there or pick another number.`,
+                        error: `${phone.phone_number} belongs to a different Twilio Messaging Service, remove it there or pick another number.`,
                     };
                 }
                 return {
@@ -911,16 +913,88 @@ export async function submitA2PCampaign(clientId: string, campaign: CampaignSubm
     }
 }
 
+/**
+ * Look for a registration on the Twilio account that we did not create, and
+ * adopt it locally if one is there.
+ *
+ * Businesses regularly complete 10DLC directly with Twilio and then connect
+ * that account to Omnify. Reading only our own table told them they were
+ * unregistered while they were sending fine, so the table is treated as a
+ * cache of Twilio's truth rather than the source of it.
+ *
+ * Never throws: registration status is informational, and a Twilio outage must
+ * not take the page down.
+ */
+async function adoptExternalA2PRegistration(
+    clientId: string,
+    existing: Record<string, any> | null
+) {
+    // Nothing to look for once the local row already says approved.
+    if (isA2PRegistered(existing)) return existing;
+
+    try {
+        const account = await getTwilioAccount(clientId);
+        if (!account) return existing;
+
+        const { sid, authToken } = getAccountCredentials(account);
+        const found = await discoverA2PRegistration(sid, authToken);
+
+        if (!found.brandSid && !found.campaignSid) return existing;
+
+        const patch: Record<string, any> = {
+            client_id: clientId,
+            discovered_externally: true,
+            discovered_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
+        if (found.brandSid) {
+            patch.brand_sid = found.brandSid;
+            patch.brand_status = found.brandStatus;
+        }
+        if (found.campaignSid) {
+            patch.campaign_sid = found.campaignSid;
+            patch.campaign_status = found.campaignStatus;
+        }
+        if (found.customerProfileSid) {
+            patch.secondary_customer_profile_sid = found.customerProfileSid;
+        }
+        if (isA2PRegistered({ brand_status: patch.brand_status, campaign_status: patch.campaign_status })) {
+            patch.current_step = "complete";
+        }
+
+        const merged = { ...(existing || {}), ...patch };
+
+        if (existing?.id) {
+            await supabase.from("tenant_a2p_registrations").update(patch).eq("id", existing.id);
+        } else {
+            const { data } = await supabase
+                .from("tenant_a2p_registrations")
+                .insert(patch)
+                .select("*")
+                .single();
+            if (data) return data;
+        }
+        return merged;
+    } catch (err) {
+        console.error("[A2P] adopt external registration failed:", err);
+        return existing;
+    }
+}
+
 // Poll all pending stages
 export async function checkA2PStatus(clientId: string) {
     try {
-        const { data: registration } = await supabase
+        const { data: existingRow } = await supabase
             .from("tenant_a2p_registrations")
             .select("*")
             .eq("client_id", clientId)
             .order("created_at", { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
+
+        // A tenant who registered directly with Twilio has no row of ours, and
+        // a tenant mid-flight may have moved on without us noticing.
+        const registration = await adoptExternalA2PRegistration(clientId, existingRow);
 
         if (!registration) {
             return { success: true, data: null };
