@@ -16,7 +16,6 @@ import {
 import { UserButton } from "@clerk/nextjs";
 import { MinuteBalanceDisplay } from "./minute-balance-display";
 import { WorkspaceDisplay } from "./workspace-display";
-import { NotificationCenter } from "./notification-center";
 
 export interface SidebarInitialData {
     clientId: string;
@@ -25,7 +24,6 @@ export interface SidebarInitialData {
     clientName: string | null;
     balance: number | null;
     accessibleClients: Array<{ id: string; name: string; business_name: string | null }>;
-    initialUnreadCount: number;
 }
 
 const baseRoutes = [
@@ -54,7 +52,6 @@ export const Sidebar = ({ initialData }: { initialData: SidebarInitialData }) =>
         clientName,
         balance,
         accessibleClients,
-        initialUnreadCount,
     } = initialData;
 
     const isUmbrella = accountType === "UMBRELLA";
@@ -62,20 +59,18 @@ export const Sidebar = ({ initialData }: { initialData: SidebarInitialData }) =>
 
     return (
         <div className="flex flex-col h-full bg-white border-r border-gray-200">
-            <div className="flex items-center justify-between pr-2">
-                <div className="flex-1 min-w-0">
-                    <WorkspaceDisplay
-                        clientId={clientId}
-                        initialCurrentClient={{
-                            id: clientId,
-                            name: clientName || "",
-                            business_name: businessName,
-                        }}
-                        initialAllClients={accessibleClients}
-                    />
-                </div>
-                <NotificationCenter clientId={clientId} initialUnreadCount={initialUnreadCount} />
-            </div>
+            {/* Notifications used to live here, which squeezed the workspace name
+                onto two lines. They are a floating button now, see the client
+                layout. */}
+            <WorkspaceDisplay
+                clientId={clientId}
+                initialCurrentClient={{
+                    id: clientId,
+                    name: clientName || "",
+                    business_name: businessName,
+                }}
+                initialAllClients={accessibleClients}
+            />
 
             <div className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5 scrollbar-thin scrollbar-thumb-gray-200">
                 {routes.map((route) => {

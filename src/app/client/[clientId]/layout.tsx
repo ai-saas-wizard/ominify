@@ -4,6 +4,7 @@ import { hasActiveSubscription } from "@/lib/access";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { Sidebar, type SidebarInitialData } from "@/components/layout/sidebar";
+import { NotificationCenter } from "@/components/layout/notification-center";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateMinuteBalance } from "@/lib/billing";
 import { getUnreadNotificationCount } from "@/app/actions/sequence-actions";
@@ -231,7 +232,6 @@ export default async function ClientLayout({
         clientName: clientRecord?.name ?? null,
         balance: balance?.balance_minutes ?? null,
         accessibleClients,
-        initialUnreadCount: unreadCountResult.success ? unreadCountResult.count : 0,
     };
 
     return (
@@ -352,6 +352,13 @@ export default async function ClientLayout({
                     )}
                     {children}
                 </main>
+
+                {/* Floating, so it sits above whichever page is mounted rather
+                    than inside the sidebar's column. */}
+                <NotificationCenter
+                    clientId={clientId}
+                    initialUnreadCount={unreadCountResult.success ? unreadCountResult.count : 0}
+                />
             </div>
         </WalkthroughProvider>
     );

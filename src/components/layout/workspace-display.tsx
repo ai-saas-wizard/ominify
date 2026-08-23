@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 interface WorkspaceDisplayProps {
@@ -57,19 +58,15 @@ export function WorkspaceDisplay({
     if (isLoading) {
         return (
             <div className="p-4 border-b border-gray-100">
-                <div className="animate-pulse flex items-center gap-3 px-2 py-1.5">
+                <div className="animate-pulse flex items-center gap-2.5 px-2 py-1.5">
                     <div className="w-8 h-8 rounded bg-gray-200" />
-                    <div className="space-y-1">
-                        <div className="h-3 w-24 bg-gray-200 rounded" />
-                        <div className="h-2 w-16 bg-gray-200 rounded" />
-                    </div>
+                    <div className="h-3 w-28 bg-gray-200 rounded" />
                 </div>
             </div>
         );
     }
 
     const displayName = (currentClient?.business_name || currentClient?.name || "Workspace").toUpperCase();
-    const initial = displayName.charAt(0);
     const hasMultipleClients = allClients.length > 1;
 
     return (
@@ -81,15 +78,19 @@ export function WorkspaceDisplay({
                     }`}
                 onClick={() => hasMultipleClients && setIsOpen(!isOpen)}
             >
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold text-xs border border-emerald-200">
-                        {initial}
-                    </div>
-                    <div className="text-sm">
-                        <div className="font-semibold text-gray-900 leading-none mb-0.5 truncate max-w-[140px]">
-                            {displayName}
-                        </div>
-                        <div className="text-xs text-gray-500">Client Dashboard</div>
+                <div className="flex min-w-0 items-center gap-2.5">
+                    <Image
+                        src="/omnify-logo.png"
+                        alt="Omnify"
+                        width={32}
+                        height={32}
+                        className="h-8 w-8 flex-none rounded object-contain"
+                        priority
+                    />
+                    {/* One line now that the bell has moved out of this row, so a
+                        real business name no longer wraps. */}
+                    <div className="min-w-0 truncate text-sm font-semibold text-gray-900">
+                        {displayName}
                     </div>
                 </div>
                 {hasMultipleClients && (

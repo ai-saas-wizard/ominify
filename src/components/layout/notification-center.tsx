@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Bell, X, Check, CheckCheck, Flame, AlertTriangle, UserCheck, TrendingDown, Calendar, Flag } from "lucide-react";
+import {
+    AlertTriangle,
+    Bell,
+    Calendar,
+    Check,
+    CheckCheck,
+    Flag,
+    Flame,
+    TrendingDown,
+    UserCheck,
+    X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
     getNotifications,
     getUnreadNotificationCount,
@@ -25,234 +37,309 @@ interface Notification {
     } | null;
 }
 
-export function NotificationCenter({ clientId, initialUnreadCount }: { clientId: string; initialUnreadCount?: number }) {
+/**
+ * Notifications as a floating panel in the bottom right rather than a bell
+ * wedged into the sidebar header.
+ *
+ * The bell used to sit beside the workspace name, which squeezed the name into
+ * two lines on any account with a real business name. Moving it out gives the
+ * sidebar its width back, and a conversation style list suits the content:
+ * these are short, chronological, one sided messages from the system, which is
+ * exactly the shape a message thread is built for.
+ */
+export function NotificationCenter({
+    clientId,
+    initialUnreadCount,
+}: {
+    clientId: string;
+    initialUnreadCount?: number;
+}) {
     const [isOpen, setIsOpen] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(initialUnreadCount ?? 0);
     const [loading, setLoading] = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
-    // Skip initial fetch if layout already prefetched the count; keep the 30s poll for freshness.
+    // Skip the initial fetch when the layout already prefetched the count, but
+    // keep the poll so a notification arriving mid session still shows up. The
+    // cancelled flag stops a late response setting state after unmount.
     useEffect(() => {
-        if (initialUnreadCount === undefined) {
-            fetchUnreadCount();
+        let cancelled = false;
+        async function poll() {
+            const result = await getUnreadNotificationCount(clientId);
+            if (!cancelled && result.success) setUnreadCount(result.count);
         }
-        const interval = setInterval(fetchUnreadCount, 30000);
-        return () => clearInterval(interval);
+        if (initialUnreadCount === undefined) void poll();
+        const interval = setInterval(() => void poll(), 30000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
     }, [clientId, initialUnreadCount]);
 
-    // Close on outside click
     useEffect(() => {
+        if (!isOpen) return;
         const handleClickOutside = (e: MouseEvent) => {
             if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
                 setIsOpen(false);
             }
         };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-            return () => document.removeEventListener('mousedown', handleClickOutside);
-        }
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setIsOpen(false);
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("keydown", handleEscape);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleEscape);
+        };
     }, [isOpen]);
 
-    const fetchUnreadCount = async () => {
-        const result = await getUnreadNotificationCount(clientId);
-        if (result.success) {
-            setUnreadCount(result.count);
-        }
-    };
+    async function handleToggle() {
+        const next = !isOpen;
+        setIsOpen(next);
+        if (!next) return;
 
-    const fetchNotifications = async () => {
         setLoading(true);
-        const result = await getNotifications(clientId, 20);
-        if (result.success) {
-            setNotifications(result.data as Notification[]);
-        }
+        const result = await getNotifications(clientId, 30);
+        if (result.success) setNotifications(result.data as Notification[]);
         setLoading(false);
-    };
+    }
 
-    const handleToggle = () => {
-        if (!isOpen) {
-            fetchNotifications();
-        }
-        setIsOpen(!isOpen);
-    };
+    // Newest sits at the bottom, so open on the newest the way a thread does.
+    useEffect(() => {
+        if (!isOpen || loading) return;
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [isOpen, loading, notifications.length]);
 
-    const handleMarkRead = async (id: string) => {
+    async function handleMarkRead(id: string) {
         await markNotificationRead(id);
-        setNotifications(prev =>
-            prev.map(n => n.id === id ? { ...n, read: true } : n)
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
-    };
+        setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+    }
 
-    const handleMarkAllRead = async () => {
+    async function handleMarkAllRead() {
         await markAllNotificationsRead(clientId);
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
         setUnreadCount(0);
-    };
+    }
+
+    // Oldest first, so the newest lands at the bottom of the thread.
+    const ordered = [...notifications].reverse();
+    const groups = groupByDay(ordered);
 
     return (
-        <div className="relative" ref={panelRef}>
-            {/* Bell Icon */}
-            <button
-                onClick={handleToggle}
-                className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                title="Notifications"
-            >
-                <Bell className="w-4 h-4 text-gray-500" />
-                {unreadCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center w-4 h-4 text-[9px] font-bold text-white bg-red-500 rounded-full">
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                    </span>
-                )}
-            </button>
-
-            {/* Dropdown Panel */}
+        <div ref={panelRef} className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
             {isOpen && (
-                <div className="absolute top-full left-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50 max-h-[480px] flex flex-col">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                        <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-                        <div className="flex items-center gap-2">
+                <div className="flex h-[560px] max-h-[calc(100vh-7rem)] w-[380px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+                    <div className="flex flex-none items-center gap-2 border-b border-gray-100 px-4 py-3">
+                        <span className="text-sm font-semibold text-gray-900">Notifications</span>
+                        {unreadCount > 0 && (
+                            <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-100 px-1.5 text-[10px] font-semibold tabular-nums text-emerald-700">
+                                {unreadCount}
+                            </span>
+                        )}
+                        <div className="ml-auto flex items-center gap-1">
                             {unreadCount > 0 && (
                                 <button
                                     onClick={handleMarkAllRead}
-                                    className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50"
                                 >
-                                    <CheckCheck className="w-3 h-3" />
+                                    <CheckCheck className="h-3 w-3" />
                                     Mark all read
                                 </button>
                             )}
-                            <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-gray-100 rounded">
-                                <X className="w-3.5 h-3.5 text-gray-400" />
+                            <button
+                                onClick={() => setIsOpen(false)}
+                                aria-label="Close notifications"
+                                className="grid h-6 w-6 place-items-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                            >
+                                <X className="h-3.5 w-3.5" />
                             </button>
                         </div>
                     </div>
 
-                    {/* Notification List */}
-                    <div className="flex-1 overflow-y-auto">
+                    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-gray-50 px-3 py-4">
                         {loading ? (
-                            <div className="flex items-center justify-center py-8">
-                                <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                            <div className="flex items-center justify-center py-10">
+                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
                             </div>
-                        ) : notifications.length === 0 ? (
-                            <div className="text-center py-8 text-sm text-gray-400">
-                                No notifications yet
+                        ) : ordered.length === 0 ? (
+                            <div className="flex flex-col items-center gap-1.5 py-12 text-center">
+                                <Bell className="h-7 w-7 text-gray-300" />
+                                <p className="text-[13px] font-medium text-gray-600">
+                                    Nothing yet
+                                </p>
+                                <p className="max-w-[220px] text-[11.5px] leading-relaxed text-gray-500">
+                                    Hot leads, bookings and anything needing a human land here.
+                                </p>
                             </div>
                         ) : (
-                            notifications.map((notification) => (
-                                <NotificationItem
-                                    key={notification.id}
-                                    notification={notification}
-                                    onMarkRead={handleMarkRead}
-                                />
+                            groups.map((group) => (
+                                <div key={group.label}>
+                                    <div className="my-2 flex justify-center">
+                                        <span className="rounded-full bg-gray-200/70 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-600">
+                                            {group.label}
+                                        </span>
+                                    </div>
+                                    {group.items.map((n) => (
+                                        <Bubble key={n.id} notification={n} onMarkRead={handleMarkRead} />
+                                    ))}
+                                </div>
                             ))
                         )}
                     </div>
                 </div>
             )}
+
+            <button
+                onClick={handleToggle}
+                aria-label={
+                    unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
+                }
+                aria-expanded={isOpen}
+                className={cn(
+                    "relative grid h-12 w-12 place-items-center rounded-full shadow-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:ring-offset-2",
+                    isOpen
+                        ? "bg-gray-900 text-white hover:bg-gray-800"
+                        : "bg-emerald-600 text-white hover:bg-emerald-700"
+                )}
+            >
+                {isOpen ? <X className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+                {!isOpen && unreadCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums text-white">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                )}
+            </button>
         </div>
     );
 }
 
-function NotificationItem({
+/**
+ * One notification as an incoming message: avatar, bubble, timestamp beneath.
+ * Everything here is one sided, so bubbles always sit on the left.
+ */
+function Bubble({
     notification,
     onMarkRead,
 }: {
     notification: Notification;
     onMarkRead: (id: string) => void;
 }) {
-    const typeConfig = getTypeConfig(notification.type);
-    const timeAgo = getTimeAgo(notification.created_at);
-    const priorityColor = getPriorityColor(notification.priority);
+    const meta = getTypeConfig(notification.type);
+    const unread = !notification.read;
+    const contextLine =
+        notification.contacts?.name ||
+        notification.sequence_enrollments?.sequences?.name ||
+        null;
 
     return (
-        <div
-            className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer ${
-                !notification.read ? 'bg-emerald-50/30' : ''
-            }`}
-            onClick={() => !notification.read && onMarkRead(notification.id)}
-        >
-            <div className="flex items-start gap-3">
-                {/* Icon */}
-                <div className={`mt-0.5 p-1.5 rounded-lg ${typeConfig.bg}`}>
-                    <typeConfig.icon className={`w-3.5 h-3.5 ${typeConfig.color}`} />
-                </div>
+        <div className="mb-2.5 flex items-end gap-2">
+            <span
+                className={cn(
+                    "grid h-7 w-7 flex-none place-items-center rounded-full",
+                    meta.bg
+                )}
+            >
+                <meta.icon className={cn("h-3.5 w-3.5", meta.color)} />
+            </span>
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <p className={`text-sm font-medium truncate ${!notification.read ? 'text-gray-900' : 'text-gray-600'}`}>
-                            {notification.title}
-                        </p>
-                        {!notification.read && (
-                            <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        )}
-                    </div>
-
-                    {notification.body && (
-                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
-                            {notification.body}
-                        </p>
+            <div className="flex min-w-0 max-w-[86%] flex-col items-start gap-1">
+                <button
+                    type="button"
+                    onClick={() => unread && onMarkRead(notification.id)}
+                    className={cn(
+                        // rounded-bl-md gives the bubble its tail corner.
+                        "w-full rounded-2xl rounded-bl-md border px-3 py-2 text-left transition-colors",
+                        unread
+                            ? "border-emerald-200 bg-emerald-50 hover:bg-emerald-100/70"
+                            : "border-gray-200 bg-white hover:bg-gray-50"
                     )}
+                >
+                    <span className="flex items-center gap-1.5">
+                        <span
+                            className={cn(
+                                "text-[13px] font-semibold leading-snug",
+                                unread ? "text-gray-900" : "text-gray-700"
+                            )}
+                        >
+                            {notification.title}
+                        </span>
+                        {notification.priority === "urgent" && (
+                            <span className="inline-flex flex-none items-center rounded bg-red-100 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-red-700">
+                                Urgent
+                            </span>
+                        )}
+                    </span>
+                    {notification.body && (
+                        <span className="mt-0.5 block text-[12.5px] leading-relaxed text-gray-600">
+                            {notification.body}
+                        </span>
+                    )}
+                </button>
 
-                    <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] text-gray-400">{timeAgo}</span>
-                        {notification.priority !== 'normal' && (
-                            <span className={`text-[10px] font-medium px-1 py-0.5 rounded ${priorityColor}`}>
-                                {notification.priority}
-                            </span>
-                        )}
-                        {notification.contacts?.name && (
-                            <span className="text-[10px] text-gray-400 truncate">
-                                {notification.contacts.name}
-                            </span>
-                        )}
-                    </div>
-                </div>
+                <span className="flex items-center gap-1.5 px-1 text-[10.5px] text-gray-500">
+                    <span>{getTimeLabel(notification.created_at)}</span>
+                    {contextLine && (
+                        <>
+                            <span className="text-gray-300">·</span>
+                            <span className="truncate">{contextLine}</span>
+                        </>
+                    )}
+                    {unread && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                </span>
             </div>
         </div>
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════════════════════════════════
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function groupByDay(items: Notification[]): Array<{ label: string; items: Notification[] }> {
+    const groups: Array<{ label: string; items: Notification[] }> = [];
+    for (const n of items) {
+        const label = getDayLabel(n.created_at);
+        const last = groups[groups.length - 1];
+        if (last && last.label === label) last.items.push(n);
+        else groups.push({ label, items: [n] });
+    }
+    return groups;
+}
+
+function getDayLabel(dateStr: string): string {
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return "Earlier";
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    if (sameDay(d, today)) return "Today";
+    if (sameDay(d, yesterday)) return "Yesterday";
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function getTimeLabel(dateStr: string): string {
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
 
 function getTypeConfig(type: string) {
-    const configs: Record<string, { icon: any; bg: string; color: string }> = {
-        hot_lead: { icon: Flame, bg: 'bg-orange-100', color: 'text-orange-600' },
-        needs_human: { icon: UserCheck, bg: 'bg-emerald-100', color: 'text-emerald-600' },
-        objection_detected: { icon: AlertTriangle, bg: 'bg-yellow-100', color: 'text-yellow-600' },
-        sentiment_drop: { icon: TrendingDown, bg: 'bg-red-100', color: 'text-red-600' },
-        appointment_booked: { icon: Calendar, bg: 'bg-green-100', color: 'text-green-600' },
-        sequence_completed: { icon: Check, bg: 'bg-blue-100', color: 'text-blue-600' },
-        escalation: { icon: Flag, bg: 'bg-red-100', color: 'text-red-600' },
-        at_risk: { icon: TrendingDown, bg: 'bg-red-100', color: 'text-red-500' },
+    const configs: Record<
+        string,
+        { icon: typeof Bell; bg: string; color: string }
+    > = {
+        hot_lead: { icon: Flame, bg: "bg-orange-100", color: "text-orange-600" },
+        needs_human: { icon: UserCheck, bg: "bg-emerald-100", color: "text-emerald-600" },
+        objection_detected: { icon: AlertTriangle, bg: "bg-amber-100", color: "text-amber-600" },
+        sentiment_drop: { icon: TrendingDown, bg: "bg-red-100", color: "text-red-600" },
+        appointment_booked: { icon: Calendar, bg: "bg-violet-100", color: "text-violet-600" },
+        sequence_completed: { icon: Check, bg: "bg-gray-100", color: "text-gray-600" },
+        escalation: { icon: Flag, bg: "bg-red-100", color: "text-red-600" },
+        at_risk: { icon: TrendingDown, bg: "bg-red-100", color: "text-red-500" },
     };
-    return configs[type] || { icon: Bell, bg: 'bg-gray-100', color: 'text-gray-600' };
-}
-
-function getPriorityColor(priority: string): string {
-    switch (priority) {
-        case 'urgent': return 'bg-red-100 text-red-600';
-        case 'high': return 'bg-orange-100 text-orange-600';
-        case 'low': return 'bg-gray-100 text-gray-500';
-        default: return 'bg-gray-100 text-gray-500';
-    }
-}
-
-function getTimeAgo(dateStr: string): string {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMinutes = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMinutes < 1) return 'Just now';
-    if (diffMinutes < 60) return `${diffMinutes}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return configs[type] || { icon: Bell, bg: "bg-gray-100", color: "text-gray-600" };
 }
