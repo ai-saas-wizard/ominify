@@ -83,7 +83,7 @@ export const GOAL_CARDS: GoalCard[] = [
         description: "Auto-enroll leads from Facebook & Instagram Lead Ads",
         icon: "megaphone",
         requires: "meta_ads",
-        // Native Meta App Review pending — flip off once approved.
+        // Native Meta App Review pending, flip off once approved.
         comingSoon: true,
         defaults: {
             trigger_type: "meta_ads_lead",

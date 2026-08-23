@@ -103,11 +103,11 @@ export function TestRunPanel({
                     setStatus(res.data);
                     if (res.data.settled) {
                         setDone(true);
-                        return; // stop polling — nothing more will change
+                        return; // stop polling, nothing more will change
                     }
                 }
             } catch {
-                // Transient — keep polling until the window closes.
+                // Transient, keep polling until the window closes.
             }
 
             if (age >= POLL_WINDOW_MS) {
@@ -161,7 +161,7 @@ export function TestRunPanel({
                 </div>
             ) : (
                 <p className="text-xs text-gray-500">
-                    Waiting for the scheduler — the first step fires within a few
+                    Waiting for the scheduler, the first step fires within a few
                     seconds, then roughly every {TEST_STEP_DELAY_SECONDS}s.
                 </p>
             )}

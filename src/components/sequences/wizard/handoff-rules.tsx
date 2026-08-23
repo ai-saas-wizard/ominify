@@ -355,7 +355,7 @@ export function HandoffRulesScreen({
                 </label>
                 <p className="text-xs text-gray-400">
                     When a handoff or success condition fires, how should we reach you?
-                    Phone numbers must include country code — e.g. +1 212 555 1212.
+                    Phone numbers must include country code, e.g. +1 212 555 1212.
                 </p>
 
                 <div className="space-y-3">

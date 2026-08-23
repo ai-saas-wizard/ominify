@@ -53,7 +53,7 @@ export function SimulationEntryComponent({
             }}
             className="relative pl-8"
         >
-            {/* Timeline dot — neutral for the AI's sends, sky for the lead's side */}
+            {/* Timeline dot, neutral for the AI's sends, sky for the lead's side */}
             <div
                 className={cn(
                     "absolute left-1 top-3.5 h-2 w-2 rounded-full ring-2 ring-white",
@@ -153,7 +153,7 @@ export function SimulationEntryComponent({
                             <Bell className="h-4 w-4 flex-shrink-0 text-red-500" />
                             <div>
                                 <p className="text-xs font-semibold text-red-700">
-                                    HANDOFF — You get notified
+                                    HANDOFF · You get notified
                                 </p>
                                 <p className="mt-0.5 text-xs text-red-600">
                                     {entry.handoff.reason}

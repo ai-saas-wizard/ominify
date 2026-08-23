@@ -34,7 +34,7 @@ import { createSequenceFromWizard, type ChannelReadiness } from "@/app/actions/s
 
 interface SequenceWizardProps {
     clientId: string;
-    /** Deployed outbound agents — sequences act as one of these; required to activate. */
+    /** Deployed outbound agents, sequences act as one of these; required to activate. */
     outboundAgents: { id: string; name: string; vapi_id: string | null }[];
     /** Which channels this tenant can actually send on (server-derived). */
     channelReadiness: ChannelReadiness;
@@ -75,7 +75,7 @@ function getDefaultState(
         agentId: defaultAgent?.id ?? null,
         channelConfig: {
             // Only channels the tenant can actually send on start enabled.
-            // Voice is scoped to the SELECTED agent — creation intersects on
+            // Voice is scoped to the SELECTED agent, creation intersects on
             // that agent's capability, so offering tenant-wide voice for a
             // vapi-less agent would silently drop it at activation.
             channels: {
@@ -190,7 +190,7 @@ export function SequenceWizard({
     // Navigation
     const goNext = useCallback(async () => {
         if (step === 2) {
-            // Moving to simulation — generate it
+            // Moving to simulation, generate it
             setDirection(1);
             setStep(3);
             setSimLoading(true);
@@ -317,7 +317,7 @@ export function SequenceWizard({
         }
     }, [state, simulation, clientId, router, onClose]);
 
-    // Zero-agent gate: sequences act as an outbound agent — without one the
+    // Zero-agent gate: sequences act as an outbound agent, without one the
     // wizard would dead-end at activation, so block up front with a clear CTA.
     if (outboundAgents.length === 0) {
         return (
@@ -351,7 +351,7 @@ export function SequenceWizard({
                             Deploy your AI agent first
                         </h2>
                         <p className="text-gray-500">
-                            Sequences are run by your AI agent — it texts and calls
+                            Sequences are run by your AI agent, it texts and calls
                             leads as your business. Deploy an outbound agent, then
                             come back to launch a sequence.
                         </p>
@@ -401,7 +401,7 @@ export function SequenceWizard({
                         <div className="mx-auto mt-4 max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                             Replaced your previous active sequence{" "}
                             <span className="font-medium">&ldquo;{replacedSequenceName}&rdquo;</span>{" "}
-                            — only one ad-platform sequence can be live at a time.
+                            Only one ad-platform sequence can be live at a time.
                         </div>
                     )}
                 </motion.div>

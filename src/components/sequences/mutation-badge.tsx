@@ -98,7 +98,7 @@ export function MutationEnabledDot() {
 }
 
 function formatContent(content: any): string {
-    if (!content) return "—";
+    if (!content) return "-";
     if (typeof content === "string") return content;
     // For JSON content objects, extract the most readable field
     if (content.body) return content.body;

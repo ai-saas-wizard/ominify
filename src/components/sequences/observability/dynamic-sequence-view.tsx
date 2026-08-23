@@ -40,7 +40,7 @@ const CHANNEL_TAB_LABELS: Record<string, string> = {
     email: "Email",
 };
 
-/** Header chip button — the three actions share one shape. */
+/** Header chip button, the three actions share one shape. */
 const headerBtn =
     "inline-flex h-[30px] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-900 transition-colors hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50";
 
@@ -56,7 +56,7 @@ interface DynamicSequenceViewProps {
  * Observability + operations view for AI-driven (generation_mode='dynamic')
  * sequences, laid out as three fixed columns: who is enrolled, what happened to
  * the selected lead, and how the campaign is configured. There is no step
- * authoring here by design — steps are generated per lead at runtime, so any
+ * authoring here by design, steps are generated per lead at runtime, so any
  * shared step graph would be fiction.
  */
 export function DynamicSequenceView({
@@ -111,13 +111,13 @@ export function DynamicSequenceView({
         if (res?.success) {
             const n = res.data?.resumed ?? 0;
             // Leads with no step left to run stay paused rather than being
-            // revived into a silent "completed" — say so instead of implying
+            // revived into a silent "completed", say so instead of implying
             // everything came back.
             const stranded = res.data?.stranded ?? 0;
             setResumeMsg(
                 `Resumed ${n} lead${n === 1 ? "" : "s"}` +
                     (stranded
-                        ? ` · ${stranded} left paused (no next step — they have finished their touches)`
+                        ? ` · ${stranded} left paused (no next step left, they have finished their touches)`
                         : "")
             );
             router.refresh();
@@ -157,7 +157,8 @@ export function DynamicSequenceView({
 
     /** "45" over "50" → "90%"; blank when there is nothing to divide by. */
     function share(n: number): string {
-        if (!stats.total || n === 0) return "—";
+        if (!stats.total) return "";
+        if (n === 0) return "0%";
         return `${Math.round((n / stats.total) * 100)}%`;
     }
 
@@ -296,7 +297,7 @@ export function DynamicSequenceView({
                                 </button>
                             </TooltipTrigger>
                             <TooltipContent>
-                                Fire a test to a phone number — bypasses pacing &amp; quiet-hours
+                                Fire a test to a phone number. Bypasses pacing and quiet hours.
                             </TooltipContent>
                         </Tooltip>
 
@@ -311,7 +312,7 @@ export function DynamicSequenceView({
                                 </Link>
                             </TooltipTrigger>
                             <TooltipContent>
-                                Learning dashboard — what is working across this sequence
+                                Learning dashboard: what is working across this sequence
                             </TooltipContent>
                         </Tooltip>
 
@@ -335,7 +336,7 @@ export function DynamicSequenceView({
                             </TooltipTrigger>
                             <TooltipContent>
                                 {isActive
-                                    ? "Stop dispatching — in-flight leads are parked as paused"
+                                    ? "Stop dispatching. In-flight leads are parked as paused."
                                     : "Resume dispatching on the sequence schedule"}
                             </TooltipContent>
                         </Tooltip>
@@ -400,7 +401,7 @@ export function DynamicSequenceView({
                         <span className="flex items-center gap-1.5">
                             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                             <span className="tabular-nums">{stats.paused}</span> lead
-                            {stats.paused === 1 ? "" : "s"} paused — outreach is stopped for them.
+                            {stats.paused === 1 ? "" : "s"} paused, so outreach is stopped for them.
                         </span>
                         <button
                             type="button"
@@ -548,7 +549,7 @@ export function DynamicSequenceView({
                                     <Brain className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                                     <p className="text-sm">
                                         {enrollments.length === 0
-                                            ? "Nothing enrolled yet — enroll a list to start."
+                                            ? "Nothing enrolled yet. Enroll a list to start."
                                             : "Select a lead to see its AI journey."}
                                     </p>
                                 </div>

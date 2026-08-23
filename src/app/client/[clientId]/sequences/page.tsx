@@ -71,7 +71,7 @@ async function getTenantWizardContext(clientId: string) {
             .select("industry, emergency_phone, business_name")
             .eq("client_id", clientId)
             .single(),
-        // Outbound agents only — sequences are run BY an agent, so the wizard
+        // Outbound agents only, sequences are run BY an agent, so the wizard
         // needs the pickable list (and gates on zero). vapi_id lets the wizard
         // scope the voice toggle to the SELECTED agent, not just the tenant.
         supabase
@@ -80,7 +80,7 @@ async function getTenantWizardContext(clientId: string) {
             .eq("client_id", clientId)
             .eq("agent_type", "outbound")
             .order("created_at", { ascending: false }),
-        // Tables may not exist on every environment yet — wrap in maybeSingle so a
+        // Tables may not exist on every environment yet, wrap in maybeSingle so a
         // missing-table error doesn't crash the page during phased rollout.
         supabase
             .from("tenant_meta_ads")

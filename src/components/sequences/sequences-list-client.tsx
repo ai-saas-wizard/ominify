@@ -56,7 +56,7 @@ export interface SequenceCardData {
     created_at: string;
     updated_at: string | null;
     step_count: number;
-    /** Enrollments still running — the same in-flight set the detail page counts. */
+    /** Enrollments still running, the same in-flight set the detail page counts. */
     active_count: number;
     paused_count: number;
     completed_count: number;
@@ -72,7 +72,7 @@ export interface SequenceCardData {
 interface SequencesListClientProps {
     clientId: string;
     sequences: SequenceCardData[];
-    /** Deployed outbound agents (server-fetched) — gates the wizard and empty state. */
+    /** Deployed outbound agents (server-fetched), gates the wizard and empty state. */
     outboundAgents: { id: string; name: string; vapi_id: string | null }[];
     /** Server-derived channel capability, passed to the wizard and task dialog. */
     channelReadiness: ChannelReadiness;
@@ -129,7 +129,7 @@ const COLS =
 
 function relativeTime(dateStr: string): string {
     const then = new Date(dateStr).getTime();
-    if (Number.isNaN(then)) return "—";
+    if (Number.isNaN(then)) return "";
     const mins = Math.floor((Date.now() - then) / 60_000);
     if (mins < 1) return "Just now";
     if (mins < 60) return `${mins}m ago`;
@@ -241,7 +241,7 @@ function SequenceRow({
                                 <Brain className="h-3.5 w-3.5 text-emerald-600" />
                             </TooltipTrigger>
                             <TooltipContent>
-                                AI-driven — the next touch is decided per lead
+                                AI-driven: the next touch is decided per lead
                             </TooltipContent>
                         </Tooltip>
                     )}
@@ -276,7 +276,7 @@ function SequenceRow({
                     </div>
                 </div>
 
-                {/* Counts — zero is muted so a live number carries the eye. */}
+                {/* Counts, zero is muted so a live number carries the eye. */}
                 <span className="text-right text-[12.5px] tabular-nums text-gray-900">
                     {sequence.active_count}
                 </span>
@@ -307,7 +307,7 @@ function SequenceRow({
                 </span>
             </Link>
 
-            {/* Row actions — a sibling of the Link so a menu click never navigates.
+            {/* Row actions, a sibling of the Link so a menu click never navigates.
                 Sits over the chevron, which fades out on hover. */}
             <div className="absolute right-[18px] top-1/2 -translate-y-1/2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                 <DropdownMenu>
@@ -512,7 +512,7 @@ export function SequencesListClient({
                             Sequences
                         </h1>
                         <p className="text-[11.5px] text-gray-500">
-                            Automated multi-step outreach — voice and SMS, run by your agents.
+                            Automated multi-step outreach: voice and SMS, run by your agents.
                         </p>
                     </div>
                     <div className="flex flex-none items-center gap-2">
@@ -684,7 +684,7 @@ export function SequencesListClient({
                                         Create your first AI sequence
                                     </h3>
                                     <p className="mt-1 max-w-md text-sm text-gray-500">
-                                        You set the goal, touchpoints, and contact windows — the AI
+                                        You set the goal, touchpoints, and contact windows, and the AI
                                         decides the channel, content, and timing of every touch.
                                     </p>
                                     <button
@@ -704,7 +704,7 @@ export function SequencesListClient({
                                         Set up your AI agent first
                                     </h3>
                                     <p className="mt-1 max-w-md text-sm text-gray-500">
-                                        Sequences are run by your AI agent — it texts and calls
+                                        Sequences are run by your AI agent, which texts and calls
                                         leads for you. Deploy an agent to get started.
                                     </p>
                                     <Link

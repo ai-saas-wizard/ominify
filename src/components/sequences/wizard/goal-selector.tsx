@@ -134,7 +134,7 @@ export function GoalSelector({
                                         {goal.description}
                                     </p>
                                     <p className="mt-2 text-xs text-gray-500">
-                                        Verification with the platform is in progress — we&apos;ll
+                                        Verification with the platform is in progress, we&apos;ll
                                         switch this on as soon as it clears.
                                     </p>
                                 </div>

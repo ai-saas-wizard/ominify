@@ -24,7 +24,7 @@ interface ListRow {
  *
  * enrollListInSequence has always existed, but the only ways to reach it were
  * at import time (createListFromImport's enrollIntoSequenceId) and the task
- * dialog — so a list created earlier could never be enrolled into a sequence
+ * dialog, so a list created earlier could never be enrolled into a sequence
  * that already exists. This surfaces it on the sequence itself.
  *
  * Enrolling starts real outreach, so the button states what will happen and

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { seqFocusRing } from "@/components/sequences/theme";
 import { ENROLLMENT_STATUS, STATUS_LABELS, isInFlight } from "./enrollment-status";
 
-/** "just now" / "14m ago" / "3h ago" / "2d ago" — null when there is no timestamp. */
+/** "just now" / "14m ago" / "3h ago" / "2d ago", null when there is no timestamp. */
 function relativeTime(iso: string | null | undefined): string | null {
     if (!iso) return null;
     const then = new Date(iso).getTime();
@@ -27,7 +27,7 @@ export function leadName(enrollment: any): string {
 /**
  * Status buckets the filter offers. "Active" spans every in-flight status
  * (active / awaiting_outcome / generating_next_step) because a dynamic
- * enrollment spends most of its life in the latter two — filtering on the
+ * enrollment spends most of its life in the latter two, filtering on the
  * literal "active" string alone would hide most of a live campaign.
  */
 const FILTERS = ["All", "Active", "Replied", "Failed"] as const;

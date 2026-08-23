@@ -40,7 +40,7 @@ function IssueRow({ issue, tone }: { issue: PreflightIssue; tone: "red" | "amber
 export function TestPreflightPanel({
     preflight,
     loading,
-    /** Manual-mode rows have no email — email steps would be skipped. */
+    /** Manual-mode rows have no email, email steps would be skipped. */
     missingEmailWarning,
 }: {
     preflight: TestPreflight | null;
@@ -63,7 +63,7 @@ export function TestPreflightPanel({
     const hasAnything = blockers.length > 0 || warnings.length > 0 || showEmailWarning;
 
     if (!hasAnything) {
-        // Happy path stays quiet — one line, no shouting.
+        // Happy path stays quiet, one line, no shouting.
         const ready = channels.filter((c) => readiness[c].ready).map((c) => CHANNEL_LABEL[c]);
         return (
             <div className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2 text-xs text-gray-500">

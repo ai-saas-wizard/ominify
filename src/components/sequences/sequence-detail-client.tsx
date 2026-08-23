@@ -441,7 +441,7 @@ export function SequenceDetailClient({
                                                             {log.enrollment_id?.substring(0, 8)}...
                                                         </td>
                                                         <td className="py-2.5 text-xs text-gray-500 max-w-[200px] truncate">
-                                                            {log.provider_message_id || log.error_message || "—"}
+                                                            {log.provider_message_id || log.error_message || "-"}
                                                         </td>
                                                     </tr>
                                                 );

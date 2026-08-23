@@ -258,7 +258,7 @@ export function CSVColumnMapper({
                 </div>
             </div>
 
-            {/* Live preview — what row 1 looks like after mapping */}
+            {/* Live preview, what row 1 looks like after mapping */}
             {sampleData.length > 0 && hasPhoneMapping && (
                 <div className="mx-6 mb-4 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
                     <div className="px-4 py-2 border-b border-gray-200 bg-white flex items-center justify-between">
@@ -301,7 +301,7 @@ export function CSVColumnMapper({
                             })}
                     </div>
                     <div className="px-4 py-2 border-t border-gray-200 bg-white text-xs text-gray-500">
-                        Reference these in your agent prompt or special instructions — they substitute at call time.
+                        Reference these in your agent prompt or special instructions, they substitute at call time.
                     </div>
                 </div>
             )}

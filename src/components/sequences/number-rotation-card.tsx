@@ -17,7 +17,7 @@ import {
     type SeqRailPanelProps,
 } from "@/components/sequences/theme";
 
-/** The sequence fields this card reads — a structural subset of the row. */
+/** The sequence fields this card reads, a structural subset of the row. */
 export interface NumberRotationFields {
     rotate_phone_numbers?: boolean | null;
     rotation_phone_number_ids?: string[] | null;
@@ -70,7 +70,7 @@ export function NumberRotationCard({
 
     // Re-sync when the server row changes under us (router.refresh after save,
     // a concurrent edit in another tab). Done during render rather than in an
-    // effect — React's "reset state when a prop changes" pattern — so the
+    // effect, React's "reset state when a prop changes" pattern, so the
     // synced values paint in the same pass instead of one render late.
     const serverKey = `${sequenceId}|${serverEnabled}|${serverIdsKey}`;
     const [syncedKey, setSyncedKey] = useState(serverKey);

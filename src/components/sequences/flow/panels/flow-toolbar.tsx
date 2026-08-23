@@ -153,7 +153,7 @@ export function FlowToolbar({
                 <h2 className="max-w-[160px] truncate text-sm font-semibold text-gray-900">
                     {sequence.name}
                 </h2>
-                {/* This canvas is the advanced/legacy editor — only static
+                {/* This canvas is the advanced/legacy editor, only static
                     sequences reach it (dynamic ones get the observability view). */}
                 <Badge variant="secondary" className="h-5 px-1.5 py-0 text-xs font-normal text-gray-500">
                     Manual
@@ -193,11 +193,11 @@ export function FlowToolbar({
                                 Test now
                             </button>
                         </TooltipTrigger>
-                        <TooltipContent>Fire a test call to a phone number — bypasses pacing &amp; quiet-hours</TooltipContent>
+                        <TooltipContent>Fire a test call to a phone number, bypasses pacing &amp; quiet-hours</TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
 
-                {/* Read-only calling-schedule summary — the editable controls
+                {/* Read-only calling-schedule summary, the editable controls
                     live in the Info sidebar. */}
                 {scheduleSummary && (
                     <TooltipProvider>

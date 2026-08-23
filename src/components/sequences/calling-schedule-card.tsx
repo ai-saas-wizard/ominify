@@ -11,7 +11,7 @@ import {
     type SeqRailPanelProps,
 } from "@/components/sequences/theme";
 
-/** The sequence fields this card reads — a structural subset of the row. */
+/** The sequence fields this card reads, a structural subset of the row. */
 export interface CallingScheduleFields {
     daily_call_cap?: number | null;
     calling_window_start?: string | null;
@@ -37,7 +37,7 @@ const DAY_PICKER: Array<{ key: (typeof DAY_KEYS)[number]; label: string }> = [
     { key: "sun", label: "Sun" },
 ];
 
-/** "Mon, Wed, Fri" — with the two common presets named. */
+/** "Mon, Wed, Fri", with the two common presets named. */
 function daysSummary(days: string[] | null | undefined): string | null {
     if (!days || days.length === 0 || days.length === 7) return null;
     const set = new Set(days);
@@ -103,7 +103,7 @@ export function CallingScheduleCard({
     const [error, setError] = useState<string | null>(null);
 
     // Re-sync the inputs when the server row changes under us (router.refresh
-    // after save, a concurrent edit in another tab) — useState initializers
+    // after save, a concurrent edit in another tab), useState initializers
     // only run on mount, so without this the inputs and the summary chips
     // would show different values.
     const serverCap = sequence?.daily_call_cap != null ? String(sequence.daily_call_cap) : "";
@@ -176,7 +176,7 @@ export function CallingScheduleCard({
     }, [dirty, onDirtyChange]);
 
     /** Same write as handleSave, but reports failure to the caller instead of
-     *  painting inline state — the rail's save bar owns the messaging. */
+     *  painting inline state, the rail's save bar owns the messaging. */
     const commit = useCallback(async (): Promise<string | null> => {
         if (selectedDays.size === 0) return "Select at least one calling day";
         const res = await updateSequencePacing(sequenceId, {
@@ -205,7 +205,7 @@ export function CallingScheduleCard({
     }
 
     const footnote =
-        "Voice calls only, in your business timezone — layered on top of business hours and the 8am\u20139pm rule.";
+        "Voice calls only, in your business timezone. Layered on top of business hours and the 8am to 9pm rule.";
 
     const fields = (
         <div className="space-y-3">

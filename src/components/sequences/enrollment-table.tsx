@@ -9,7 +9,7 @@ import { seqCardStatic, seqFocusRing } from "@/components/sequences/theme";
 
 // Status as dot+label: sky=in-flight, amber=paused, red=failed, ink=terminal
 // outcomes, gray=inactive. Dynamic enrollments spend most of their life in
-// awaiting_outcome / generating_next_step — without entries they'd
+// awaiting_outcome / generating_next_step, without entries they'd
 // misleadingly render as plain "active".
 const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
     active: { dot: "bg-sky-500", text: "text-sky-700" },

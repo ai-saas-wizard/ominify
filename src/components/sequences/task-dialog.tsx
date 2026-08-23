@@ -88,7 +88,7 @@ export function TaskDialog({
     const [loadingAction, setLoadingAction] = useState<"launch" | "test" | null>(null);
     const [error, setError] = useState("");
 
-    // Voice agent picker — fetched once when the dialog opens. Empty list
+    // Voice agent picker, fetched once when the dialog opens. Empty list
     // means the client hasn't deployed an outbound agent yet (we surface the
     // existing NO_OUTBOUND_AGENT error so the user gets a configure CTA).
     const [agents, setAgents] = useState<
@@ -223,7 +223,7 @@ export function TaskDialog({
             mapping: Record<string, string>;
         }) => {
             // Selecting a list clears any uploaded CSV. We don't populate
-            // csvParsedData — the list path uses enrollListInSequence which
+            // csvParsedData, the list path uses enrollListInSequence which
             // pulls members directly server-side.
             setCsvFile(null);
             setCsvColumns([]);
@@ -341,7 +341,7 @@ export function TaskDialog({
                     setLastEnrolledSequenceId(sequenceId);
                     setLastMapping(mapping);
 
-                    // Any failures — stay on the mapping screen so the operator
+                    // Any failures, stay on the mapping screen so the operator
                     // can retry the failed subset or continue anyway.
                     if (enrollErrors && enrollErrors.length > 0) {
                         if (enrolled === 0) {
@@ -590,7 +590,7 @@ export function TaskDialog({
                                         </p>
                                         <p className="text-xs text-emerald-700 mt-0.5">
                                             {pendingMode === "test"
-                                                ? "Test mode active — first call dispatches in ~30 seconds, ignoring pacing and quiet-hours."
+                                                ? "Test mode active. First call dispatches in ~30 seconds, ignoring pacing and quiet-hours."
                                                 : pacingPerMinute.trim()
                                                   ? `Calls staggered at ${pacingPerMinute} per minute, respecting business hours.`
                                                   : "First call dispatches now, respecting business hours."}
@@ -746,7 +746,7 @@ export function TaskDialog({
                                     rows={3}
                                     disabled={loadingAction !== null}
                                 />
-                                {/* Variable chips — click to insert at cursor */}
+                                {/* Variable chips, click to insert at cursor */}
                                 <div className="flex flex-wrap items-center gap-1.5">
                                     <span className="text-xs text-gray-400">Insert variable:</span>
                                     {availableVariables.map((v) => (
@@ -763,7 +763,7 @@ export function TaskDialog({
                                     ))}
                                 </div>
                                 <p className="text-xs text-gray-400">
-                                    Injected into the agent's prompt for every call — use <code>{'{{first_name}}'}</code> etc. to personalize.
+                                    Injected into the agent's prompt for every call, use <code>{'{{first_name}}'}</code> etc. to personalize.
                                 </p>
                             </div>
 
@@ -794,7 +794,7 @@ export function TaskDialog({
                                 </p>
                             </div>
 
-                            {/* Contact source — Upload CSV | Select List */}
+                            {/* Contact source, Upload CSV | Select List */}
                             <TaskSourcePicker
                                 clientId={clientId}
                                 selectedListId={selectedListId}
@@ -882,7 +882,7 @@ export function TaskDialog({
                                 </p>
                             )}
 
-                            {/* Voice agent picker — shown when voice is ready and agents exist */}
+                            {/* Voice agent picker, shown when voice is ready and agents exist */}
                             {channelReadiness.voice.ready && (
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">

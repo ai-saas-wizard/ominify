@@ -24,7 +24,7 @@ const GOAL_LABELS: Record<string, string> = {
 /**
  * The "what will the AI do" answer for a dynamic sequence: renders the
  * strategy the wizard wrote (goal, channels, cadence × duration, max steps)
- * plus the handoff rules. There is deliberately no step graph — the AI decides
+ * plus the handoff rules. There is deliberately no step graph, the AI decides
  * each lead's next touch at runtime, so any shared graph would be fiction.
  */
 export function StrategyOverviewCard({ sequence }: { sequence: any }) {

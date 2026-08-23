@@ -235,7 +235,7 @@ export function LiveDashboard({
                                         <div className="flex-1 min-w-0">
                                             <p className="text-sm text-gray-800">
                                                 <span className="font-medium">{entry.contactName}</span>
-                                                {" — "}
+                                                {" · "}
                                                 {entry.description}
                                             </p>
                                             {entry.aiReasoning && (

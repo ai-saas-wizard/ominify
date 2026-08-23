@@ -101,14 +101,14 @@ function Section({
 }
 
 /**
- * Right rail of the sequence detail view: the AI's brief up top (read-only —
+ * Right rail of the sequence detail view: the AI's brief up top (read-only , 
  * the strategy is authored in the wizard), then every operational setting as a
  * collapsed section whose header states its current value, so the whole
  * configuration is legible without opening anything.
  *
  * Schedule, rotation and the bound agent share one save bar: they are three
  * separate writes, but from the operator's side they are one edit to "how this
- * campaign runs". Enrolling a list keeps its own button — it starts real
+ * campaign runs". Enrolling a list keeps its own button, it starts real
  * outreach rather than changing a setting.
  */
 export function SequenceConfigRail({
@@ -127,7 +127,7 @@ export function SequenceConfigRail({
     const [briefExpanded, setBriefExpanded] = useState(false);
 
     // Bumping this remounts the child panels, which resets their drafts from
-    // the server row — that is exactly what Discard means here.
+    // the server row, that is exactly what Discard means here.
     const [resetKey, setResetKey] = useState(0);
 
     const strategy = sequence.sequence_strategy || {};
@@ -225,18 +225,18 @@ export function SequenceConfigRail({
     }
 
     const scheduleSummary =
-        callingScheduleSummary(sequence) || "No cap or window — dials on business hours";
+        callingScheduleSummary(sequence) || "No cap or window, dials on business hours";
 
     const rotationSummary = sequence.rotate_phone_numbers
         ? `${(sequence.rotation_phone_number_ids || []).length} number${
               (sequence.rotation_phone_number_ids || []).length === 1 ? "" : "s"
           } in rotation`
-        : "Off — single number";
+        : "Off, single number";
 
     return (
         <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-gray-200 bg-white">
             <div className="min-h-0 flex-1 overflow-y-auto">
-                {/* AI strategy — read-only; the brief is authored in the wizard. */}
+                {/* AI strategy, read-only; the brief is authored in the wizard. */}
                 <div className="flex flex-col gap-2.5 border-b border-gray-100 px-4 py-3.5">
                     <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-gray-500">
                         AI strategy
@@ -318,7 +318,7 @@ export function SequenceConfigRail({
                     onToggle={(id) => setOpen(open === id ? null : id)}
                 >
                     <div className="flex flex-col gap-2">
-                        {/* AI sequences require an agent — swapping is allowed,
+                        {/* AI sequences require an agent, swapping is allowed,
                             unbinding is not (also enforced in updateSequenceCore). */}
                         <select
                             aria-label="Bound agent"

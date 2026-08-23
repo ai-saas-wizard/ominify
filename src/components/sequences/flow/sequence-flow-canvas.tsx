@@ -150,7 +150,7 @@ export function SequenceFlowCanvas({
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [showStepEditor, sidebarTab, handleStepEditorClose]);
 
-    // MiniMap node color — ink for the trigger, amber for waits, neutral grays
+    // MiniMap node color, ink for the trigger, amber for waits, neutral grays
     // for everything else (channel identity lives on the nodes, not the map).
     const nodeColor = useCallback((node: Node) => {
         const channel = (node.data as any)?.channel;

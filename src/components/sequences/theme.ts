@@ -1,5 +1,5 @@
 /**
- * Sequences section design tokens — "quiet confidence" restyle.
+ * Sequences section design tokens, "quiet confidence" restyle.
  *
  * Scoped to src/components/sequences/* only; the rest of the app keeps its
  * current look. Color discipline:
@@ -29,11 +29,11 @@ export const seqCardInteractive =
 /** Static card: hairline border, no shadow, no hover response. */
 export const seqCardStatic = "rounded-xl border border-gray-200 bg-white shadow-none";
 
-/** Selectable option (wizard cards, pills, condition rows) — unselected. */
+/** Selectable option (wizard cards, pills, condition rows), unselected. */
 export const seqOption =
     "border border-gray-200 bg-white transition-colors duration-150 hover:border-gray-300";
 
-/** Selectable option — selected. ring-1 doubles the hairline without layout shift. */
+/** Selectable option, selected. ring-1 doubles the hairline without layout shift. */
 export const seqOptionSelected = "border border-emerald-600 ring-1 ring-emerald-600 bg-emerald-50/40";
 
 /** Status → dot + label styling. Dot color is the only non-ink element. */
@@ -55,7 +55,7 @@ export type SeqStatusKey = keyof typeof SEQ_STATUS;
  * `bare` drops the card chrome + title + own save button (the accordion header
  * carries the title and the rail carries one save bar); `onDirtyChange` and
  * `registerSave` let the rail's single save bar count and commit the edits.
- * All optional — omitting them leaves the card exactly as it behaves today in
+ * All optional, omitting them leaves the card exactly as it behaves today in
  * the flow sidebar.
  */
 export interface SeqRailPanelProps {

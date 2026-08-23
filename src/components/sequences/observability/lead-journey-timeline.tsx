@@ -26,7 +26,7 @@ const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string }
 
 // The page-wide palette, applied to a single touch rather than a whole lead:
 // emerald=went out fine, red=failed, blue=the lead responded, amber=objection,
-// neutral=queued or nothing yet. Blue never means "in flight" here — it belongs
+// neutral=queued or nothing yet. Blue never means "in flight" here, it belongs
 // to the lead's own replies, exactly as in the lead list (see enrollment-status).
 const SENTIMENT_COLORS: Record<string, string> = {
     positive: "bg-emerald-50 text-emerald-700",
@@ -41,7 +41,7 @@ function statusStyle(status: string): { dot: string; text: string } {
     if (status === "delivered" || status === "success" || status === "completed" || status === "sent")
         return { dot: "bg-emerald-500", text: "text-emerald-700" };
     if (status === "failed") return { dot: "bg-red-500", text: "text-red-700" };
-    // Queued, not yet dispatched — neutral says "nothing has happened" more
+    // Queued, not yet dispatched, neutral says "nothing has happened" more
     // honestly than a color that implies an outcome.
     if (status === "pending" || status === "executing")
         return { dot: "bg-gray-300", text: "text-gray-500" };
@@ -80,7 +80,7 @@ function channelKey(raw: string | null | undefined): string {
     return raw === "voice_call" ? "voice" : raw || "sms";
 }
 
-/** True when the AI visibly shaped this touch — generated, rewrote, or repaired it. */
+/** True when the AI visibly shaped this touch, generated, rewrote, or repaired it. */
 function isAiEvent(event: JourneyEvent): boolean {
     if (event.kind !== "log") return false;
     const log = event.data;
@@ -203,7 +203,7 @@ export function LeadJourneyTimeline({
             }));
             // Outbound sends are already represented by their log row; the
             // interaction stream adds the lead's side (replies, call outcomes
-            // with sentiment/intent) — the signals that drive the AI's next
+            // with sentiment/intent), the signals that drive the AI's next
             // decision. Outbound voice interactions are kept because they carry
             // disposition/duration/summary the log row lacks.
             const interactions: JourneyEvent[] = (result.interactions || [])
@@ -409,7 +409,7 @@ export function LeadJourneyTimeline({
                     );
                 }
 
-                // Interaction event — the lead's side of the conversation.
+                // Interaction event, the lead's side of the conversation.
                 const interaction = event.data;
                 const isOutbound = interaction.direction === "outbound";
                 const preview =
@@ -496,7 +496,7 @@ export function LeadJourneyTimeline({
             {nextTouchAt && (
                 <TimelineRow dashed>
                     <div className="flex items-center gap-2 pt-2 text-[12px] text-gray-500">
-                        <span>Waiting on next scheduled touch —</span>
+                        <span>Waiting on next scheduled touch</span>
                         <span className="font-medium tabular-nums text-gray-900">
                             {new Date(nextTouchAt).toLocaleString()}
                         </span>

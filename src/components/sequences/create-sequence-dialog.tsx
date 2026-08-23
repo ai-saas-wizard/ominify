@@ -46,7 +46,7 @@ export function CreateSequenceDialog({
     const router = useRouter();
 
     // Load the client's outbound agents when the dialog opens so the user can
-    // bind one — it drives the voice assistant for calls and the SMS persona
+    // bind one, it drives the voice assistant for calls and the SMS persona
     // for texts.
     useEffect(() => {
         if (!isOpen) return;
@@ -126,7 +126,7 @@ export function CreateSequenceDialog({
                         Create Manual Sequence (Advanced)
                     </h3>
                     <p className="mt-1 text-xs text-gray-500">
-                        Fixed steps you author yourself — the AI won&apos;t decide
+                        Fixed steps you author yourself, the AI won&apos;t decide
                         channels, content, or timing. For AI-driven outreach, use
                         the sequence wizard instead.
                     </p>

@@ -3,9 +3,9 @@
 import { motion } from "framer-motion";
 
 /**
- * Dark brand background — three radial color blooms (emerald / sky / blue),
+ * Dark brand background, three radial color blooms (emerald / sky / blue),
  * a subtle dot grid, and a vignette gradient. Matches the marketing site's
- * walkthrough aesthetic. Pure decoration — pointer-events-none everywhere.
+ * walkthrough aesthetic. Pure decoration, pointer-events-none everywhere.
  */
 export function LandingBackground() {
     return (
@@ -49,7 +49,7 @@ export function LandingBackground() {
 }
 
 /**
- * A small "live" status pill — emerald dot with a ping animation. Useful to
+ * A small "live" status pill, emerald dot with a ping animation. Useful to
  * pair with hero copy ("real-time pricing", "live", "active offer").
  */
 export function LiveDot({ label = "Live" }: { label?: string }) {

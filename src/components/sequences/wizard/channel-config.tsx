@@ -117,7 +117,7 @@ export function ChannelConfigScreen({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {CHANNELS.map((ch, i) => {
                         const isOn = config.channels[ch.key];
-                        // Voice is scoped to the selected agent — creation
+                        // Voice is scoped to the selected agent, creation
                         // intersects on the bound agent's capability.
                         const agentLacksVoice =
                             ch.key === "voice" && !!selectedAgent && !selectedAgent.vapi_id;

@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Check, ArrowRight, Loader2 } from "lucide-react";
 
 /**
- * Subscribe button — posts to /api/stripe/subscribe and redirects to
+ * Subscribe button, posts to /api/stripe/subscribe and redirects to
  * Stripe-hosted Checkout. Gated behind a TCPA/DNC consent checkbox.
  *
  * Dark-themed variant for the in-app subscribe page; matches the offer
@@ -118,7 +118,7 @@ export function SubscribeButton({
                         {ctaLabel ??
                             (multiPhase
                                 ? `Start with $${priceUsd}/month`
-                                : `Subscribe — $${priceUsd}/month`)}
+                                : `Subscribe · $${priceUsd}/month`)}
                         <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                     </>
                 )}

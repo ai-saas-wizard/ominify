@@ -47,6 +47,12 @@ export interface UsageRecord {
     recorded_at: string;
 }
 
+export interface DailyUsagePoint {
+    /** Local calendar day, YYYY-MM-DD. */
+    date: string;
+    minutes: number;
+}
+
 export interface UsageSummary {
     totalMinutesUsed: number;
     totalCostToUs: number;

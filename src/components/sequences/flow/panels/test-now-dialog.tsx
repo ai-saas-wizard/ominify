@@ -54,7 +54,7 @@ interface TestRow {
     id: string;
     phone: string;
     name: string;
-    /** Optional — without it, email steps are silently skipped at dispatch. */
+    /** Optional, without it, email steps are silently skipped at dispatch. */
     email: string;
 }
 
@@ -72,12 +72,12 @@ export function TestNowDialog({
 }: TestNowDialogProps) {
     const reactId = useId();
 
-    // Eligible existing enrollments — only active/paused ones can be flipped
+    // Eligible existing enrollments, only active/paused ones can be flipped
     // to test in place, and ONLY ones that are already test enrollments.
     // is_test is permanent and strips every safety gate for that lead
     // (business hours, TCPA, calling window/days, daily cap, fatigue guard,
     // the dial-time gate) while compressing delays to 30s. Listing real leads
-    // here — previously sorted live-first, so they appeared at the top — put a
+    // here, previously sorted live-first, so they appeared at the top, put a
     // "call this stranger repeatedly at any hour" button one click away. The
     // server refuses them too (convertEnrollmentsToTest); this keeps the UI
     // honest about what can be selected.
@@ -329,8 +329,8 @@ export function TestNowDialog({
 
                                     <p className="text-sm text-gray-500">
                                         {mode === "existing"
-                                            ? "Pick contacts already enrolled in this sequence — they'll flip to test mode and dispatch in ~30s, bypassing pacing and quiet-hours."
-                                            : "Drop one or more phone numbers — they enroll instantly, bypass pacing and quiet-hours, and the first call dispatches in ~30 seconds."}
+                                            ? "Pick contacts already enrolled in this sequence, they'll flip to test mode and dispatch in ~30s, bypassing pacing and quiet-hours."
+                                            : "Drop one or more phone numbers, they enroll instantly, bypass pacing and quiet-hours, and the first call dispatches in ~30 seconds."}
                                     </p>
 
                                     <TestPreflightPanel
@@ -497,7 +497,7 @@ function ExistingMode({
                                 {rows.map((row) => {
                                     const selected = selectedIds.has(row.id);
                                     const name = row.contacts?.name || "(unnamed)";
-                                    const phone = row.contacts?.phone || "—";
+                                    const phone = row.contacts?.phone || "-";
                                     return (
                                         <motion.li
                                             key={row.id}
@@ -634,7 +634,7 @@ function ManualMode({
                                     </motion.button>
                                 </div>
                                 {/* Email steps are skipped at dispatch when the
-                                    contact has no email — and nothing is logged. */}
+                                    contact has no email, and nothing is logged. */}
                                 <div className="relative pr-8">
                                     <Mail className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                                     <input
@@ -643,7 +643,7 @@ function ManualMode({
                                         onChange={(e) =>
                                             onUpdate(row.id, { email: e.target.value })
                                         }
-                                        placeholder="Email (optional — needed for email steps)"
+                                        placeholder="Email (optional, needed for email steps)"
                                         disabled={disabled}
                                         className="w-full pl-8 pr-3 py-2 text-sm rounded-md border border-gray-200 outline-none transition-colors hover:border-gray-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/30 disabled:opacity-50"
                                     />
@@ -753,7 +753,7 @@ function ResultView({
                 </motion.div>
             )}
 
-            {/* What the sequencer ACTUALLY did — polls the execution log so a
+            {/* What the sequencer ACTUALLY did, polls the execution log so a
                 silent failure (no Twilio config, no minutes, no VAPI slot) is
                 visible instead of the dialog just saying "enrolled". */}
             {result.enrollmentIds.length > 0 && (

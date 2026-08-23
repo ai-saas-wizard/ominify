@@ -34,7 +34,7 @@ const TRIGGER_LABELS: Record<string, string> = {
     schedule: "Schedule",
 };
 
-// Urgency as dot+label — only critical/high carry color.
+// Urgency as dot+label, only critical/high carry color.
 const URGENCY_DOTS: Record<string, string> = {
     critical: "bg-red-500",
     high: "bg-amber-500",

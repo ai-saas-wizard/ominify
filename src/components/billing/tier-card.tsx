@@ -48,7 +48,7 @@ export function TierCard({
             }}
             className="relative group"
         >
-            {/* Recommended glow (decorative — must not capture clicks). */}
+            {/* Recommended glow (decorative, must not capture clicks). */}
             {tier.is_recommended && (
                 <motion.div
                     aria-hidden
@@ -59,7 +59,7 @@ export function TierCard({
                 />
             )}
 
-            {/* Hover halo (non-recommended cards) — pointer-events-none so it
+            {/* Hover halo (non-recommended cards), pointer-events-none so it
                 never blocks the button below, even at opacity-0 it would
                 otherwise be a giant invisible click-eater. */}
             {!tier.is_recommended && (
@@ -69,7 +69,7 @@ export function TierCard({
                 />
             )}
 
-            {/* Inner card — the lift on hover happens HERE, not on the parent.
+            {/* Inner card, the lift on hover happens HERE, not on the parent.
                 Lifting the parent would change its hit area and cause
                 hover-flicker when the cursor is near the bottom edge (where the
                 CTA lives), making clicks drop intermittently. */}
@@ -135,7 +135,7 @@ export function TierCard({
                     )}
                 </ul>
 
-                {/* CTA — switches action + payload based on mode */}
+                {/* CTA, switches action + payload based on mode */}
                 {mode === "select" && clientId ? (
                     <form action={selectClientTierAction} className="mt-8">
                         <input type="hidden" name="client_id" value={clientId} />

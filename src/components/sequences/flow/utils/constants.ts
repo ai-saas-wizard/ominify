@@ -30,7 +30,7 @@ export interface ChannelFlowConfig {
 }
 
 // Send channels are neutral ink (identity comes from icon + label); only
-// wait keeps amber — it's a timing state, matching the section's semantics.
+// wait keeps amber, it's a timing state, matching the section's semantics.
 export const CHANNEL_FLOW_CONFIG: Record<string, ChannelFlowConfig> = {
     sms: {
         icon: MessageSquare,

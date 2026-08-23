@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import {
     Users,
     Phone,
-    CreditCard,
     Settings,
     Bot,
     GitBranch,
@@ -35,7 +34,6 @@ const baseRoutes = [
     { label: "Pipeline", icon: KanbanSquare, href: "/pipeline" },
     { label: "Analytics", icon: BarChart3, href: "/analytics" },
     { label: "UNIBOX", icon: Inbox, href: "/unibox" },
-    { label: "Billing", icon: CreditCard, href: "/billing" },
 ];
 
 const umbrellaRoutes = [

@@ -13,7 +13,7 @@
  *
  * A dynamic enrollment spends most of its life in awaiting_outcome /
  * generating_next_step, so those read as running rather than as a state of
- * their own — otherwise a healthy campaign looks like it is doing nothing.
+ * their own, otherwise a healthy campaign looks like it is doing nothing.
  */
 export const ENROLLMENT_STATUS: Record<
     string,

@@ -8,11 +8,12 @@ export {
     type MinuteBalance,
     type MinutePurchase,
     type UsageRecord,
-    type UsageSummary
+    type UsageSummary,
+    type DailyUsagePoint
 } from './billing-types';
 
 // Import types for use in this file
-import type { ClientBilling, MinuteBalance, MinutePurchase, UsageRecord, UsageSummary } from './billing-types';
+import type { ClientBilling, DailyUsagePoint, MinuteBalance, MinutePurchase, UsageRecord, UsageSummary } from './billing-types';
 
 /**
  * Get or create billing config for a client
@@ -249,6 +250,49 @@ export async function getClientUsageRecords(
 
     if (error) throw new Error(`Failed to get usage records: ${error.message}`);
     return (data || []) as UsageRecord[];
+}
+
+/** Local calendar day key, so bucketing and lookup never disagree over UTC. */
+function dayKey(d: Date): string {
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Minutes charged per day for the last N days, oldest first. Days with no
+ * calls are filled in as zero so the chart always draws the same number of
+ * bars and a quiet stretch reads as quiet rather than as missing data.
+ */
+export async function getClientDailyUsage(
+    clientId: string,
+    days: number = 14
+): Promise<DailyUsagePoint[]> {
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - (days - 1));
+
+    const { data, error } = await supabase
+        .from('usage_records')
+        .select('minutes_charged, recorded_at')
+        .eq('client_id', clientId)
+        .gte('recorded_at', since.toISOString());
+
+    if (error) throw new Error(`Failed to get daily usage: ${error.message}`);
+
+    const buckets = new Map<string, number>();
+    for (let i = 0; i < days; i++) {
+        const d = new Date(since);
+        d.setDate(since.getDate() + i);
+        buckets.set(dayKey(d), 0);
+    }
+    for (const r of data || []) {
+        const key = dayKey(new Date(r.recorded_at));
+        if (buckets.has(key)) {
+            buckets.set(key, (buckets.get(key) ?? 0) + Number(r.minutes_charged));
+        }
+    }
+    return [...buckets.entries()].map(([date, minutes]) => ({ date, minutes }));
 }
 
 /**
