@@ -279,13 +279,13 @@ export function SequenceConfigRail({
                             );
                         })}
                         {strategy.max_steps != null && (
-                            <span className="inline-flex h-[22px] items-center gap-1.5 rounded-md border border-gray-200 px-2 font-mono text-[11px] tabular-nums text-gray-900">
+                            <span className="inline-flex h-[22px] items-center gap-1.5 rounded-md border border-gray-200 px-2 text-[11px] tabular-nums text-gray-900">
                                 <Flag className="h-3 w-3 text-gray-400" />
                                 {strategy.max_steps} touchpoints
                             </span>
                         )}
                         {strategy.cadence_per_week != null && strategy.duration_weeks != null && (
-                            <span className="inline-flex h-[22px] items-center rounded-md border border-gray-200 px-2 font-mono text-[11px] tabular-nums text-gray-900">
+                            <span className="inline-flex h-[22px] items-center rounded-md border border-gray-200 px-2 text-[11px] tabular-nums text-gray-900">
                                 {strategy.cadence_per_week}/week · {strategy.duration_weeks} week
                                 {strategy.duration_weeks !== 1 ? "s" : ""}
                             </span>
@@ -397,19 +397,29 @@ export function SequenceConfigRail({
                 </Section>
             </div>
 
-            {(dirtyCount > 0 || saveError) && (
-                <div className="flex flex-none flex-col gap-2 border-t border-gray-200 bg-gray-50 px-3.5 py-2.5">
+            {/* Always mounted: a save control that only appears once you have already
+                edited something reads as a missing button. State carries the message. */}
+            <div className="flex flex-none flex-col gap-2 border-t border-gray-200 bg-gray-50 px-3.5 py-2.5">
                     <div className="flex items-center gap-2.5">
                         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11.5px] text-gray-600">
-                            <span className="h-1.5 w-1.5 flex-none rounded-full bg-amber-500" />
-                            {dirtyCount === 1 ? "1 unsaved change" : `${dirtyCount} unsaved changes`}
+                            <span
+                                className={cn(
+                                    "h-1.5 w-1.5 flex-none rounded-full",
+                                    dirtyCount > 0 ? "bg-amber-500" : "bg-gray-300"
+                                )}
+                            />
+                            {dirtyCount === 0
+                                ? "No unsaved changes"
+                                : dirtyCount === 1
+                                ? "1 unsaved change"
+                                : `${dirtyCount} unsaved changes`}
                         </span>
                         <button
                             type="button"
                             onClick={handleDiscard}
-                            disabled={saving}
+                            disabled={saving || dirtyCount === 0}
                             className={cn(
-                                "h-[30px] rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:opacity-50",
+                                "h-[30px] rounded-md border border-gray-300 bg-white px-2.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:opacity-40",
                                 seqFocusRing
                             )}
                         >
@@ -429,8 +439,7 @@ export function SequenceConfigRail({
                         </button>
                     </div>
                     {saveError && <p className="text-[11.5px] text-red-600">{saveError}</p>}
-                </div>
-            )}
+            </div>
         </aside>
     );
 }

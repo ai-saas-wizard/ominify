@@ -268,7 +268,7 @@ export function CallingScheduleCard({
                                         "rounded-md border px-1.5 py-1 text-[11px] font-medium transition-colors",
                                         on
                                             ? "border-emerald-600 bg-emerald-50 text-emerald-700"
-                                            : "border-gray-200 bg-white text-gray-400 hover:border-gray-300 hover:text-gray-600",
+                                            : "border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900",
                                         saving && "opacity-60"
                                     )}
                                 >

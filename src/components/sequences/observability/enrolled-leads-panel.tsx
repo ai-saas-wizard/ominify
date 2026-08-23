@@ -79,7 +79,7 @@ export function EnrolledLeadsPanel({
                     <span className="text-[10px] font-semibold uppercase tracking-[0.09em] text-gray-500">
                         Enrolled leads
                     </span>
-                    <span className="font-mono text-[11px] tabular-nums text-gray-500">
+                    <span className="text-[11px] tabular-nums text-gray-500">
                         {shown.length}
                         <span className="text-gray-300"> / {enrollments.length}</span>
                     </span>
@@ -199,11 +199,11 @@ export function EnrolledLeadsPanel({
                                             />
                                         ))}
                                     </span>
-                                    <span className="font-mono text-[10.5px] tabular-nums text-gray-500">
+                                    <span className="text-[10.5px] tabular-nums text-gray-500">
                                         Touch {touch}/{maxTouches}
                                     </span>
                                     {last && (
-                                        <span className="ml-auto font-mono text-[10.5px] tabular-nums text-gray-400">
+                                        <span className="ml-auto text-[10.5px] tabular-nums text-gray-400">
                                             {last}
                                         </span>
                                     )}

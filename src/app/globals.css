@@ -22,8 +22,7 @@
   --color-border-subtle: var(--border-subtle);
   --color-muted-foreground: var(--muted-foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
-    Consolas, monospace;
+  --font-mono: var(--font-geist-mono);
 }
 
 

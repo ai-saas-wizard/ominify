@@ -319,7 +319,7 @@ export function LeadJourneyTimeline({
                                         className="text-gray-700"
                                     />
                                     {step?.step_order != null && (
-                                        <span className="font-mono text-[11px] tabular-nums text-gray-500">
+                                        <span className="text-[11px] tabular-nums text-gray-500">
                                             Touch {step.step_order}
                                         </span>
                                     )}
@@ -351,7 +351,7 @@ export function LeadJourneyTimeline({
                                     </p>
                                 )}
 
-                                <div className="mt-2 flex items-center gap-2 font-mono text-[10.5px] tabular-nums text-gray-400">
+                                <div className="mt-2 flex items-center gap-2 text-[10.5px] tabular-nums text-gray-400">
                                     <span>{new Date(log.executed_at).toLocaleString()}</span>
                                     {delay && (
                                         <>
@@ -391,7 +391,7 @@ export function LeadJourneyTimeline({
                                         {(log.provider_id || log.error_message) && (
                                             <p
                                                 className={cn(
-                                                    "break-all font-mono text-[10.5px]",
+                                                    "break-all text-[10.5px]",
                                                     log.provider_id ? "text-gray-400" : "text-red-600"
                                                 )}
                                             >
@@ -438,7 +438,7 @@ export function LeadJourneyTimeline({
                                     {isOutbound ? "Sent" : "Lead replied"}
                                 </span>
                                 {interaction.appointment_booked && <Chip>Booked</Chip>}
-                                <span className="ml-auto shrink-0 font-mono text-[10.5px] tabular-nums text-gray-400">
+                                <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-gray-400">
                                     {new Date(interaction.created_at).toLocaleString()}
                                 </span>
                             </div>
@@ -493,7 +493,7 @@ export function LeadJourneyTimeline({
                 <TimelineRow dashed>
                     <div className="flex items-center gap-2 pt-2 text-[12px] text-gray-500">
                         <span>Waiting on next scheduled touch —</span>
-                        <span className="font-mono font-medium tabular-nums text-gray-900">
+                        <span className="font-medium tabular-nums text-gray-900">
                             {new Date(nextTouchAt).toLocaleString()}
                         </span>
                     </div>

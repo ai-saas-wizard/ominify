@@ -251,7 +251,7 @@ export function DynamicSequenceView({
                             {headerMeta.map((m) => (
                                 <span key={m.text} className="flex items-center gap-2.5">
                                     <span className="text-gray-300">·</span>
-                                    <span className={cn(m.mono && "font-mono tabular-nums")}>
+                                    <span className={cn(m.mono && "tabular-nums")}>
                                         {m.text}
                                     </span>
                                 </span>
@@ -354,13 +354,13 @@ export function DynamicSequenceView({
                             <div className="flex items-baseline gap-2">
                                 <span
                                     className={cn(
-                                        "font-mono text-[21px] font-medium tabular-nums tracking-[-0.02em]",
+                                        "text-[21px] font-medium tabular-nums tracking-[-0.02em]",
                                         k.value === 0 ? "text-gray-400" : "text-gray-900"
                                     )}
                                 >
                                     {k.value}
                                 </span>
-                                <span className="font-mono text-[10.5px] tabular-nums text-gray-400">
+                                <span className="text-[10.5px] tabular-nums text-gray-400">
                                     {k.sub}
                                 </span>
                             </div>
@@ -375,7 +375,7 @@ export function DynamicSequenceView({
                     <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-100 bg-amber-50/70 px-4 py-2 text-[11.5px] text-amber-900">
                         <span className="flex items-center gap-1.5">
                             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                            <span className="font-mono tabular-nums">{stats.paused}</span> lead
+                            <span className="tabular-nums">{stats.paused}</span> lead
                             {stats.paused === 1 ? "" : "s"} paused — outreach is stopped for them.
                         </span>
                         <button
@@ -409,7 +409,7 @@ export function DynamicSequenceView({
                     <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-gray-50">
                         {selected ? (
                             <>
-                                <div className="flex flex-none items-end gap-4 border-b border-gray-200 bg-white px-4.5 py-3">
+                                <div className="flex flex-none items-end gap-4 border-b border-gray-200 bg-white px-[18px] py-3">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1">
                                         <div className="flex items-center gap-2.5">
                                             <span className="truncate text-[14.5px] font-semibold tracking-[-0.01em] text-gray-900">
@@ -434,7 +434,7 @@ export function DynamicSequenceView({
                                         </div>
                                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-gray-500">
                                             {selected.contacts?.phone && (
-                                                <span className="font-mono tabular-nums">
+                                                <span className="tabular-nums">
                                                     {selected.contacts.phone}
                                                 </span>
                                             )}
@@ -510,7 +510,7 @@ export function DynamicSequenceView({
                                     </div>
                                 </div>
 
-                                <div className="min-h-0 flex-1 overflow-y-auto px-4.5 pb-7 pt-4.5">
+                                <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-7 pt-[18px]">
                                     <LeadJourneyTimeline
                                         enrollmentId={selected.id}
                                         channelFilter={journeyFilter}
