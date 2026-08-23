@@ -1,6 +1,8 @@
 "use server";
 
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { supabase } from "@/lib/supabase";
+import { isAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { getActiveUmbrellaWithRawKey } from "@/app/actions/umbrella-actions";
 import { encrypt } from "@/lib/encryption";
@@ -158,5 +160,52 @@ export async function toggleClientDisabled(clientId: string, disabled: boolean) 
     }
 
     revalidatePath("/admin/clients");
+    return { success: true };
+}
+
+/**
+ * Same admin gate the offers/pricing-tier actions use: the caller must be a
+ * row in `admin_users`, matched on either their email or their Clerk id.
+ */
+async function callerIsAdmin(): Promise<boolean> {
+    const { userId } = await auth();
+    if (!userId) return false;
+    const user = await currentUser();
+    const email = user?.emailAddresses[0]?.emailAddress;
+    return (!!email && (await isAdmin(email))) || (await isAdmin(userId));
+}
+
+/**
+ * Archive a client, or restore one from the archive.
+ *
+ * Archiving is a VIEW state for the admin panel only — the client drops out of
+ * the default Admin → Clients grid and the onboarding queue so a long list of
+ * dead accounts stops getting in the way. It deliberately does NOT change
+ * access: `disabled` is what blocks the dashboard, and an archived client that
+ * was never disabled keeps working exactly as before. The archive dialog warns
+ * when the two disagree so nothing goes quiet by accident.
+ */
+export async function setClientArchived(clientId: string, archived: boolean) {
+    if (!(await callerIsAdmin())) {
+        return { success: false, error: "Not authorized" };
+    }
+
+    const { error } = await supabase
+        .from("clients")
+        .update({ archived_at: archived ? new Date().toISOString() : null })
+        .eq("id", clientId);
+
+    if (error) {
+        console.error("Archive client error:", error);
+        return { success: false, error: error.message };
+    }
+
+    await auditLog(
+        archived ? "archive_client" : "unarchive_client",
+        { type: "client", id: clientId }
+    );
+
+    revalidatePath("/admin/clients");
+    revalidatePath("/admin/onboarding");
     return { success: true };
 }

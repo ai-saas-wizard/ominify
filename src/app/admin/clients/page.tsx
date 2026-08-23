@@ -1,9 +1,10 @@
 import { supabase } from "@/lib/supabase";
 import { secretLastChars } from "@/lib/encryption-helpers";
-import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap, Tag, Layers } from "lucide-react";
+import { Users, Key, CreditCard, Umbrella, CheckCircle, Clock, Zap, Tag, Layers, Archive } from "lucide-react";
 import Link from "next/link";
 import { CreateClientDialog } from "@/components/admin/create-client-dialog";
 import { DisableClientButton } from "@/components/admin/disable-client-button";
+import { ArchiveClientButton } from "@/components/admin/archive-client-button";
 import { ClientCard } from "@/components/admin/client-card";
 import { Badge } from "@/components/ui/badge";
 import { SubscriptionBadge } from "@/components/admin/subscription-badge";
@@ -27,6 +28,7 @@ interface EnrichedClient {
     email: string | null;
     account_type: string;
     disabled: boolean | null;
+    archived_at: string | null;
     subscription_grandfathered: boolean | null;
     pricing_tier_id: string | null;
     signup_offer_id: string | null;
@@ -175,6 +177,7 @@ async function getClients(): Promise<EnrichedClient[]> {
                 email: safeClient.email,
                 account_type: safeClient.account_type,
                 disabled: safeClient.disabled,
+                archived_at: safeClient.archived_at ?? null,
                 subscription_grandfathered: safeClient.subscription_grandfathered,
                 pricing_tier_id: safeClient.pricing_tier_id ?? null,
                 signup_offer_id: safeClient.signup_offer_id ?? null,
@@ -298,22 +301,39 @@ function StatusDetail({ client }: { client: EnrichedClient }) {
     return null;
 }
 
-export default async function AdminClientsPage() {
-    const [clients, { tierOptions, offerOptions }] = await Promise.all([
+export default async function AdminClientsPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ view?: string }>;
+}) {
+    const [{ view }, clients, { tierOptions, offerOptions }] = await Promise.all([
+        searchParams,
         getClients(),
         getPlanOptions(),
     ]);
 
-    const customClients = clients.filter((c) => c.account_type === "CUSTOM");
-    const umbrellaClients = clients.filter((c) => c.account_type === "UMBRELLA");
+    // Archived clients are hidden by default and live behind their own tab.
+    const showArchived = view === "archived";
+    const activeCount = clients.filter((c) => !c.archived_at).length;
+    const archivedCount = clients.length - activeCount;
+
+    const visibleClients = clients.filter((c) =>
+        showArchived ? !!c.archived_at : !c.archived_at
+    );
+    const customClients = visibleClients.filter((c) => c.account_type === "CUSTOM");
+    const umbrellaClients = visibleClients.filter((c) => c.account_type === "UMBRELLA");
 
     return (
         <div className="p-4 lg:p-8 space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Clients</h2>
+                    <h2 className="text-2xl md:text-3xl font-bold tracking-tight">
+                        {showArchived ? "Archived Clients" : "Clients"}
+                    </h2>
                     <p className="text-muted-foreground">
-                        Manage your agency clients.
+                        {showArchived
+                            ? "Hidden from the main list. Restore any of them at any time."
+                            : "Manage your agency clients."}
                         {umbrellaClients.length > 0 && (
                             <span className="ml-2 text-emerald-600">
                                 {umbrellaClients.length} Umbrella · {customClients.length} Custom
@@ -333,6 +353,33 @@ export default async function AdminClientsPage() {
                 </div>
             </div>
 
+            {/* Active / Archived tabs */}
+            <div className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
+                <Link
+                    href="/admin/clients"
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        showArchived
+                            ? "text-gray-500 hover:text-gray-900"
+                            : "bg-white text-gray-900 shadow-sm"
+                    }`}
+                >
+                    Active
+                    <span className="ml-1.5 text-gray-400">{activeCount}</span>
+                </Link>
+                <Link
+                    href="/admin/clients?view=archived"
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        showArchived
+                            ? "bg-white text-gray-900 shadow-sm"
+                            : "text-gray-500 hover:text-gray-900"
+                    }`}
+                >
+                    <Archive className="w-3.5 h-3.5" />
+                    Archived
+                    <span className="text-gray-400">{archivedCount}</span>
+                </Link>
+            </div>
+
             {/* ── UMBRELLA CLIENTS ── */}
             {umbrellaClients.length > 0 && (
                 <div className="space-y-3">
@@ -342,7 +389,7 @@ export default async function AdminClientsPage() {
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {umbrellaClients.map((client, i) => (
-                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} variant="umbrella">
+                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} archived={!!client.archived_at} variant="umbrella">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-emerald-50 text-emerald-600"}`}>
@@ -359,6 +406,11 @@ export default async function AdminClientsPage() {
                                                         DISABLED
                                                     </Badge>
                                                 )}
+                                                {client.archived_at && (
+                                                    <Badge className="text-[10px] px-1.5 py-0 bg-gray-100 text-gray-600 border-gray-200">
+                                                        ARCHIVED
+                                                    </Badge>
+                                                )}
                                                 <SubscriptionBadge
                                                     clientId={client.id}
                                                     accountType={client.account_type}
@@ -371,7 +423,15 @@ export default async function AdminClientsPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    <DisableClientButton clientId={client.id} clientName={client.name ?? "Client"} disabled={!!client.disabled} />
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <DisableClientButton clientId={client.id} clientName={client.name ?? "Client"} disabled={!!client.disabled} />
+                                        <ArchiveClientButton
+                                            clientId={client.id}
+                                            clientName={client.name ?? "Client"}
+                                            archived={!!client.archived_at}
+                                            clientDisabled={!!client.disabled}
+                                        />
+                                    </div>
                                 </div>
 
                                 {/* Plan + change plan trigger */}
@@ -439,7 +499,21 @@ export default async function AdminClientsPage() {
                     </h3>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {clients.length === 0 ? (
+                    {visibleClients.length === 0 && showArchived ? (
+                        <div className="col-span-full h-[300px] flex flex-col items-center justify-center border border-dashed rounded-xl bg-gray-50/50">
+                            <Archive className="w-12 h-12 text-gray-300 mb-4" />
+                            <h3 className="text-lg font-medium text-gray-900">Nothing archived</h3>
+                            <p className="text-gray-500 mb-4">
+                                Archive a client from the active list to tuck it away here.
+                            </p>
+                            <Link
+                                href="/admin/clients"
+                                className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                            >
+                                Back to active clients →
+                            </Link>
+                        </div>
+                    ) : visibleClients.length === 0 ? (
                         <div className="col-span-full h-[300px] flex flex-col items-center justify-center border border-dashed rounded-xl bg-gray-50/50">
                             <Users className="w-12 h-12 text-gray-300 mb-4" />
                             <h3 className="text-lg font-medium text-gray-900">No clients yet</h3>
@@ -447,11 +521,13 @@ export default async function AdminClientsPage() {
                         </div>
                     ) : customClients.length === 0 && umbrellaClients.length > 0 ? (
                         <div className="col-span-full h-[120px] flex flex-col items-center justify-center border border-dashed rounded-xl bg-gray-50/50">
-                            <p className="text-gray-400 text-sm">No Type A clients yet.</p>
+                            <p className="text-gray-400 text-sm">
+                                No {showArchived ? "archived " : ""}Type A clients{showArchived ? "." : " yet."}
+                            </p>
                         </div>
                     ) : (
                         customClients.map((client, i) => (
-                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} variant="custom">
+                            <ClientCard key={client.id} index={i} disabled={!!client.disabled} archived={!!client.archived_at} variant="custom">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${client.disabled ? "bg-red-50 text-red-400" : "bg-blue-50 text-blue-600"}`}>
@@ -468,6 +544,11 @@ export default async function AdminClientsPage() {
                                                         DISABLED
                                                     </Badge>
                                                 )}
+                                                {client.archived_at && (
+                                                    <Badge className="text-[10px] px-1.5 py-0 bg-gray-100 text-gray-600 border-gray-200">
+                                                        ARCHIVED
+                                                    </Badge>
+                                                )}
                                                 <SubscriptionBadge
                                                     clientId={client.id}
                                                     accountType={client.account_type}
@@ -480,7 +561,15 @@ export default async function AdminClientsPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    <DisableClientButton clientId={client.id} clientName={client.name ?? "Client"} disabled={!!client.disabled} />
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <DisableClientButton clientId={client.id} clientName={client.name ?? "Client"} disabled={!!client.disabled} />
+                                        <ArchiveClientButton
+                                            clientId={client.id}
+                                            clientName={client.name ?? "Client"}
+                                            archived={!!client.archived_at}
+                                            clientDisabled={!!client.disabled}
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="space-y-3 pt-3 border-t border-gray-100 mt-3">

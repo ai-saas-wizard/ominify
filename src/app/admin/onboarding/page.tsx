@@ -21,6 +21,7 @@ interface ClientRow {
     name: string;
     email: string;
     created_at: string;
+    archived_at: string | null;
 }
 
 async function getOnboardingQueue() {
@@ -43,16 +44,21 @@ async function getOnboardingQueue() {
     const clientIds = profilesData.map((p) => p.client_id);
     const { data: clients } = await supabase
         .from("clients")
-        .select("id, name, email, created_at")
+        .select("id, name, email, created_at, archived_at")
         .in("id", clientIds);
 
     const clientMap = new Map<string, ClientRow>();
     (clients ?? []).forEach((c) => clientMap.set((c as ClientRow).id, c as ClientRow));
 
-    const enriched = profilesData.map((p) => ({
-        ...p,
-        client: clientMap.get(p.client_id) ?? null,
-    }));
+    const enriched = profilesData
+        // An archived client is one the admin has deliberately put away, so it
+        // should not keep nagging from the onboarding queue either. Rows whose
+        // client row is missing entirely still show, same as before.
+        .filter((p) => !clientMap.get(p.client_id)?.archived_at)
+        .map((p) => ({
+            ...p,
+            client: clientMap.get(p.client_id) ?? null,
+        }));
 
     const booked = enriched
         .filter((r) => r.onboarding_path === "manual_call_booked")
