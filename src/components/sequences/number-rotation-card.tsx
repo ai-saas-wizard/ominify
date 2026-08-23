@@ -172,7 +172,7 @@ export function NumberRotationCard({
                     checked={enabled}
                     onCheckedChange={handleToggle}
                     disabled={saving || loading}
-                    className="h-5 w-9 shrink-0 data-[state=checked]:bg-emerald-600"
+                    className="shrink-0 data-[state=checked]:bg-emerald-600"
                 />
             </div>
 

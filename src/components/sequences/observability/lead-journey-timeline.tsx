@@ -24,8 +24,10 @@ const CHANNEL_META: Record<string, { icon: typeof MessageSquare; label: string }
     voice_call: { icon: Phone, label: "Voice" },
 };
 
-// One hue per meaning: emerald=success, red=failed, amber=confusion/objection,
-// sky=in-flight, neutral for the rest.
+// The page-wide palette, applied to a single touch rather than a whole lead:
+// emerald=went out fine, red=failed, blue=the lead responded, amber=objection,
+// neutral=queued or nothing yet. Blue never means "in flight" here — it belongs
+// to the lead's own replies, exactly as in the lead list (see enrollment-status).
 const SENTIMENT_COLORS: Record<string, string> = {
     positive: "bg-emerald-50 text-emerald-700",
     interested: "bg-emerald-50 text-emerald-700",
@@ -39,8 +41,10 @@ function statusStyle(status: string): { dot: string; text: string } {
     if (status === "delivered" || status === "success" || status === "completed" || status === "sent")
         return { dot: "bg-emerald-500", text: "text-emerald-700" };
     if (status === "failed") return { dot: "bg-red-500", text: "text-red-700" };
+    // Queued, not yet dispatched — neutral says "nothing has happened" more
+    // honestly than a color that implies an outcome.
     if (status === "pending" || status === "executing")
-        return { dot: "bg-sky-500", text: "text-sky-700" };
+        return { dot: "bg-gray-300", text: "text-gray-500" };
     return { dot: "bg-gray-300", text: "text-gray-500" };
 }
 
@@ -414,26 +418,26 @@ export function LeadJourneyTimeline({
                     interaction.content_body?.substring(0, 160) ||
                     (interaction.channel === "voice" ? "Voice call" : "No content");
                 return (
-                    <TimelineRow key={key} dot={isOutbound ? "bg-gray-300" : "bg-sky-500"}>
+                    <TimelineRow key={key} dot={isOutbound ? "bg-gray-300" : "bg-blue-600"}>
                         <div
                             className={cn(
                                 "cursor-pointer rounded-lg border px-3.5 py-3 transition-colors duration-150",
                                 isOutbound
                                     ? "border-gray-200 bg-gray-50/80 hover:border-gray-300"
-                                    : "border-sky-200 bg-sky-50/40 hover:border-sky-300"
+                                    : "border-blue-200 bg-blue-50/40 hover:border-blue-300"
                             )}
                             onClick={() => setExpandedKey(isExpanded ? null : key)}
                         >
                             <div className="flex flex-wrap items-center gap-2">
                                 <ChannelLabel
                                     channel={channelKey(interaction.channel)}
-                                    className={isOutbound ? "text-gray-700" : "text-sky-700"}
+                                    className={isOutbound ? "text-gray-700" : "text-blue-700"}
                                 />
                                 <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
                                     {isOutbound ? (
                                         <ArrowUpRight className="h-3 w-3 text-gray-400" />
                                     ) : (
-                                        <ArrowDownLeft className="h-3 w-3 text-sky-600" />
+                                        <ArrowDownLeft className="h-3 w-3 text-blue-600" />
                                     )}
                                     {isOutbound ? "Sent" : "Lead replied"}
                                 </span>

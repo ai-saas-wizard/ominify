@@ -161,18 +161,40 @@ export function DynamicSequenceView({
         return `${Math.round((n / stats.total) * 100)}%`;
     }
 
+    // Dots come from the same map the lead rows use, so a status can never read
+    // as one color up here and another down there.
     const kpis = [
         { label: "Enrolled", value: stats.total, sub: "leads", dot: "bg-gray-300" },
-        { label: "Active", value: stats.active, sub: share(stats.active), dot: "bg-sky-500" },
-        { label: "Replied", value: stats.replied, sub: share(stats.replied), dot: "bg-gray-900" },
-        { label: "Booked", value: stats.booked, sub: share(stats.booked), dot: "bg-emerald-500" },
+        {
+            label: "Active",
+            value: stats.active,
+            sub: share(stats.active),
+            dot: ENROLLMENT_STATUS.active.dot,
+        },
+        {
+            label: "Replied",
+            value: stats.replied,
+            sub: share(stats.replied),
+            dot: ENROLLMENT_STATUS.replied.dot,
+        },
+        {
+            label: "Booked",
+            value: stats.booked,
+            sub: share(stats.booked),
+            dot: ENROLLMENT_STATUS.booked.dot,
+        },
         {
             label: "Completed",
             value: stats.completed,
             sub: share(stats.completed),
-            dot: "bg-gray-300",
+            dot: ENROLLMENT_STATUS.completed.dot,
         },
-        { label: "Failed", value: stats.failed, sub: share(stats.failed), dot: "bg-red-500" },
+        {
+            label: "Failed",
+            value: stats.failed,
+            sub: share(stats.failed),
+            dot: ENROLLMENT_STATUS.failed.dot,
+        },
     ];
 
     const strategy = sequence.sequence_strategy || {};
