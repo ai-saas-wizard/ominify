@@ -60,7 +60,6 @@ export function WorkspaceDisplay({
             <div className="p-4 border-b border-gray-100">
                 <div className="animate-pulse flex items-center gap-2.5 px-2 py-1.5">
                     <div className="w-8 h-8 rounded bg-gray-200" />
-                    <div className="h-3 w-28 bg-gray-200 rounded" />
                 </div>
             </div>
         );
@@ -79,6 +78,7 @@ export function WorkspaceDisplay({
                         : ''
                     }`}
                 onClick={() => hasMultipleClients && setIsOpen(!isOpen)}
+                title={hasMultipleClients ? undefined : displayName}
             >
                 <div className="flex min-w-0 items-center gap-2.5">
                     <Image
@@ -89,11 +89,14 @@ export function WorkspaceDisplay({
                         className="h-8 w-8 flex-none object-contain"
                         priority
                     />
-                    {/* One line now that the bell has moved out of this row, so a
-                        real business name no longer wraps. */}
-                    <div className="min-w-0 truncate text-sm font-semibold text-gray-900">
-                        {displayName}
-                    </div>
+                    {/* The name is dropped when there is only one workspace, where
+                        it is decoration. With several, it is the only thing telling
+                        you whose leads you are about to act on, so it stays. */}
+                    {hasMultipleClients && (
+                        <div className="min-w-0 truncate text-sm font-semibold text-gray-900">
+                            {displayName}
+                        </div>
+                    )}
                 </div>
                 {hasMultipleClients && (
                     <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
