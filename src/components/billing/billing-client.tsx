@@ -259,7 +259,7 @@ export function BillingClient({
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-                <div className="flex max-w-[1180px] flex-col gap-4 px-6 pb-10 pt-5">
+                <div className="flex flex-col gap-4 px-6 pb-10 pt-5">
                     {/* ---- Balance ---- */}
                     <section className={CARD}>
                         <div className="grid grid-cols-[minmax(220px,300px)_minmax(0,1fr)] items-start gap-7 px-[18px] pb-[15px] pt-4">
