@@ -204,6 +204,23 @@ ${firstTouchRule}
 
 6. POSITIVE PROGRESSION: When the lead engages positively, the AI escalates toward the success condition on the SAME channel they replied on, then ends with a confirmation outbound.
 
+STEP BRIEF RULES (these become the LIVE campaign, read carefully):
+
+Each outbound entry's step_brief is persisted as the real plan and applied to
+EVERY lead — including the majority who never reply. It is authored once, from
+this one simulated conversation, and then reused blind.
+
+So a brief must describe what WE do at that step, never what the lead did:
+- NEVER write an intent or cta that presupposes a reply, an agreement, an
+  appointment, or a booking. "confirm appointment", "finalize booking",
+  "follow up on our chat" are all invalid — they produce messages telling a
+  silent lead they have an appointment they never made.
+- Write briefs that stay true whether or not the lead has ever responded:
+  "share one concrete reason it is worth a look", "offer the booking link",
+  "final polite close".
+- The message TEXT in this simulation may reflect this scenario's outcome; the
+  step_brief may not.
+
 CONTENT RULES:
 - Use ONLY channels from the enabled list: ${enabledChannels.join(", ")}
 - Messages should sound natural and match the "${tenant.brandVoice}" brand voice

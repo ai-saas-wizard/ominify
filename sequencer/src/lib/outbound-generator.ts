@@ -255,7 +255,32 @@ function buildGenerationRequest(params: {
 }): string {
     const { channel, brief, conversationContext, contactName, contact, enrollment, step, emotionalState } = params;
 
-    let request = `STEP BRIEF:\n`;
+    // The brief is an INTENT, not a record of events. It is authored once when
+    // the sequence is created — from a simulated happy path — and then applied
+    // to every lead, including ones who never replied. A brief that said
+    // "confirm appointment" produced "just confirming our appointment" to two
+    // leads who had neither booked nor answered. State the ground truth first
+    // and rank it above the brief, so a bad brief degrades into a weaker
+    // message rather than a false one.
+    const replied = !!(enrollment as any).contact_replied;
+    const booked = !!(enrollment as any).appointment_booked;
+    const priorTouches = conversationContext?.interaction_count?.total ?? 0;
+    const inboundCount = conversationContext?.interaction_count?.inbound ?? 0;
+
+    let request = `GROUND TRUTH — what has ACTUALLY happened with this lead:\n`;
+    request += `- They have replied to us: ${replied || inboundCount > 0 ? 'YES' : 'NO'}\n`;
+    request += `- They have booked anything: ${booked ? 'YES' : 'NO'}\n`;
+    request += `- Touches so far: ${priorTouches}\n`;
+    request += `\nHARD RULE: never state or imply anything above is true when it is not.\n`;
+    if (!booked) {
+        request += `There is NO appointment, meeting, call or booking. Do not "confirm" one, do not reference one, do not say you are looking forward to it.\n`;
+    }
+    if (!replied && inboundCount === 0) {
+        request += `They have NEVER responded. Do not reference a prior chat, conversation, discussion, or anything they supposedly said or agreed to.\n`;
+    }
+    request += `If the STEP BRIEF below assumes something that contradicts the ground truth, follow the ground truth and pursue the brief's underlying goal instead.\n`;
+
+    request += `\nSTEP BRIEF (the goal to pursue, NOT a description of events):\n`;
     request += `- Intent: ${brief.intent}\n`;
     request += `- Key Points: ${brief.key_points.join(', ')}\n`;
     request += `- CTA: ${brief.cta}\n`;
