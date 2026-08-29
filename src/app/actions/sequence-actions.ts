@@ -3237,6 +3237,11 @@ function explainEvent(
                 severity: "warn",
                 explanation: "Contact is opted out, so nothing was sent.",
             };
+        case "skipped_meeting_booked":
+            return {
+                severity: "ok",
+                explanation: "Lead already booked a meeting on Calendly — sequence stopped.",
+            };
         case "skipped":
             return {
                 severity: "warn",

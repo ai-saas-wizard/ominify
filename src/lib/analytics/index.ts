@@ -68,6 +68,7 @@ const BLOCKED_LABELS: Record<string, { label: string; tone: BlockedReason["tone"
     skipped_capacity: { label: "Skipped, daily cap reached", tone: "amber" },
     skipped_opt_out: { label: "Skipped, opted out", tone: "muted" },
     skipped_conditions: { label: "Skipped, conditions not met", tone: "muted" },
+    skipped_meeting_booked: { label: "Stopped, meeting booked", tone: "emerald" },
     held_contact_fatigue: { label: "Held, contact fatigue", tone: "amber" },
     blocked_placeholder: { label: "Blocked, placeholder in body", tone: "red" },
     blocked_empty_body: { label: "Blocked, empty body", tone: "red" },
