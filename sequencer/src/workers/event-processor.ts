@@ -45,7 +45,7 @@ import {
 } from '../lib/opt-out.js';
 import { getTenantCapableChannels } from '../lib/channel-capabilities.js';
 import { isTCPACompliant, getNextBusinessHoursStart } from '../lib/compliance.js';
-import { computeStepAttribution } from '../lib/outcome-learning.js';
+import { computeStepAttribution, attributeVariantOutcome } from '../lib/outcome-learning.js';
 import { phoneLookupCandidates } from '../lib/phone.js';
 import {
     generateNextStep,
@@ -139,39 +139,6 @@ async function updateEnrollmentStatus(
             updated_at: new Date().toISOString(),
         })
         .eq('id', enrollmentId);
-}
-
-/**
- * A/B variant attribution (last-touch): credit the most recently sent
- * variant for this enrollment with a reply or a conversion. Closes the
- * learning loop — step_variants counters were previously written nowhere.
- */
-async function attributeVariantOutcome(
-    enrollmentId: string,
-    kind: 'reply' | 'conversion'
-): Promise<void> {
-    const { data: logRow, error: logErr } = await supabase
-        .from('sequence_execution_log')
-        .select('variant_id')
-        .eq('enrollment_id', enrollmentId)
-        .not('variant_id', 'is', null)
-        .order('executed_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (logErr) {
-        console.error(`[EVENT] Variant attribution lookup failed for enrollment ${enrollmentId}:`, logErr);
-        return;
-    }
-    if (!logRow?.variant_id) return;
-
-    const rpcName = kind === 'reply' ? 'increment_variant_replies' : 'increment_variant_conversions';
-    const { error: rpcErr } = await supabase.rpc(rpcName, { p_variant_id: logRow.variant_id });
-    if (rpcErr) {
-        console.error(`[EVENT] ${rpcName} failed for variant ${logRow.variant_id}:`, rpcErr);
-    } else {
-        console.log(`[EVENT] Variant ${logRow.variant_id} credited with ${kind} (enrollment ${enrollmentId})`);
-    }
 }
 
 /**
