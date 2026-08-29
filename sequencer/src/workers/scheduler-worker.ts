@@ -42,7 +42,10 @@ import {
 import {
     selectVariant,
     recordVariantSent,
+    computeStepAttribution,
+    attributeVariantOutcome,
 } from '../lib/outcome-learning.js';
+import { checkLeadBookedOnCalendly } from '../lib/calendly-booking-check.js';
 import {
     generateNextStep,
     getExecutedSteps,
@@ -485,6 +488,64 @@ async function processStep(ctx: EnrollmentWithContext): Promise<void> {
             console.error(`[SCHEDULER] Failed to log opt-out skip for enrollment ${enrollment.id}:`, logErr);
         }
         return;
+    }
+
+    // 0c. Meeting-booked gate — a lead who booked on the tenant's Calendly
+    // page (via the booking link we text/email) must not keep getting
+    // follow-ups. Polled right before dispatch; negative results are
+    // Redis-cached 15 min inside the check. Fail-open: 'unavailable'
+    // (no Calendly connection, no email, API error) falls through to send.
+    if (!isTestEnrollmentEarly(enrollment) && contact.email) {
+        const bookedResult = await checkLeadBookedOnCalendly(
+            enrollment.tenant_id,
+            contact.email,
+            enrollment.enrolled_at
+        );
+        if (bookedResult === 'booked') {
+            console.log(
+                `[SCHEDULER] Contact ${contact.id} already booked on Calendly — marking enrollment ${enrollment.id} as booked`
+            );
+            const { error: bookErr } = await supabase
+                .from('sequence_enrollments')
+                .update({
+                    status: 'booked',
+                    appointment_booked: true,
+                    completed_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', enrollment.id);
+            if (bookErr) {
+                // We KNOW they booked — never fall through to a send. Park
+                // and let the next claim retry the status write.
+                console.error(`[SCHEDULER] Failed to mark enrollment ${enrollment.id} booked:`, bookErr);
+                await rescheduleStep(enrollment.id, new Date(Date.now() + 10 * 60_000));
+                return;
+            }
+            const { error: bookLogErr } = await supabase.from('sequence_execution_log').insert({
+                enrollment_id: enrollment.id,
+                step_id: step.id,
+                channel: step.channel,
+                action: 'skipped_meeting_booked',
+                provider_id: null,
+                provider_response: { source: 'calendly_poll', invitee_email: contact.email },
+                call_status: 'skipped',
+                executed_at: new Date().toISOString(),
+            });
+            if (bookLogErr) {
+                console.error(`[SCHEDULER] Failed to log meeting-booked skip for enrollment ${enrollment.id}:`, bookLogErr);
+            }
+            try {
+                await computeStepAttribution(enrollment.id, 'booked');
+            } catch (err) {
+                console.error('[SCHEDULER] Attribution computation failed:', err);
+            }
+            try {
+                await attributeVariantOutcome(enrollment.id, 'conversion');
+            } catch (err) {
+                console.error('[SCHEDULER] Variant attribution failed:', err);
+            }
+            return;
+        }
     }
 
     // 1. Check skip conditions
