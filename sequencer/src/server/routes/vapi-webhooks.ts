@@ -19,6 +19,7 @@ import { eventQueue, redis } from '../../lib/redis.js';
 import { concurrencyManager } from '../../lib/concurrency-manager.js';
 import { supabase } from '../../lib/db.js';
 import { requireVapiSecret } from '../middleware/webhook-auth.js';
+import { refineDisposition } from '../../lib/call-classification.js';
 import type { EventJobPayload } from '../../lib/types.js';
 
 interface VapiArtifactMessage {
@@ -470,7 +471,9 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                         const transcript = extractTranscript(payload);
                         const appointmentBooked = detectAppointmentBooked(payload, transcript);
                         const wasTransferred = detectCallTransferred(payload);
-                        const disposition = getDisposition(endedReason);
+                        // `endedReason` alone calls every voicemail pickup an
+                        // answered call; the transcript settles it.
+                        const disposition = refineDisposition(getDisposition(endedReason), transcript, duration);
 
                         // Resolve stepId from DB for self-healing support
                         const stepId = await resolveStepId(metadata.enrollmentId);
@@ -540,7 +543,11 @@ export async function vapiWebhooks(fastify: FastifyInstance) {
                     const appointmentBooked = detectAppointmentBooked(payload, transcript);
                     const wasTransferred = detectCallTransferred(payload);
                     const endedReason = call.endedReason || payload.message.endedReason;
-                    const disposition = getDisposition(endedReason);
+                    const disposition = refineDisposition(
+                        getDisposition(endedReason),
+                        transcript || call.transcript,
+                        duration || call.duration
+                    );
 
                     // Resolve stepId from DB for self-healing support
                     const stepId = await resolveStepId(metadata.enrollmentId);
