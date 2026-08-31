@@ -58,6 +58,7 @@ export type UniboxStatus =
     | "booked"
     | "awaiting_reply"
     | "no_answer"
+    | "not_interested"
     | "opted_out"
     | "new";
 
@@ -141,6 +142,12 @@ export const STATUS_META: Record<
         dot: "bg-gray-300",
         text: "text-gray-500",
         chip: "bg-gray-50 text-gray-600 border-gray-200",
+    },
+    not_interested: {
+        label: "Not interested",
+        dot: "bg-rose-300",
+        text: "text-rose-600",
+        chip: "bg-rose-50 text-rose-600 border-rose-200",
     },
     opted_out: {
         label: "Opted out",

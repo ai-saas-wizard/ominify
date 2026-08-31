@@ -13,10 +13,9 @@ import type {
     UniboxThread,
 } from "./types";
 import {
-    dispositionFromCall,
+    classifyVoiceCall,
     formatDuration,
     DISPOSITION_LABEL,
-    normalizeDisposition,
     normalizePhone,
     parseTranscript,
 } from "./parse";
@@ -108,11 +107,18 @@ const ENROLLMENT_WORD: Record<string, string> = {
 
 const ms = (iso: string) => new Date(iso).getTime();
 
-/** The lead engaged: they wrote to us, called us, or picked up when we called. */
+/**
+ * The lead engaged: they wrote to us, or a person was actually on the call.
+ *
+ * A connected call is not engagement on its own — half of them are voicemail
+ * boxes and instant hang-ups. `classifyVoiceCall` has already demoted those,
+ * so only `answered` (a human spoke) and `transferred` (handed to a human)
+ * count here.
+ */
 export function isEngagement(e: UniboxEvent): boolean {
     if (e.isLive) return false;
-    if (e.direction === "inbound") return true;
-    return e.kind === "voice" && e.disposition === "answered";
+    if (e.kind !== "voice") return e.direction === "inbound";
+    return e.disposition === "answered" || e.disposition === "transferred";
 }
 
 function previewFor(e: UniboxEvent): string {
@@ -177,12 +183,22 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             (linked && contactById.get(linked.contact_id)) ||
             (phone ? contactByPhone.get(phone) : undefined) ||
             null;
-        const key = contact ? contact.id : phone ? `phone:${phone}` : "unknown";
+        // A call with no contact and no caller ID is its own thread — bucketing
+        // them all under one key produced a single fake lead with hundreds of
+        // touches on accounts where inbound numbers go unrecorded.
+        const key = contact ? contact.id : phone ? `phone:${phone}` : `call:${call.vapi_call_id}`;
         if (linked) consumed.add(linked.id);
 
         const rawTranscript = call.transcript || linked?.content_body || null;
-        const disposition =
-            normalizeDisposition(linked?.call_disposition) ?? dispositionFromCall(call.status, call.ended_reason);
+        const transcript = parseTranscript(rawTranscript);
+        const durationSeconds = call.duration_seconds ?? linked?.call_duration_seconds ?? undefined;
+        const disposition = classifyVoiceCall({
+            recorded: linked?.call_disposition ?? linked?.outcome,
+            status: call.status,
+            endedReason: call.ended_reason,
+            transcript,
+            durationSeconds,
+        });
 
         push(key, contact, phone ?? normalizePhone(contact?.phone), {
             id: `call:${call.vapi_call_id}`,
@@ -191,9 +207,9 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             at,
             body: rawTranscript ?? undefined,
             summary: call.summary || linked?.content_summary || undefined,
-            transcript: parseTranscript(rawTranscript),
+            transcript,
             recordingUrl: call.recording_url || undefined,
-            durationSeconds: call.duration_seconds ?? linked?.call_duration_seconds ?? undefined,
+            durationSeconds,
             disposition,
             outcome: linked?.outcome ?? undefined,
             sentiment: linked?.sentiment ?? undefined,
@@ -211,6 +227,7 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
         const contact = contactById.get(i.contact_id);
         if (!contact) continue;
         const isVoice = i.channel === "voice";
+        const transcript = isVoice ? parseTranscript(i.content_body) : undefined;
         push(contact.id, contact, normalizePhone(contact.phone), {
             id: `ix:${i.id}`,
             kind: i.channel,
@@ -219,10 +236,14 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             body: i.content_body ?? undefined,
             subject: i.content_subject ?? undefined,
             summary: i.content_summary ?? undefined,
-            transcript: isVoice ? parseTranscript(i.content_body) : undefined,
+            transcript,
             durationSeconds: i.call_duration_seconds ?? undefined,
             disposition: isVoice
-                ? normalizeDisposition(i.call_disposition) ?? normalizeDisposition(i.outcome) ?? "answered"
+                ? classifyVoiceCall({
+                      recorded: i.call_disposition ?? i.outcome,
+                      transcript,
+                      durationSeconds: i.call_duration_seconds,
+                  })
                 : undefined,
             outcome: i.outcome ?? undefined,
             sentiment: i.sentiment ?? undefined,
@@ -236,12 +257,14 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
     const latestEnrollment = new Map<string, EnrollmentRow>();
     const enrollmentBooked = new Set<string>();
     const enrollmentOptedOut = new Set<string>();
+    const enrollmentDeclined = new Set<string>();
     const enrollmentHot = new Set<string>();
     for (const e of enrollments) {
         const cur = latestEnrollment.get(e.contact_id);
         if (!cur || ms(e.enrolled_at ?? "0") > ms(cur.enrolled_at ?? "0")) latestEnrollment.set(e.contact_id, e);
         if (e.appointment_booked || e.status === "booked" || e.status === "converted") enrollmentBooked.add(e.contact_id);
         if ((e.completed_reason || "").includes("opted_out")) enrollmentOptedOut.add(e.contact_id);
+        if ((e.completed_reason || "") === "not_interested") enrollmentDeclined.add(e.contact_id);
         if (e.is_hot_lead) enrollmentHot.add(e.contact_id);
     }
 
@@ -259,26 +282,25 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
         const lastResponse = engagement[engagement.length - 1] ?? null;
         const last = events[events.length - 1];
 
-        const stepAfterResponse = lastResponse
-            ? events.some(
-                  (e) =>
-                      e.direction === "outbound" &&
-                      e.isSequenceStep &&
-                      !isEngagement(e) &&
-                      ms(e.at) > ms(lastResponse.at)
-              )
-            : false;
-
-        const optedOut =
+        // A hard opt-out (STOP, or the sequencer suppressing the contact) is a
+        // compliance fact. "No thanks" is a sales answer — both stop the
+        // sequence, but only one belongs under a red Opted-out badge.
+        const saidStop = events.some((e) => e.direction === "inbound" && e.intent === "stop");
+        const declined = events.some((e) => e.direction === "inbound" && e.intent === "not_interested");
+        const suppressed =
             !!contact?.opted_out_at ||
-            (contact ? enrollmentOptedOut.has(contact.id) : false) ||
-            events.some((e) => e.direction === "inbound" && e.intent === "stop");
+            (contact ? enrollmentOptedOut.has(contact.id) || enrollmentDeclined.has(contact.id) : false) ||
+            saidStop ||
+            declined;
+        const optedOut = saidStop || (contact ? enrollmentOptedOut.has(contact.id) : false) || (suppressed && !declined);
+        const notInterested = suppressed && !optedOut;
         const booked =
             events.some((e) => e.appointmentBooked) || (contact ? enrollmentBooked.has(contact.id) : false);
 
         // Interest is read off the lead's *latest* engagement — an earlier
         // "sounds good" is void once they say no — with the sequencer's
-        // hot-lead flag as a second source.
+        // hot-lead flag as a second source. The flag alone is never enough:
+        // it has fired on leads who never said a word.
         const saidNo = lastResponse?.intent === "not_interested" || lastResponse?.intent === "stop";
         const interested =
             !!lastResponse &&
@@ -287,11 +309,16 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
                 lastResponse.sentiment === "interested" ||
                 (contact ? enrollmentHot.has(contact.id) : false));
 
+        // Once a lead engages they stay engaged. Demoting them back to
+        // "Awaiting reply" the moment the next step fires hid every real
+        // replier inside the largest, least interesting bucket; "who owes a
+        // reply right now" is what `needsReply` is for.
         let status: UniboxStatus;
         if (optedOut) status = "opted_out";
+        else if (notInterested) status = "not_interested";
         else if (booked) status = "booked";
         else if (interested) status = "interested";
-        else if (lastResponse) status = stepAfterResponse ? "awaiting_reply" : "responded";
+        else if (lastResponse) status = "responded";
         else if (channelCounts.voice) status = "no_answer";
         else status = "awaiting_reply";
 
@@ -337,7 +364,9 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             preview: previewFor(last),
             needsReply: last.direction === "inbound" && last.kind !== "voice",
             appointmentBooked: booked,
-            optedOut,
+            // The do-not-contact flag covers both terminal answers; `status`
+            // is what distinguishes a STOP from a polite decline.
+            optedOut: suppressed,
             hasLiveCall: false,
             engagementScore: contact?.engagement_score ?? null,
             sentimentTrend: contact?.sentiment_trend ?? null,

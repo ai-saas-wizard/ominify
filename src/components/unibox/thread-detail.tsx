@@ -38,11 +38,22 @@ import { PulsingDot } from "./pulsing-dot";
 
 const DISPOSITION_TONE: Record<Disposition, string> = {
     answered: "bg-emerald-50 text-emerald-700",
+    transferred: "bg-blue-50 text-blue-700",
     voicemail: "bg-amber-50 text-amber-700",
     no_answer: "bg-gray-100 text-gray-500",
     busy: "bg-orange-50 text-orange-700",
     failed: "bg-red-50 text-red-600",
     live: "bg-emerald-500 text-white",
+};
+
+const DISPOSITION_ICON_TONE: Record<Disposition, string> = {
+    answered: "bg-emerald-50 text-emerald-600",
+    transferred: "bg-blue-50 text-blue-600",
+    voicemail: "bg-amber-50 text-amber-500",
+    no_answer: "bg-gray-100 text-gray-500",
+    busy: "bg-orange-50 text-orange-500",
+    failed: "bg-red-50 text-red-500",
+    live: "bg-emerald-100 text-emerald-600",
 };
 
 interface ThreadDetailProps {
@@ -478,15 +489,7 @@ function VoiceCard({ event, agentLabel, leadInitials }: { event: UniboxEvent; ag
     const isLive = !!event.isLive;
     const disposition = (event.disposition as Disposition | undefined) ?? (isLive ? "live" : "answered");
     const inbound = event.direction === "inbound";
-    const iconTone = isLive
-        ? "bg-emerald-100 text-emerald-600"
-        : disposition === "answered"
-          ? "bg-emerald-50 text-emerald-600"
-          : disposition === "voicemail"
-            ? "bg-amber-50 text-amber-500"
-            : disposition === "failed"
-              ? "bg-red-50 text-red-500"
-              : "bg-gray-100 text-gray-500";
+    const iconTone = isLive ? "bg-emerald-100 text-emerald-600" : DISPOSITION_ICON_TONE[disposition];
     const transcript = event.transcript ?? [];
 
     return (

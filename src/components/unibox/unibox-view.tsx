@@ -30,6 +30,7 @@ const STATUS_FILTERS: Array<{ key: StatusFilter; label: string }> = [
     { key: "booked", label: "Booked" },
     { key: "awaiting_reply", label: "Awaiting reply" },
     { key: "no_answer", label: "No answer" },
+    { key: "not_interested", label: "Not interested" },
     { key: "opted_out", label: "Opted out" },
 ];
 

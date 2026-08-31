@@ -14,6 +14,37 @@ import { UniboxPageClient } from "@/components/unibox/unibox-page-client";
 const CONTACT_COLS =
     "id, phone, name, email, custom_fields, engagement_score, sentiment_trend, pipeline_stage_id, opted_out_at";
 
+// PostgREST caps every response at 1000 rows regardless of the `limit()` we
+// ask for, so a bare `.limit(2000)` silently dropped the oldest touches and
+// left statuses derived from half a conversation. Pull explicit pages instead
+// and stop as soon as one comes back short.
+const PAGE_SIZE = 1000;
+const MAX_INTERACTIONS = 2000;
+
+async function fetchInteractions(clientId: string): Promise<InteractionRow[]> {
+    const rows: InteractionRow[] = [];
+    for (let from = 0; from < MAX_INTERACTIONS; from += PAGE_SIZE) {
+        const { data, error } = await supabase
+            .from("contact_interactions")
+            .select(
+                "id, contact_id, step_id, channel, direction, content_body, content_subject, content_summary, outcome, sentiment, intent, call_duration_seconds, call_disposition, appointment_booked, provider_id, created_at"
+            )
+            .eq("client_id", clientId)
+            .order("created_at", { ascending: false })
+            .range(from, Math.min(from + PAGE_SIZE, MAX_INTERACTIONS) - 1);
+        if (error) {
+            console.error("[UNIBOX] interactions fetch failed:", error.message);
+            break;
+        }
+        rows.push(...((data ?? []) as InteractionRow[]));
+        if ((data?.length ?? 0) < PAGE_SIZE) return rows;
+    }
+    console.warn(
+        `[UNIBOX] client ${clientId} has more than ${MAX_INTERACTIONS} interactions; older touches are not shown.`
+    );
+    return rows;
+}
+
 // PostgREST `in()` filters ride in the query string, so large id lists are
 // split into URL-safe batches and fetched concurrently.
 function chunk<T>(items: T[], size: number): T[][] {
@@ -116,7 +147,7 @@ export default async function UniboxPage({
         await syncVapiCallsForClient(clientId, agentRows);
     }
 
-    const [callsRes, interactionsRes] = await Promise.all([
+    const [callsRes, interactions] = await Promise.all([
         supabase
             .from("calls")
             .select(
@@ -126,21 +157,12 @@ export default async function UniboxPage({
             .eq("is_hidden", false)
             .order("started_at", { ascending: false, nullsFirst: false })
             .limit(500),
-        supabase
-            .from("contact_interactions")
-            .select(
-                "id, contact_id, step_id, channel, direction, content_body, content_subject, content_summary, outcome, sentiment, intent, call_duration_seconds, call_disposition, appointment_booked, provider_id, created_at"
-            )
-            .eq("client_id", clientId)
-            .order("created_at", { ascending: false })
-            .limit(2000),
+        fetchInteractions(clientId),
     ]);
 
     if (callsRes.error) console.error("[UNIBOX] calls fetch failed:", callsRes.error.message);
-    if (interactionsRes.error) console.error("[UNIBOX] interactions fetch failed:", interactionsRes.error.message);
 
     const calls = (callsRes.data ?? []) as unknown as CallRow[];
-    const interactions = (interactionsRes.data ?? []) as InteractionRow[];
 
     const contactIds = [...new Set(interactions.map((i) => i.contact_id))];
     const callPhones = [
