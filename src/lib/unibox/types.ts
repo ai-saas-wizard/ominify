@@ -42,6 +42,8 @@ export interface UniboxEvent {
     outcome?: string;
     sentiment?: string;
     intent?: string;
+    /** The analysis pass recorded something the lead said that reads as buying interest. */
+    hasBuyingSignal?: boolean;
 
     agentName?: string;
     agentVapiId?: string;

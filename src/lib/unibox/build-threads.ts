@@ -49,6 +49,26 @@ export interface InteractionRow {
     appointment_booked: boolean | null;
     provider_id: string | null;
     created_at: string;
+    /**
+     * Read out of `emotional_analysis` as JSON sub-fields. Voice rows never
+     * had `intent`/`sentiment` written to their own columns — the analysis
+     * only ever landed in the blob — so without these a phone conversation
+     * carries no intent at all.
+     */
+    ei_intent?: string | null;
+    ei_hot?: string | null;
+    ei_signals?: unknown;
+}
+
+/** `unknown` is the EI pass declining to answer, not an intent. */
+function eiIntentOf(row: { ei_intent?: string | null }): string | undefined {
+    const raw = row.ei_intent;
+    return raw && raw !== "unknown" ? raw : undefined;
+}
+
+/** The EI pass recorded something the lead said that reads as buying interest. */
+function hasBuyingSignal(row: { ei_signals?: unknown }): boolean {
+    return Array.isArray(row.ei_signals) && row.ei_signals.length > 0;
 }
 
 export interface CallRow {
@@ -213,7 +233,8 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             disposition,
             outcome: linked?.outcome ?? undefined,
             sentiment: linked?.sentiment ?? undefined,
-            intent: linked?.intent ?? undefined,
+            intent: linked?.intent ?? (linked ? eiIntentOf(linked) : undefined),
+            hasBuyingSignal: linked ? hasBuyingSignal(linked) : false,
             agentName: call.agents?.name ?? undefined,
             agentVapiId: call.agents?.vapi_id ?? undefined,
             providerId: call.vapi_call_id,
@@ -247,7 +268,8 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
                 : undefined,
             outcome: i.outcome ?? undefined,
             sentiment: i.sentiment ?? undefined,
-            intent: i.intent ?? undefined,
+            intent: i.intent ?? eiIntentOf(i),
+            hasBuyingSignal: hasBuyingSignal(i),
             providerId: i.provider_id ?? undefined,
             isSequenceStep: !!i.step_id,
             appointmentBooked: i.appointment_booked ?? false,
@@ -307,6 +329,12 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             !saidNo &&
             (lastResponse.intent === "interested" ||
                 lastResponse.sentiment === "interested" ||
+                // A recorded buying signal is the thing itself — "agreed to
+                // schedule a demo", "wants to see if it's cheaper than what
+                // they run". Those land on calls the analysis files under a
+                // softer intent like `needs_info`, so reading intent alone
+                // dropped them.
+                lastResponse.hasBuyingSignal === true ||
                 (contact ? enrollmentHot.has(contact.id) : false));
 
         // Once a lead engages they stay engaged. Demoting them back to

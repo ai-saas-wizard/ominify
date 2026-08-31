@@ -31,6 +31,8 @@ import {
     updateEnrollmentEI,
     generateEINotifications,
     createNotification,
+    intentColumnFor,
+    sentimentColumnFor,
 } from '../lib/emotional-intelligence.js';
 import { handleFailure } from '../lib/self-healer.js';
 import {
@@ -535,6 +537,13 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
                 appointment_booked: appointmentBooked || false,
                 objections_raised: callObjections.length ? callObjections : undefined,
                 key_topics: callKeyTopics.length ? callKeyTopics : undefined,
+                // The EI pass already worked this out; without copying it onto
+                // the column, voice rows carry a null intent forever and every
+                // reader that filters on intent — the inbox's Interested bucket
+                // included — is blind to what was said on the phone. SMS rows
+                // have always had this set by the SMS responder.
+                intent: intentColumnFor(eiAnalysis?.intent),
+                sentiment: sentimentColumnFor(eiAnalysis?.primary_emotion),
             });
 
             // Store EI analysis on the interaction

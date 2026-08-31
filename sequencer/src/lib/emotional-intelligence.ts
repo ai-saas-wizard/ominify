@@ -20,6 +20,8 @@ import type {
     SentimentTrend,
     PrimaryEmotion,
     InteractionChannel,
+    InteractionIntent,
+    InteractionSentiment,
     RecommendedTone,
     RecommendedAction,
     UrgencyLevel,
@@ -635,4 +637,45 @@ function validateAnalysis(analysis: EmotionalAnalysis): EmotionalAnalysis {
 function truncate(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + '...';
+}
+
+/**
+ * The EI pass and the `contact_interactions` columns use different, partly
+ * overlapping vocabularies. These translate one to the other so a call's
+ * analysis can be written onto `intent` / `sentiment` — voice rows used to
+ * leave both null, which left every reader that filters on intent blind to
+ * what happened on the phone.
+ *
+ * Anything without a faithful equivalent returns undefined rather than being
+ * forced into the nearest slot: filing an objection as `not_interested`, say,
+ * would bury a lead who was still engaging.
+ */
+const INTENT_TO_COLUMN: Record<string, InteractionIntent> = {
+    interested: 'interested',
+    ready_to_buy: 'interested',
+    not_interested: 'not_interested',
+    stop: 'stop',
+    reschedule: 'reschedule',
+    question: 'question',
+    needs_info: 'question',
+};
+
+const EMOTION_TO_SENTIMENT: Record<PrimaryEmotion, InteractionSentiment> = {
+    excited: 'positive',
+    interested: 'interested',
+    neutral: 'neutral',
+    hesitant: 'neutral',
+    frustrated: 'negative',
+    angry: 'negative',
+    dismissive: 'negative',
+    confused: 'confused',
+};
+
+export function intentColumnFor(intent: string | undefined | null): InteractionIntent | undefined {
+    if (!intent || intent === 'unknown') return undefined;
+    return INTENT_TO_COLUMN[intent];
+}
+
+export function sentimentColumnFor(emotion: PrimaryEmotion | undefined | null): InteractionSentiment | undefined {
+    return emotion ? EMOTION_TO_SENTIMENT[emotion] : undefined;
 }

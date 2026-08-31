@@ -27,7 +27,11 @@ async function fetchInteractions(clientId: string): Promise<InteractionRow[]> {
         const { data, error } = await supabase
             .from("contact_interactions")
             .select(
-                "id, contact_id, step_id, channel, direction, content_body, content_subject, content_summary, outcome, sentiment, intent, call_duration_seconds, call_disposition, appointment_booked, provider_id, created_at"
+                // The EI fields are pulled as JSON sub-fields, not the whole
+                // `emotional_analysis` blob — voice rows carry the intent only
+                // in there, and fetching the entire object per row is a lot of
+                // payload for three values.
+                "id, contact_id, step_id, channel, direction, content_body, content_subject, content_summary, outcome, sentiment, intent, call_duration_seconds, call_disposition, appointment_booked, provider_id, created_at, ei_intent:emotional_analysis->>intent, ei_hot:emotional_analysis->>is_hot_lead, ei_signals:emotional_analysis->buying_signals"
             )
             .eq("client_id", clientId)
             .order("created_at", { ascending: false })
