@@ -36,6 +36,14 @@ export const MAX_IMPORT_ROWS = 10_000;
 // round-trip well under request size limits (source_row JSONB can be multi-KB
 // per row) while amortising latency.
 const BATCH_SIZE = 500;
+// Max ids per `.in()` filter. PostgREST puts these in the URL query string,
+// which Supabase's gateway rejects past ~16 KB: 1000 UUIDs is a 400 Bad
+// Request, 500 fails at the socket, 300 works. 200 keeps a wide margin for
+// both UUIDs and phone numbers. Upserts are POST bodies and are unaffected.
+const LOOKUP_CHUNK = 200;
+// Supabase silently caps an un-paginated select at 1000 rows, so anything
+// that reads "all members" must page with .range().
+const PAGE_SIZE = 1000;
 const MAX_STORED_ERRORS = 200;
 
 type ColumnRole =
@@ -273,7 +281,7 @@ async function upsertContactsFromRows(
     }
     const phones = Array.from(dedupedByPhone.keys());
     const existingByPhone = new Map<string, ExistingContact>();
-    for (const batch of chunk(phones, 1000)) {
+    for (const batch of chunk(phones, LOOKUP_CHUNK)) {
         const { data, error } = await supabase
             .from('contacts')
             .select('id, phone, name, email, custom_fields, opted_out_at')
@@ -528,7 +536,7 @@ async function enrollUpsertedRows(
     // Bulk SELECT existing enrollments for every contact in one pass.
     const existingByContact = new Map<string, { id: string; status: string }>();
     const contactIds = upserted.map((u) => u.contactId);
-    for (const batch of chunk(contactIds, 1000)) {
+    for (const batch of chunk(contactIds, LOOKUP_CHUNK)) {
         const { data, error } = await supabase
             .from('sequence_enrollments')
             .select('id, contact_id, status')
@@ -679,7 +687,7 @@ async function bulkAdvanceContacts(clientId: string, contactIds: string[]): Prom
         moved_by: string | null;
     }
     const pcs: PcRow[] = [];
-    for (const batch of chunk(contactIds, 1000)) {
+    for (const batch of chunk(contactIds, LOOKUP_CHUNK)) {
         const { data } = await supabase
             .from('pipeline_contacts')
             .select('id, pipeline_id, contact_id, stage_id, moved_by')
@@ -781,7 +789,7 @@ async function bulkAdvanceContacts(clientId: string, contactIds: string[]): Prom
         }
     }
     for (const { stageId, ids } of updatesByStage.values()) {
-        for (const batch of chunk(ids, 500)) {
+        for (const batch of chunk(ids, LOOKUP_CHUNK)) {
             const { error } = await supabase
                 .from('pipeline_contacts')
                 .update({ stage_id: stageId, moved_at: now, moved_by: 'auto' })
@@ -803,7 +811,7 @@ async function bulkAdvanceContacts(clientId: string, contactIds: string[]): Prom
         contactsByStage.get(stageId)!.push(contactId);
     }
     for (const [stageId, ids] of contactsByStage) {
-        for (const batch of chunk(ids, 500)) {
+        for (const batch of chunk(ids, LOOKUP_CHUNK)) {
             const { error } = await supabase
                 .from('contacts')
                 .update({
@@ -922,12 +930,21 @@ export async function processListEnroll(
         throw new Error('List has no phone column mapping. Edit the list mapping before enrolling.');
     }
 
-    const { data: members, error: membersErr } = await supabase
-        .from('contact_list_members')
-        .select('contact_id, source_row, contacts(id, phone, name, email, custom_fields)')
-        .eq('list_id', listId);
-    if (membersErr) throw new Error(`Failed to load members: ${membersErr.message}`);
-    if (!members || members.length === 0) {
+    // Page through members — a plain select silently stops at 1000 rows,
+    // which would enroll only the first third of a 3000-contact list.
+    const members: any[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+        const { data: page, error: membersErr } = await supabase
+            .from('contact_list_members')
+            .select('contact_id, source_row, contacts(id, phone, name, email, custom_fields)')
+            .eq('list_id', listId)
+            .order('added_at', { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+        if (membersErr) throw new Error(`Failed to load members: ${membersErr.message}`);
+        members.push(...(page || []));
+        if (!page || page.length < PAGE_SIZE) break;
+    }
+    if (members.length === 0) {
         return {
             totalRows: 0,
             counts: { contactsCreated: 0, contactsUpdated: 0, enrolled: 0, skipped: 0 },

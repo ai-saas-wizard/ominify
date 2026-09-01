@@ -14,6 +14,9 @@
  *   4. Re-running the enroll skips everyone already enrolled.
  *   5. Flipping one enrollment to 'failed' and re-running re-enrolls exactly
  *      that one.
+ *   6. SCALE: a 1,200-row import + enroll, which crosses both the 200-id
+ *      `.in()` chunk boundary (PostgREST URL limit — 1000 ids was a 400) and
+ *      Supabase's silent 1000-row select cap on list members.
  *
  * Spawns `node dist/workers/import-worker.js` as a child for the duration,
  * so the claim/heartbeat/complete protocol is exercised for real.
@@ -22,6 +25,7 @@
  *   node scripts/test-import-worker.mjs
  */
 import { createClient } from '@supabase/supabase-js';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { spawn } from 'child_process';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -45,12 +49,37 @@ const CSV = [
 const BUCKET = 'contact-imports';
 const STORAGE_PATH = `${TENANT}/${Date.now()}-e2e-import-worker.csv`;
 
+// Scale phase: 1,200 fictional-but-format-valid numbers (555-01xx across 12
+// area codes). Cleanup is by EXACT phone match on this list, never a prefix,
+// so it cannot touch real contacts; the phase aborts if any already exist.
+const SCALE_LIST = 'E2E Import Worker Scale';
+const SCALE_SEQ = 'E2E Import Worker Scale Seq';
+const SCALE_PATH = `${TENANT}/${Date.now()}-e2e-scale.csv`;
+const SCALE_ROWS = 1200;
+const SCALE_AREA_CODES = ['775', '702', '530', '916', '415', '408', '619', '858', '650', '925', '510', '707'];
+const SCALE_PHONES = [];
+for (const ac of SCALE_AREA_CODES) {
+    for (let i = 0; i < 100; i++) SCALE_PHONES.push(`+1${ac}5550${String(i).padStart(3, '0')}`);
+}
+const SCALE_CSV = ['first_name,last_name,phone,deal_size']
+    .concat(SCALE_PHONES.map((ph, i) => `ScaleE2E,Row${i},${ph.slice(2)},${i * 10}`))
+    .join('\n');
+
+function chunk(arr, n) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+}
+
 let failures = 0;
 function check(label, ok, detail = '') {
     console.log(`${ok ? '  ✅' : '  ❌'} ${label}${detail ? ` — ${detail}` : ''}`);
     if (!ok) failures++;
 }
 
+// Only jobs THIS run enqueued get deleted in cleanup — the tenant is a real
+// account and may have genuine job history worth keeping.
+const enqueuedJobIds = [];
 async function enqueue(kind, payload) {
     const { data, error } = await sb
         .from('import_jobs')
@@ -58,6 +87,7 @@ async function enqueue(kind, payload) {
         .select('id')
         .single();
     if (error) throw new Error(`enqueue failed: ${error.message}`);
+    enqueuedJobIds.push(data.id);
     return data.id;
 }
 
@@ -93,8 +123,31 @@ async function cleanup() {
         await sb.from('pipeline_contacts').delete().in('contact_id', ids);
         await sb.from('contacts').delete().in('id', ids);
     }
-    await sb.from('import_jobs').delete().eq('client_id', TENANT);
-    await sb.storage.from(BUCKET).remove([STORAGE_PATH]);
+    // Scale artifacts (exact-phone match, chunked to stay under the URL limit).
+    for (const name of [SCALE_SEQ]) {
+        const { data: ss } = await sb.from('sequences').select('id').eq('client_id', TENANT).eq('name', name);
+        for (const s of ss || []) {
+            await sb.from('sequence_enrollments').delete().eq('sequence_id', s.id);
+            await sb.from('sequences').delete().eq('id', s.id);
+        }
+    }
+    const { data: slists } = await sb.from('contact_lists').select('id').eq('client_id', TENANT).eq('name', SCALE_LIST);
+    for (const l of slists || []) {
+        await sb.from('contact_list_members').delete().eq('list_id', l.id);
+        await sb.from('contact_lists').delete().eq('id', l.id);
+    }
+    for (const phones of chunk(SCALE_PHONES, 200)) {
+        const { data: cs } = await sb.from('contacts').select('id').eq('client_id', TENANT).in('phone', phones);
+        const cids = (cs || []).map((c) => c.id);
+        if (!cids.length) continue;
+        const { data: pcs } = await sb.from('pipeline_contacts').select('id').in('contact_id', cids);
+        const pcIds = (pcs || []).map((r) => r.id);
+        if (pcIds.length) await sb.from('pipeline_contact_history').delete().in('pipeline_contact_id', pcIds);
+        await sb.from('pipeline_contacts').delete().in('contact_id', cids);
+        await sb.from('contacts').delete().in('id', cids);
+    }
+    if (enqueuedJobIds.length) await sb.from('import_jobs').delete().in('id', enqueuedJobIds);
+    await sb.storage.from(BUCKET).remove([STORAGE_PATH, SCALE_PATH]);
     console.log('  cleaned.');
 }
 
@@ -207,11 +260,54 @@ async function main() {
         check('still 2 enrollment rows', (enr2 || []).length === 2, String(enr2?.length));
 
         console.log("\n— Test 5: 'failed' enrollments are retried, others untouched —");
-        await sb.from('sequence_enrollments').update({ status: 'failed' }).eq('id', enr1[0].id);
+        // Park enrolled_at in the past so a re-enroll is provable by timestamp:
+        // the scheduler can tick and 'complete' the (step-less) enrollment
+        // within seconds, so status alone is racy.
+        await sb.from('sequence_enrollments').update({ status: 'failed', enrolled_at: '2020-01-01T00:00:00Z' }).eq('id', enr1[0].id);
         job = await awaitJob(await enqueue('list_enroll', enrollPayload));
         check('1 enrolled (the failed one), 1 skipped', job.counts?.enrolled === 1 && job.counts?.skipped === 1, JSON.stringify(job.counts));
-        const { data: revived } = await sb.from('sequence_enrollments').select('status').eq('id', enr1[0].id).single();
-        check("failed enrollment back to 'active'", revived?.status === 'active', revived?.status);
+        const { data: revived } = await sb.from('sequence_enrollments').select('status, enrolled_at').eq('id', enr1[0].id).single();
+        check('failed enrollment re-enrolled (fresh enrolled_at, no longer failed)', revived?.status !== 'failed' && new Date(revived?.enrolled_at).getFullYear() >= 2026, `${revived?.status} @ ${revived?.enrolled_at}`);
+
+        console.log(`\n— Test 6: SCALE — ${SCALE_ROWS}-row import + enroll (chunk + pagination boundaries) —`);
+        const allValid = SCALE_PHONES.every((ph) => parsePhoneNumberFromString(ph, 'US')?.isValid());
+        check('synthetic phones are format-valid', allValid);
+        let preexisting = 0;
+        for (const phones of chunk(SCALE_PHONES, 200)) {
+            const { count } = await sb.from('contacts').select('*', { count: 'exact', head: true }).eq('client_id', TENANT).in('phone', phones);
+            preexisting += count || 0;
+        }
+        check('no real contacts share the synthetic range', preexisting === 0, String(preexisting));
+        if (allValid && preexisting === 0) {
+            const { error: sUp } = await sb.storage.from(BUCKET).upload(SCALE_PATH, SCALE_CSV, { contentType: 'text/csv' });
+            if (sUp) throw new Error(`scale upload failed: ${sUp.message}`);
+            const t0 = Date.now();
+            job = await awaitJob(await enqueue('contact_import', {
+                storagePath: SCALE_PATH,
+                columnMapping: { first_name: 'first_name', last_name: 'last_name', phone: 'phone', deal_size: 'custom_variable' },
+                createList: true,
+                listName: SCALE_LIST,
+                sourceFilename: 'e2e-scale.csv',
+            }), 180_000);
+            check('scale import completed', job.status === 'completed', job.error || `${Date.now() - t0}ms`);
+            check(`${SCALE_ROWS} contacts created`, job.counts?.contactsCreated === SCALE_ROWS, JSON.stringify(job.counts));
+            check('no row errors', (job.errors || []).length === 0, JSON.stringify((job.errors || []).slice(0, 3)));
+            const scaleListId = job.result?.listId;
+            const { count: sMembers } = await sb.from('contact_list_members').select('*', { count: 'exact', head: true }).eq('list_id', scaleListId);
+            check(`list has ${SCALE_ROWS} members`, sMembers === SCALE_ROWS, String(sMembers));
+
+            const { data: sseq, error: sseqErr } = await sb.from('sequences').insert({ client_id: TENANT, name: SCALE_SEQ, is_active: false, trigger_type: 'manual' }).select('id').single();
+            if (sseqErr) throw new Error(`scale sequence insert failed: ${sseqErr.message}`);
+            const t1 = Date.now();
+            job = await awaitJob(await enqueue('list_enroll', { listId: scaleListId, sequenceId: sseq.id }), 180_000);
+            check('scale enroll completed', job.status === 'completed', job.error || `${Date.now() - t1}ms`);
+            check(`total_rows = ${SCALE_ROWS} (pagination past 1000)`, job.total_rows === SCALE_ROWS, String(job.total_rows));
+            check(`${SCALE_ROWS} enrolled, 0 skipped`, job.counts?.enrolled === SCALE_ROWS && job.counts?.skipped === 0, JSON.stringify(job.counts));
+            const { count: sEnr } = await sb.from('sequence_enrollments').select('*', { count: 'exact', head: true }).eq('sequence_id', sseq.id);
+            check(`${SCALE_ROWS} enrollment rows`, sEnr === SCALE_ROWS, String(sEnr));
+            job = await awaitJob(await enqueue('list_enroll', { listId: scaleListId, sequenceId: sseq.id }), 180_000);
+            check(`re-enroll skips all ${SCALE_ROWS}`, job.counts?.enrolled === 0 && job.counts?.skipped === SCALE_ROWS, JSON.stringify(job.counts));
+        }
     } finally {
         worker.kill('SIGTERM');
         await new Promise((r) => setTimeout(r, 1500));
