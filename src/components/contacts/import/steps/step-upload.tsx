@@ -2,22 +2,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import Papa from "papaparse";
-import { createClient } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "framer-motion";
 import { UploadCloud, FileText, X, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { useImport } from "../import-context";
 import { MAX_IMPORT_ROWS } from "../import-limits";
-import {
-    deleteContactImportUpload,
-    getContactImportUploadUrl,
-} from "@/app/actions/contact-list-actions";
+import { deleteContactImportUpload } from "@/app/actions/contact-list-actions";
+import { uploadCsvToStorage } from "../upload-csv-client";
 import { cn } from "@/lib/utils";
-
-// Anon-key client used solely to PUT the CSV with a server-issued upload
-// token. No session/auth involved — the signed token IS the authorization.
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const STORAGE_BUCKET = "contact-imports";
 
 interface StepUploadProps {
     clientId: string;
@@ -38,19 +29,8 @@ export function StepUpload({ clientId }: StepUploadProps) {
             dispatch({ type: "set_uploading", value: true });
             dispatch({ type: "set_upload_error", value: null });
             try {
-                const r = await getContactImportUploadUrl(clientId, file.name);
-                if (!r.success || !r.data) {
-                    throw new Error(r.error || "Failed to get upload URL");
-                }
-                const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-                const { error: upErr } = await sb.storage
-                    .from(STORAGE_BUCKET)
-                    .uploadToSignedUrl(r.data.storagePath, r.data.token, file, {
-                        contentType: "text/csv",
-                        upsert: false,
-                    });
-                if (upErr) throw new Error(upErr.message);
-                dispatch({ type: "set_storage_path", value: r.data.storagePath });
+                const storagePath = await uploadCsvToStorage(clientId, file);
+                dispatch({ type: "set_storage_path", value: storagePath });
             } catch (e) {
                 const message = e instanceof Error ? e.message : "Upload failed";
                 dispatch({ type: "set_upload_error", value: message });

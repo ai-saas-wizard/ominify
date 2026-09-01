@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, X } from "lucide-react";
+import { CheckCircle2, AlertTriangle, X, Loader2 } from "lucide-react";
 import { ImportProvider, useImport } from "./import-context";
 import { ImportStepper } from "./import-stepper";
 import { StepStart } from "./steps/step-start";
@@ -11,10 +11,9 @@ import { StepUpload } from "./steps/step-upload";
 import { StepMap } from "./steps/step-map";
 import { StepVerify } from "./steps/step-verify";
 import { ImportActions } from "./import-actions";
-import {
-    createListFromImport,
-    importContactsWithoutList,
-} from "@/app/actions/contact-list-actions";
+import { startContactImportJob } from "@/app/actions/import-job-actions";
+import { useImportJob } from "./use-import-job";
+import type { ImportJobStatus } from "@/app/actions/import-job-actions";
 import type { ColumnRole } from "./import-types";
 
 interface ImportWizardProps {
@@ -60,6 +59,36 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
         });
     }, [state.step, dispatch]);
 
+    // The import runs as a server-side job on the sequencer (survives this
+    // page/tab closing). Submit only enqueues; we then poll job progress and
+    // render the same result modal from the finished job's fields.
+    const [jobId, setJobId] = useState<string | null>(null);
+    const enrollRequested = !!state.enrollIntoSequenceId;
+    const job = useImportJob(jobId, (finished) => {
+        setJobId(null);
+        dispatch({ type: "set_submitting", value: false });
+        if (finished.status === "failed") {
+            dispatch({ type: "set_error", value: finished.error || "Import failed" });
+            setResult({
+                success: false,
+                contactsCreated: 0,
+                contactsUpdated: 0,
+                errors: [finished.error || "Import failed"],
+            });
+        } else {
+            setResult({
+                success: true,
+                listId: finished.result.listId,
+                contactsCreated: finished.counts.contactsCreated ?? 0,
+                contactsUpdated: finished.counts.contactsUpdated ?? 0,
+                enrolledCount: enrollRequested
+                    ? finished.counts.enrolled ?? 0
+                    : undefined,
+                errors: finished.errors,
+            });
+        }
+    });
+
     const submit = useCallback(async () => {
         dispatch({ type: "set_submitting", value: true });
         dispatch({ type: "set_error", value: null });
@@ -73,7 +102,7 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
             return;
         }
 
-        // Drop the "skip" entries from the mapping. The server applies the
+        // Drop the "skip" entries from the mapping. The worker applies the
         // mapping to the rows it parses from storage; unmapped columns are
         // simply ignored (the bytes already cost us nothing — they live in
         // Supabase Storage, not in this request).
@@ -91,67 +120,29 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
         }
 
         try {
-            if (state.createList) {
-                const r = await createListFromImport({
-                    clientId,
-                    listName: state.listName.trim(),
-                    description: state.listDescription.trim() || undefined,
-                    sourceFilename: state.fileName,
-                    storagePath: state.storagePath,
-                    columnMapping: cleanedMapping,
-                    customFieldDescriptions: fieldDescriptions,
-                    tagIds: state.selectedTagIds,
-                    enrollIntoSequenceId: state.enrollIntoSequenceId || undefined,
-                });
-                if (!r.success || !r.data) {
-                    dispatch({ type: "set_error", value: r.error || "Import failed" });
-                    setResult({
-                        success: false,
-                        contactsCreated: 0,
-                        contactsUpdated: 0,
-                        errors: [r.error || "Import failed"],
-                    });
-                } else {
-                    setResult({
-                        success: true,
-                        listId: r.data.listId,
-                        contactsCreated: r.data.contactsCreated,
-                        contactsUpdated: r.data.contactsUpdated,
-                        enrolledCount: r.data.enrolledCount,
-                        errors: r.data.errors,
-                    });
-                }
-            } else {
-                const r = await importContactsWithoutList({
-                    clientId,
-                    storagePath: state.storagePath,
-                    columnMapping: cleanedMapping,
-                    customFieldDescriptions: fieldDescriptions,
-                    tagIds: state.selectedTagIds,
-                    enrollIntoSequenceId: state.enrollIntoSequenceId || undefined,
-                });
-                if (!r.success || !r.data) {
-                    dispatch({ type: "set_error", value: r.error || "Import failed" });
-                    setResult({
-                        success: false,
-                        contactsCreated: 0,
-                        contactsUpdated: 0,
-                        errors: [r.error || "Import failed"],
-                    });
-                } else {
-                    setResult({
-                        success: true,
-                        contactsCreated: r.data.contactsCreated,
-                        contactsUpdated: r.data.contactsUpdated,
-                        enrolledCount: r.data.enrolledCount,
-                        errors: r.data.errors,
-                    });
-                }
+            const r = await startContactImportJob({
+                clientId,
+                storagePath: state.storagePath,
+                columnMapping: cleanedMapping,
+                customFieldDescriptions: fieldDescriptions,
+                tagIds: state.selectedTagIds,
+                createList: state.createList,
+                listName: state.createList ? state.listName.trim() : undefined,
+                description: state.createList
+                    ? state.listDescription.trim() || undefined
+                    : undefined,
+                sourceFilename: state.fileName,
+                enrollIntoSequenceId: state.enrollIntoSequenceId || undefined,
+            });
+            if (!r.success || !r.data) {
+                dispatch({ type: "set_error", value: r.error || "Import failed" });
+                dispatch({ type: "set_submitting", value: false });
+                return;
             }
+            setJobId(r.data.jobId);
         } catch (e) {
             const message = e instanceof Error ? e.message : "Import failed";
             dispatch({ type: "set_error", value: message });
-        } finally {
             dispatch({ type: "set_submitting", value: false });
         }
     }, [clientId, dispatch, state]);
@@ -224,6 +215,10 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
                 />
             </div>
 
+            {/* Progress modal — the job runs on the server, so this is only
+                a window into it, not the work itself. */}
+            {jobId && !result && <ImportProgressModal job={job} />}
+
             {/* Result modal */}
             {result && (
                 <ImportResultModal
@@ -233,6 +228,59 @@ function ImportWizardInner({ clientId }: ImportWizardProps) {
                 />
             )}
         </div>
+    );
+}
+
+function ImportProgressModal({ job }: { job: ImportJobStatus | null }) {
+    const total = job?.totalRows || 0;
+    const processed = job?.processedRows || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+        >
+            <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+            >
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100">
+                        <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                            {job?.status === "processing" ? "Importing..." : "Queued"}
+                        </h2>
+                        <p className="text-sm text-gray-500">
+                            {total > 0
+                                ? `${processed.toLocaleString()} of ${total.toLocaleString()} rows processed`
+                                : "Waiting for the server to pick this up"}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                    <div
+                        className={
+                            pct === null
+                                ? "h-full w-1/4 animate-pulse rounded-full bg-indigo-400"
+                                : "h-full rounded-full bg-indigo-600 transition-all duration-500"
+                        }
+                        style={pct === null ? undefined : { width: `${pct}%` }}
+                    />
+                </div>
+
+                <p className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                    This import runs on the server — you can safely close this
+                    page and it will finish on its own. Progress also shows on
+                    the Contacts page.
+                </p>
+            </motion.div>
+        </motion.div>
     );
 }
 

@@ -7,8 +7,10 @@
 //      pre-signed upload token scoped to the `contact-imports` bucket.
 //   2. Browser PUTs the raw CSV directly to Supabase Storage using the
 //      returned token. This bypasses Vercel's 4.5 MB request body cap.
-//   3. Browser sends only the resulting storage path to the import server
-//      action; the server downloads the file via service-role and parses it.
+//   3. Browser sends only the resulting storage path to startContactImportJob
+//      (import-job-actions.ts), which enqueues an import_jobs row; the
+//      sequencer's import-worker downloads the file via service-role and
+//      processes it server-side.
 
 import { supabase } from "@/lib/supabase";
 
@@ -18,25 +20,6 @@ export const CONTACT_IMPORTS_BUCKET = "contact-imports";
 export function buildContactImportPath(clientId: string, fileName: string): string {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
     return `${clientId}/${Date.now()}-${safeName}`;
-}
-
-// Server-side: download a previously uploaded CSV by storage path.
-export async function downloadContactImportCsv(storagePath: string): Promise<{
-    success: boolean;
-    error?: string;
-    text?: string;
-}> {
-    if (!storagePath) return { success: false, error: "Missing storagePath" };
-
-    const { data, error } = await supabase.storage
-        .from(CONTACT_IMPORTS_BUCKET)
-        .download(storagePath);
-    if (error || !data) {
-        return { success: false, error: error?.message || "Failed to download CSV" };
-    }
-
-    const text = await data.text();
-    return { success: true, text };
 }
 
 // Best-effort cleanup after a successful import. Failure to delete is logged

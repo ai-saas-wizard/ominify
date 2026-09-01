@@ -94,6 +94,22 @@ module.exports = {
             min_uptime: '10s',
         },
         {
+            // Processes import_jobs (CSV contact imports + list->sequence
+            // enrollments) enqueued by the Next.js app, so imports survive
+            // the user closing the browser. 250M: parses whole CSVs (<=10k
+            // rows) in memory.
+            name: 'import-worker',
+            script: './dist/workers/import-worker.js',
+            instances: 1,
+            max_memory_restart: '250M',
+            env: {
+                NODE_ENV: 'production',
+            },
+            exp_backoff_restart_delay: 100,
+            max_restarts: 10,
+            min_uptime: '10s',
+        },
+        {
             name: 'analytics-worker',
             script: './dist/workers/analytics-worker.js',
             instances: 1,

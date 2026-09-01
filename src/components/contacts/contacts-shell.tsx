@@ -2,6 +2,7 @@
 
 import { ReactNode } from "react";
 import { ContactsTabBar } from "./contacts-tab-bar";
+import { ImportJobsBanner } from "./import-jobs-banner";
 
 interface ContactsShellProps {
     title: ReactNode;
@@ -26,6 +27,7 @@ export function ContactsShell({
         <div className="flex flex-col">
             {showTabs && <ContactsTabBar />}
             <div className="p-4 lg:p-8 space-y-6">
+                <ImportJobsBanner />
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-semibold tracking-tight text-gray-900">

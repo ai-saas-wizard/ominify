@@ -31,7 +31,13 @@ import {
     createTaskFromDescription,
     listOutboundAgentsForClient,
 } from "@/app/actions/ai-generate-sequence-actions";
-import { bulkEnrollFromCSV, enrollListInSequence } from "@/app/actions/sequence-actions";
+import {
+    startContactImportJob,
+    startListEnrollJob,
+} from "@/app/actions/import-job-actions";
+import { awaitImportJob } from "@/components/contacts/import/use-import-job";
+import type { ColumnRole } from "@/components/contacts/import/import-types";
+import { uploadCsvToStorage } from "@/components/contacts/import/upload-csv-client";
 import { CSVColumnMapper } from "@/components/sequences/csv-column-mapper";
 import { TaskSourcePicker } from "@/components/sequences/task-source-picker";
 
@@ -78,7 +84,6 @@ export function TaskDialog({
     const [csvColumns, setCsvColumns] = useState<string[]>([]);
     const [csvRowCount, setCsvRowCount] = useState(0);
     const [csvSampleData, setCsvSampleData] = useState<Record<string, string>[]>([]);
-    const [csvParsedData, setCsvParsedData] = useState<Record<string, string>[]>([]);
     // Saved-list source: when set, we skip the mapping phase entirely and call
     // enrollListInSequence (which replays the list's saved column_mapping
     // against each member's source_row). Mutually exclusive with csvFile.
@@ -111,6 +116,10 @@ export function TaskDialog({
     const [lastMapping, setLastMapping] = useState<Record<string, string> | null>(
         null
     );
+    // Storage path of the CSV behind the last enroll job, kept so "Retry
+    // failed rows" can re-enqueue the same file (the worker keeps the CSV in
+    // Storage whenever a job finishes with row errors).
+    const [lastStoragePath, setLastStoragePath] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -169,7 +178,6 @@ export function TaskDialog({
                 setCsvColumns(headers);
                 setCsvRowCount(results.data.length);
                 setCsvSampleData(results.data.slice(0, 3));
-                setCsvParsedData(results.data);
             },
             error: () => {
                 setError("Failed to read file.");
@@ -206,7 +214,6 @@ export function TaskDialog({
         setCsvColumns([]);
         setCsvRowCount(0);
         setCsvSampleData([]);
-        setCsvParsedData([]);
         if (fileInputRef.current) {
             fileInputRef.current.value = "";
         }
@@ -222,14 +229,12 @@ export function TaskDialog({
             columns: string[];
             mapping: Record<string, string>;
         }) => {
-            // Selecting a list clears any uploaded CSV. We don't populate
-            // csvParsedData, the list path uses enrollListInSequence which
-            // pulls members directly server-side.
+            // Selecting a list clears any uploaded CSV. The list path uses
+            // startListEnrollJob, whose worker pulls members server-side.
             setCsvFile(null);
             setCsvColumns([]);
             setCsvRowCount(0);
             setCsvSampleData([]);
-            setCsvParsedData([]);
             setSelectedListId(payload.listId);
             setSelectedListName(payload.listName);
             setSelectedListCount(payload.contactCount);
@@ -258,7 +263,6 @@ export function TaskDialog({
         setCsvColumns([]);
         setCsvRowCount(0);
         setCsvSampleData([]);
-        setCsvParsedData([]);
         setSelectedListId(null);
         setSelectedListName("");
         setSelectedListCount(0);
@@ -269,6 +273,7 @@ export function TaskDialog({
         setEnrolledCount(0);
         setLastEnrolledSequenceId(null);
         setLastMapping(null);
+        setLastStoragePath(null);
         setSelectedAgentId("");
     }, []);
 
@@ -317,24 +322,38 @@ export function TaskDialog({
 
                 const sequenceId = result.sequenceId;
 
-                // If CSV + mapping provided, enroll contacts.
+                // If CSV + mapping provided, enroll contacts. The CSV is
+                // uploaded to Storage and processed as a server-side job on
+                // the sequencer, so closing the browser mid-way no longer
+                // abandons a half-enrolled list — we only await it here to
+                // show the counts.
                 let totalEnrolled = 0;
-                if (mapping && csvParsedData.length > 0) {
-                    const enrollResult = await bulkEnrollFromCSV(
-                        sequenceId,
+                if (mapping && csvFile) {
+                    const storagePath = await uploadCsvToStorage(clientId, csvFile);
+                    setLastStoragePath(storagePath);
+                    const startRes = await startContactImportJob({
                         clientId,
-                        csvParsedData,
-                        mapping as any,
-                        { isTest: mode === "test" }
-                    );
-
-                    if (!enrollResult.success) {
-                        setError(enrollResult.error || "Failed to enroll contacts.");
+                        storagePath,
+                        columnMapping: mapping as Record<string, ColumnRole>,
+                        createList: false,
+                        sourceFilename: csvFile.name,
+                        enrollIntoSequenceId: sequenceId,
+                        isTest: mode === "test",
+                    });
+                    if (!startRes.success || !startRes.data) {
+                        setError(startRes.error || "Failed to enroll contacts.");
+                        setLoadingAction(null);
+                        return;
+                    }
+                    const job = await awaitImportJob(startRes.data.jobId);
+                    if (job.status === "failed") {
+                        setError(job.error || "Failed to enroll contacts.");
                         setLoadingAction(null);
                         return;
                     }
 
-                    const { enrolled, errors: enrollErrors } = enrollResult.data!;
+                    const enrolled = job.counts.enrolled ?? 0;
+                    const enrollErrors = job.errors;
                     totalEnrolled = enrolled;
                     setEnrolledCount(enrolled);
                     setEnrollmentErrors(enrollErrors || []);
@@ -353,19 +372,26 @@ export function TaskDialog({
                         return;
                     }
                 } else if (selectedListId) {
-                    // Saved-list path: skip the mapping phase entirely and let
-                    // the server replay the list's stored column_mapping.
-                    const enrollResult = await enrollListInSequence(
+                    // Saved-list path: skip the mapping phase entirely — the
+                    // worker replays the list's stored column_mapping.
+                    const startRes = await startListEnrollJob(
                         sequenceId,
                         selectedListId,
                         { isTest: mode === "test" },
                     );
-                    if (!enrollResult.success) {
-                        setError(enrollResult.error || "Failed to enroll list.");
+                    if (!startRes.success || !startRes.data) {
+                        setError(startRes.error || "Failed to enroll list.");
                         setLoadingAction(null);
                         return;
                     }
-                    const { enrolled, errors: enrollErrors } = enrollResult.data!;
+                    const job = await awaitImportJob(startRes.data.jobId);
+                    if (job.status === "failed") {
+                        setError(job.error || "Failed to enroll list.");
+                        setLoadingAction(null);
+                        return;
+                    }
+                    const enrolled = job.counts.enrolled ?? 0;
+                    const enrollErrors = job.errors;
                     totalEnrolled = enrolled;
                     setEnrolledCount(enrolled);
                     setEnrollmentErrors(enrollErrors || []);
@@ -393,7 +419,7 @@ export function TaskDialog({
             taskContext,
             pacingPerMinute,
             csvColumns,
-            csvParsedData,
+            csvFile,
             selectedListId,
             clientId,
             channelReadiness,
@@ -456,35 +482,39 @@ export function TaskDialog({
     };
 
     const handleRetryFailedRows = useCallback(async () => {
-        if (!lastEnrolledSequenceId || !lastMapping || enrollmentErrors.length === 0) return;
-        const failedIdxs = parseFailedRowIndexes(enrollmentErrors);
-        if (failedIdxs.length === 0) return;
+        if (!lastEnrolledSequenceId || !lastMapping || !lastStoragePath) return;
+        if (parseFailedRowIndexes(enrollmentErrors).length === 0) return;
 
-        // Rows are 1-indexed in error messages; csvParsedData is 0-indexed.
-        const subset = failedIdxs
-            .map((i) => csvParsedData[i - 1])
-            .filter(Boolean);
-
-        if (subset.length === 0) return;
-
+        // Re-enqueue the same CSV as a fresh job. Enrollment is idempotent
+        // server-side (contacts the sequence already touched are skipped),
+        // so this only picks up rows that failed or never enrolled.
         setLoadingAction(pendingMode || "launch");
         setError("");
         try {
-            const result = await bulkEnrollFromCSV(
-                lastEnrolledSequenceId,
+            const startRes = await startContactImportJob({
                 clientId,
-                subset,
-                lastMapping as any
-            );
-            if (!result.success) {
-                setError(result.error || "Retry failed.");
+                storagePath: lastStoragePath,
+                columnMapping: lastMapping as Record<string, ColumnRole>,
+                createList: false,
+                sourceFilename: csvFile?.name || undefined,
+                enrollIntoSequenceId: lastEnrolledSequenceId,
+                isTest: pendingMode === "test",
+            });
+            if (!startRes.success || !startRes.data) {
+                setError(startRes.error || "Retry failed.");
+                return;
+            }
+            const job = await awaitImportJob(startRes.data.jobId);
+            if (job.status === "failed") {
+                setError(job.error || "Retry failed.");
             } else {
-                setEnrollmentErrors(result.data?.errors || []);
+                setEnrolledCount((prev) => prev + (job.counts.enrolled ?? 0));
+                setEnrollmentErrors(job.errors);
             }
         } finally {
             setLoadingAction(null);
         }
-    }, [lastEnrolledSequenceId, lastMapping, enrollmentErrors, csvParsedData, clientId, pendingMode]);
+    }, [lastEnrolledSequenceId, lastMapping, lastStoragePath, enrollmentErrors, csvFile, clientId, pendingMode]);
 
     // Available variables to offer as clickable chips under the taskContext
     // field. Built-ins are always shown; CSV columns (if any) append.
@@ -662,7 +692,8 @@ export function TaskDialog({
                                 {loadingAction !== null && (
                                     <div className="mt-4 text-sm text-gray-500 flex items-center gap-2">
                                         <Loader2 className="w-4 h-4 animate-spin" />
-                                        Enrolling {csvRowCount} contacts…
+                                        Enrolling {csvRowCount} contacts… Runs on the
+                                        server — closing this page won&apos;t stop it.
                                     </div>
                                 )}
                                 {error && (

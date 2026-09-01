@@ -1,23 +1,18 @@
 "use server";
 
-import Papa from "papaparse";
 import { supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
-import {
-    upsertContactsFromRows,
-    registerCustomFields,
-    type ColumnRole,
-    type UpsertedRow,
-} from "@/app/actions/_helpers/contact-import";
 import {
     CONTACT_IMPORTS_BUCKET,
     buildContactImportPath,
     deleteContactImportCsv,
-    downloadContactImportCsv,
 } from "@/app/actions/_helpers/contact-import-storage";
-import { assignTagsToContacts } from "@/app/actions/contact-tag-actions";
-import { enrollListInSequence } from "@/app/actions/sequence-actions";
-import { MAX_IMPORT_ROWS } from "@/components/contacts/import/import-limits";
+
+// NOTE: CSV processing (parse, contact upserts, list creation, tags,
+// enrollment) no longer happens here. The wizard enqueues an import job via
+// startContactImportJob (import-job-actions.ts) and the sequencer's
+// import-worker executes it server-side, so imports survive the browser tab
+// closing. This file keeps only upload-token minting and list CRUD.
 
 // Drop a CSV from the contact-imports bucket. Called from the wizard when
 // the user replaces or clears their selected file so the previous upload
@@ -32,8 +27,8 @@ export async function deleteContactImportUpload(storagePath: string): Promise<{
 
 // Mints a pre-signed upload token so the browser can PUT a CSV directly to
 // Supabase Storage, bypassing Vercel's 4.5 MB serverless body limit. The
-// returned `storagePath` is then passed back to createListFromImport /
-// importContactsWithoutList at submit time.
+// returned `storagePath` is then passed back to startContactImportJob at
+// submit time.
 export async function getContactImportUploadUrl(
     clientId: string,
     fileName: string,
@@ -56,308 +51,6 @@ export async function getContactImportUploadUrl(
     }
 
     return { success: true, data: { storagePath, token: data.token } };
-}
-
-// Same batching strategy used in _helpers/contact-import.ts. Avoids a single
-// PostgREST request that bloats with `source_row` JSONB on large imports.
-const MEMBERS_BATCH_SIZE = 500;
-
-function chunk<T>(arr: T[], size: number): T[][] {
-    const out: T[][] = [];
-    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-    return out;
-}
-
-// Parse a CSV downloaded from Storage into the same row+column shape the
-// browser produced. Pure wrapper around papaparse — keeps the parsing details
-// out of the action body.
-function parseCsvText(
-    text: string,
-): { columns: string[]; rows: Record<string, string>[]; error?: string } {
-    const result = Papa.parse<Record<string, string>>(text, {
-        header: true,
-        skipEmptyLines: true,
-    });
-    if (result.errors.length > 0) {
-        return { columns: [], rows: [], error: `CSV parse error: ${result.errors[0].message}` };
-    }
-    const columns = result.meta.fields || [];
-    const rows = (result.data as Record<string, string>[]).filter((r) =>
-        Object.values(r).some((v) => (v || "").trim()),
-    );
-    return { columns, rows };
-}
-
-interface CreateListInput {
-    clientId: string;
-    listName: string;
-    description?: string;
-    sourceFilename?: string;
-    storagePath: string;
-    columnMapping: Record<string, ColumnRole>;
-    customFieldDescriptions?: Record<string, { description: string; dirty: boolean }>;
-    tagIds?: string[];
-    enrollIntoSequenceId?: string;
-}
-
-// Create a new contact list from a CSV-style row set. Upserts all contacts,
-// registers any new custom fields (with descriptions when provided), then
-// inserts the list + members. Optionally tags and enrolls into a sequence
-// in the same call so the verify step is one server round-trip.
-export async function createListFromImport(input: CreateListInput): Promise<{
-    success: boolean;
-    error?: string;
-    data?: {
-        listId: string;
-        contactsCreated: number;
-        contactsUpdated: number;
-        errors: string[];
-        enrolledCount?: number;
-    };
-}> {
-    try {
-        const {
-            clientId,
-            listName,
-            description,
-            sourceFilename,
-            storagePath,
-            columnMapping,
-            customFieldDescriptions = {},
-            tagIds = [],
-            enrollIntoSequenceId,
-        } = input;
-
-        if (!listName?.trim()) {
-            return { success: false, error: "List name is required" };
-        }
-        if (!storagePath) {
-            return { success: false, error: "Missing uploaded CSV reference" };
-        }
-        if (!Object.values(columnMapping).includes("phone")) {
-            return { success: false, error: "A phone column mapping is required" };
-        }
-        if (
-            !Object.values(columnMapping).some(
-                (r) => r === "first_name" || r === "last_name",
-            )
-        ) {
-            return {
-                success: false,
-                error: "A name column mapping (first or last) is required to prevent cold outreach",
-            };
-        }
-
-        const downloaded = await downloadContactImportCsv(storagePath);
-        if (!downloaded.success || !downloaded.text) {
-            return { success: false, error: downloaded.error || "Failed to download CSV" };
-        }
-        const parsed = parseCsvText(downloaded.text);
-        if (parsed.error) return { success: false, error: parsed.error };
-        const csvRows = parsed.rows;
-        if (csvRows.length === 0) {
-            return { success: false, error: "No rows to import" };
-        }
-        if (csvRows.length > MAX_IMPORT_ROWS) {
-            return {
-                success: false,
-                error: `Import limited to ${MAX_IMPORT_ROWS.toLocaleString()} rows per file. Please split your list.`,
-            };
-        }
-
-        await registerCustomFields(clientId, columnMapping, customFieldDescriptions);
-
-        const upsertResult = await upsertContactsFromRows(clientId, csvRows, columnMapping);
-
-        // Insert the list row.
-        const { data: listRow, error: listErr } = await supabase
-            .from("contact_lists")
-            .insert({
-                client_id: clientId,
-                name: listName.trim(),
-                description: description?.trim() || null,
-                source: "csv",
-                source_filename: sourceFilename || null,
-                column_mapping: columnMapping,
-                contact_count: 0,
-            })
-            .select("id")
-            .single();
-
-        if (listErr || !listRow) {
-            return {
-                success: false,
-                error: listErr?.message || "Failed to create list",
-            };
-        }
-        const listId = listRow.id as string;
-
-        // Insert members in batched upserts, preserving each row's verbatim CSV
-        // row for later replay during sequence enrollment. Batching is required
-        // because `source_row` JSONB can be multi-KB per row — a single 10k-row
-        // upsert would blow PostgREST's request size limit.
-        if (upsertResult.upserted.length > 0) {
-            const memberRows = upsertResult.upserted.map((u) => ({
-                list_id: listId,
-                contact_id: u.contactId,
-                source_row: u.sourceRow,
-                added_via: "csv",
-            }));
-
-            for (const batch of chunk(memberRows, MEMBERS_BATCH_SIZE)) {
-                const { error: membersErr } = await supabase
-                    .from("contact_list_members")
-                    .upsert(batch, { onConflict: "list_id,contact_id" });
-
-                if (membersErr) {
-                    return {
-                        success: false,
-                        error: `List created but members failed: ${membersErr.message}`,
-                    };
-                }
-            }
-
-            await supabase
-                .from("contact_lists")
-                .update({ contact_count: upsertResult.upserted.length, updated_at: new Date().toISOString() })
-                .eq("id", listId);
-        }
-
-        // Optional: tag every contact in this import with the picked tags.
-        if (tagIds.length > 0 && upsertResult.upserted.length > 0) {
-            const contactIds = upsertResult.upserted.map((u) => u.contactId);
-            await assignTagsToContacts(tagIds, contactIds);
-        }
-
-        // Optional: auto-enroll the new list into a sequence.
-        let enrolledCount: number | undefined;
-        if (enrollIntoSequenceId && upsertResult.upserted.length > 0) {
-            const enrollResult = await enrollListInSequence(enrollIntoSequenceId, listId);
-            if (enrollResult.success && enrollResult.data) {
-                enrolledCount = enrollResult.data.enrolled;
-                upsertResult.errors.push(...enrollResult.data.errors);
-            } else if (enrollResult.error) {
-                upsertResult.errors.push(`Auto-enroll failed: ${enrollResult.error}`);
-            }
-        }
-
-        revalidatePath(`/client/${clientId}/contacts`);
-        revalidatePath(`/client/${clientId}/contacts/lists`);
-
-        // Best-effort: drop the uploaded CSV now that it's been imported.
-        await deleteContactImportCsv(storagePath);
-
-        return {
-            success: true,
-            data: {
-                listId,
-                contactsCreated: upsertResult.contactsCreated,
-                contactsUpdated: upsertResult.contactsUpdated,
-                errors: upsertResult.errors,
-                enrolledCount,
-            },
-        };
-    } catch (e: any) {
-        console.error("createListFromImport error:", e);
-        return { success: false, error: e?.message || "Internal error" };
-    }
-}
-
-// Standalone import: upsert contacts from a CSV without creating a list. Used
-// when the user toggles "Create a list" off in the verify step.
-export async function importContactsWithoutList(input: Omit<CreateListInput, "listName">): Promise<{
-    success: boolean;
-    error?: string;
-    data?: { contactsCreated: number; contactsUpdated: number; errors: string[]; enrolledCount?: number };
-}> {
-    try {
-        const {
-            clientId,
-            storagePath,
-            columnMapping,
-            customFieldDescriptions = {},
-            tagIds = [],
-            enrollIntoSequenceId,
-        } = input;
-        if (!storagePath) {
-            return { success: false, error: "Missing uploaded CSV reference" };
-        }
-        if (!Object.values(columnMapping).includes("phone")) {
-            return { success: false, error: "A phone column mapping is required" };
-        }
-        if (
-            !Object.values(columnMapping).some(
-                (r) => r === "first_name" || r === "last_name",
-            )
-        ) {
-            return {
-                success: false,
-                error: "A name column mapping (first or last) is required to prevent cold outreach",
-            };
-        }
-
-        const downloaded = await downloadContactImportCsv(storagePath);
-        if (!downloaded.success || !downloaded.text) {
-            return { success: false, error: downloaded.error || "Failed to download CSV" };
-        }
-        const parsed = parseCsvText(downloaded.text);
-        if (parsed.error) return { success: false, error: parsed.error };
-        const csvRows = parsed.rows;
-        if (csvRows.length === 0) {
-            return { success: false, error: "No rows to import" };
-        }
-        if (csvRows.length > MAX_IMPORT_ROWS) {
-            return {
-                success: false,
-                error: `Import limited to ${MAX_IMPORT_ROWS.toLocaleString()} rows per file. Please split your list.`,
-            };
-        }
-
-        await registerCustomFields(clientId, columnMapping, customFieldDescriptions);
-        const upsertResult = await upsertContactsFromRows(clientId, csvRows, columnMapping);
-
-        if (tagIds.length > 0 && upsertResult.upserted.length > 0) {
-            const contactIds = upsertResult.upserted.map((u: UpsertedRow) => u.contactId);
-            await assignTagsToContacts(tagIds, contactIds);
-        }
-
-        let enrolledCount: number | undefined;
-        if (enrollIntoSequenceId && upsertResult.upserted.length > 0) {
-            // Without a list, fall back to bulkEnrollFromCSV so the rows still flow
-            // through the normal pacing path.
-            const { bulkEnrollFromCSV } = await import("@/app/actions/sequence-actions");
-            const r = await bulkEnrollFromCSV(
-                enrollIntoSequenceId,
-                clientId,
-                csvRows,
-                columnMapping,
-            );
-            if (r.success && r.data) {
-                enrolledCount = r.data.enrolled;
-                upsertResult.errors.push(...r.data.errors);
-            } else if (r.error) {
-                upsertResult.errors.push(`Auto-enroll failed: ${r.error}`);
-            }
-        }
-
-        revalidatePath(`/client/${clientId}/contacts`);
-
-        // Best-effort: drop the uploaded CSV now that it's been imported.
-        await deleteContactImportCsv(storagePath);
-
-        return {
-            success: true,
-            data: {
-                contactsCreated: upsertResult.contactsCreated,
-                contactsUpdated: upsertResult.contactsUpdated,
-                errors: upsertResult.errors,
-                enrolledCount,
-            },
-        };
-    } catch (e: any) {
-        console.error("importContactsWithoutList error:", e);
-        return { success: false, error: e?.message || "Internal error" };
-    }
 }
 
 export async function listContactLists(
