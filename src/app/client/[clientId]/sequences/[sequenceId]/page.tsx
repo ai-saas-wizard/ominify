@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/supabase-paginate";
 import { notFound } from "next/navigation";
 import { SequenceFlowCanvas } from "@/components/sequences/flow/sequence-flow-canvas";
 import { DynamicSequenceView } from "@/components/sequences/observability/dynamic-sequence-view";
@@ -8,8 +9,7 @@ async function getSequenceWithDetails(sequenceId: string) {
         .from("sequences")
         .select(`
             *,
-            sequence_steps(*),
-            sequence_enrollments(*, contacts(id, name, phone, email))
+            sequence_steps(*)
         `)
         .eq("id", sequenceId)
         .single();
@@ -17,6 +17,21 @@ async function getSequenceWithDetails(sequenceId: string) {
     if (error || !sequence) {
         return null;
     }
+
+    // Paginated rather than embedded above: an embedded join caps at 1000
+    // rows, which hid every lead past the first thousand on big sequences.
+    sequence.sequence_enrollments = await fetchAllRows<any>((from, to) =>
+        supabase
+            .from("sequence_enrollments")
+            .select("*, contacts(id, name, phone, email)")
+            .eq("sequence_id", sequenceId)
+            .order("enrolled_at", { ascending: false })
+            .order("id")
+            .range(from, to),
+    ).catch((e) => {
+        console.error("getSequenceWithDetails enrollments error:", e);
+        return [];
+    });
 
     // Sort steps by step_order
     if (sequence.sequence_steps) {

@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/supabase-paginate";
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { canAccessClient } from "@/lib/auth";
@@ -59,26 +60,45 @@ async function assertClientAccess(
 
 export async function getSequences(clientId: string) {
     try {
-        const { data, error } = await supabase
-            .from("sequences")
-            .select(`
-                *,
-                sequence_steps(id),
-                sequence_enrollments(id, status, is_test)
-            `)
-            .eq("client_id", clientId)
-            .order("created_at", { ascending: false });
+        // Enrollments are read separately and paginated — embedding them in
+        // the sequences select caps each sequence at 1000 rows.
+        const [seqResult, enrollmentRows] = await Promise.all([
+            supabase
+                .from("sequences")
+                .select(`
+                    *,
+                    sequence_steps(id)
+                `)
+                .eq("client_id", clientId)
+                .order("created_at", { ascending: false }),
+            fetchAllRows<{ sequence_id: string; status: string; is_test: boolean | null }>(
+                (from, to) =>
+                    supabase
+                        .from("sequence_enrollments")
+                        .select("sequence_id, status, is_test")
+                        .eq("tenant_id", clientId)
+                        .order("id")
+                        .range(from, to),
+            ),
+        ]);
+        const { data, error } = seqResult;
 
         if (error) {
             console.error("getSequences error:", error);
             return { success: false, error: error.message, data: [] };
         }
 
-        const sequences = (data || []).map((seq: any) => {
+        const bySequence = new Map<string, typeof enrollmentRows>();
+        for (const e of enrollmentRows) {
             // Exclude test enrollments from analytics counts
-            const realEnrollments = (seq.sequence_enrollments || []).filter(
-                (e: any) => !e.is_test
-            );
+            if (e.is_test) continue;
+            const arr = bySequence.get(e.sequence_id);
+            if (arr) arr.push(e);
+            else bySequence.set(e.sequence_id, [e]);
+        }
+
+        const sequences = (data || []).map((seq: any) => {
+            const realEnrollments = bySequence.get(seq.id) || [];
             return {
                 ...seq,
                 step_count: seq.sequence_steps?.length || 0,
@@ -109,8 +129,7 @@ export async function getSequenceDetail(sequenceId: string) {
             .from("sequences")
             .select(`
                 *,
-                sequence_steps(*),
-                sequence_enrollments(id, status, current_step_order, enrolled_at, contact_id, is_test, contacts(id, name, phone, email))
+                sequence_steps(*)
             `)
             .eq("id", sequenceId)
             .single();
@@ -119,6 +138,17 @@ export async function getSequenceDetail(sequenceId: string) {
             console.error("getSequenceDetail error:", error);
             return { success: false, error: error.message, data: null };
         }
+
+        // Paginated rather than embedded: an embedded join caps at 1000 rows.
+        sequence.sequence_enrollments = await fetchAllRows<any>((from, to) =>
+            supabase
+                .from("sequence_enrollments")
+                .select("id, status, current_step_order, enrolled_at, contact_id, is_test, contacts(id, name, phone, email)")
+                .eq("sequence_id", sequenceId)
+                .order("enrolled_at", { ascending: false })
+                .order("id")
+                .range(from, to),
+        );
 
         // Sort steps by step_order
         if (sequence?.sequence_steps) {
@@ -808,21 +838,21 @@ export async function resumeSequenceEnrollments(sequenceId: string) {
 
 export async function getEnrollments(sequenceId: string) {
     try {
-        const { data, error } = await supabase
-            .from("sequence_enrollments")
-            .select(`
+        // Paginated: a plain select stops at 1000 rows.
+        const data = await fetchAllRows<any>((from, to) =>
+            supabase
+                .from("sequence_enrollments")
+                .select(`
                 *,
                 contacts(id, name, phone, email)
             `)
-            .eq("sequence_id", sequenceId)
-            .order("enrolled_at", { ascending: false });
+                .eq("sequence_id", sequenceId)
+                .order("enrolled_at", { ascending: false })
+                .order("id")
+                .range(from, to),
+        );
 
-        if (error) {
-            console.error("getEnrollments error:", error);
-            return { success: false, error: error.message, data: [] };
-        }
-
-        return { success: true, data: data || [] };
+        return { success: true, data };
     } catch (error) {
         console.error("getEnrollments error:", error);
         return { success: false, error: "Internal error", data: [] };

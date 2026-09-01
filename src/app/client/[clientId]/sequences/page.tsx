@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/supabase-paginate";
 import { getChannelCapabilities } from "@/lib/channels/capabilities";
 import {
     SequencesListClient,
@@ -6,27 +7,51 @@ import {
 } from "@/components/sequences/sequences-list-client";
 import { IN_FLIGHT_STATUSES } from "@/components/sequences/observability/enrollment-status";
 
+type EnrollmentStatRow = { sequence_id: string; status: string; is_test: boolean | null };
+
 async function getSequencesData(clientId: string): Promise<SequenceCardData[]> {
-    const { data, error } = await supabase
-        .from("sequences")
-        .select(`
-            *,
-            sequence_steps(id, channel, enable_ai_mutation),
-            sequence_enrollments(id, status, is_test)
-        `)
-        .eq("client_id", clientId)
-        .order("created_at", { ascending: false });
+    // Enrollments are read separately and paginated: embedding them in the
+    // sequences select capped each sequence at 1000 rows, so a 3,000-lead
+    // sequence showed "1000 enrolled" here.
+    const [seqResult, enrollmentRows] = await Promise.all([
+        supabase
+            .from("sequences")
+            .select(`
+                *,
+                sequence_steps(id, channel, enable_ai_mutation)
+            `)
+            .eq("client_id", clientId)
+            .order("created_at", { ascending: false }),
+        fetchAllRows<EnrollmentStatRow>((from, to) =>
+            supabase
+                .from("sequence_enrollments")
+                .select("sequence_id, status, is_test")
+                .eq("tenant_id", clientId)
+                .order("id")
+                .range(from, to),
+        ).catch((e): EnrollmentStatRow[] => {
+            console.error("getSequencesData enrollments error:", e);
+            return [];
+        }),
+    ]);
+    const { data, error } = seqResult;
 
     if (error) {
         console.error("getSequencesData error:", error);
         return [];
     }
 
+    const enrollmentsBySequence = new Map<string, EnrollmentStatRow[]>();
+    for (const e of enrollmentRows) {
+        if (e.is_test) continue;
+        const arr = enrollmentsBySequence.get(e.sequence_id);
+        if (arr) arr.push(e);
+        else enrollmentsBySequence.set(e.sequence_id, [e]);
+    }
+
     return (data || []).map((seq: any) => {
         const steps = seq.sequence_steps || [];
-        const enrollments = (seq.sequence_enrollments || []).filter(
-            (e: any) => !e.is_test
-        );
+        const enrollments = enrollmentsBySequence.get(seq.id) || [];
 
         const isTask = seq.metadata?.is_task === true ||
             seq.sequence_strategy?.is_task === true;
