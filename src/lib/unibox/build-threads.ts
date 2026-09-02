@@ -100,6 +100,8 @@ export interface EnrollmentRow {
 }
 
 export interface BuildThreadsInput {
+    /** Owning client — used to build the recording playback route. */
+    clientId: string;
     contacts: ContactRow[];
     interactions: InteractionRow[];
     calls: CallRow[];
@@ -163,7 +165,7 @@ function locationFor(fields: Record<string, unknown> | null): string | null {
 }
 
 export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
-    const { contacts, interactions, calls, enrollments, agents, stageNames, stepCounts } = input;
+    const { clientId, contacts, interactions, calls, enrollments, agents, stageNames, stepCounts } = input;
 
     const agentById = new Map(agents.map((a) => [a.id, a]));
     const contactById = new Map(contacts.map((c) => [c.id, c]));
@@ -228,7 +230,11 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             body: rawTranscript ?? undefined,
             summary: call.summary || linked?.content_summary || undefined,
             transcript,
-            recordingUrl: call.recording_url || undefined,
+            // `recording_url` is an unsigned R2 object URL that never plays;
+            // the route fetches a fresh presigned URL from VAPI at play time.
+            recordingUrl: call.recording_url
+                ? `/api/client/${clientId}/recordings/${call.vapi_call_id}`
+                : undefined,
             durationSeconds,
             disposition,
             outcome: linked?.outcome ?? undefined,

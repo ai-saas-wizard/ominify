@@ -180,7 +180,7 @@ export default async function UniboxPage({
     );
     const stepCounts = await fetchStepCounts([...new Set(enrollments.map((e) => e.sequence_id))]);
 
-    const threads = buildThreads({ contacts, interactions, calls, enrollments, agents, stageNames, stepCounts });
+    const threads = buildThreads({ clientId, contacts, interactions, calls, enrollments, agents, stageNames, stepCounts });
 
     return (
         <div className="h-screen overflow-hidden">

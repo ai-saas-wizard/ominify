@@ -51,6 +51,16 @@ export interface VapiCall {
     cost?: number;
     type?: string;
     durationSeconds?: number;
+    // Present on GET /call/{id}. For HIPAA-storage orgs `recordingUrl` is an
+    // unsigned R2 object URL (unplayable); the presigned ones expire after
+    // ~30 min (`presignedUrlsExpiresAt`), so fetch them at play time.
+    artifact?: {
+        recordingUrl?: string;
+        stereoRecordingUrl?: string;
+        presignedMonoUrl?: string;
+        presignedStereoUrl?: string;
+        presignedUrlsExpiresAt?: string;
+    };
 }
 
 // ─── CREATE ASSISTANT ───
