@@ -19,6 +19,7 @@ import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import type { SmsJobPayload, TenantTwilioAccount, PhoneType } from '../lib/types.js';
 import { resolveTwilioAccountSid } from '../lib/twilio-account.js';
 import { resolveRotationPhone } from '../lib/outbound-phone.js';
+import { isTwilioAuthError, notifyTwilioAuthFailure } from '../lib/twilio-balance.js';
 
 const WEBHOOK_BASE_URL = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
 
@@ -407,6 +408,14 @@ async function processSmsJob(job: Job<SmsJobPayload>): Promise<{ sid: string; st
         // Release the claim so a legitimate BullMQ retry can resend
         if (claimKey) {
             await releaseClaim(claimKey);
+        }
+        // 401 / 20003 / 20005 = Twilio suspended the account (empty balance)
+        // or the token changed. Tell the tenant now — on 2026-09-01 this
+        // failed silently for five hours. Never let the alert mask the error.
+        if (isTwilioAuthError(error)) {
+            await notifyTwilioAuthFailure(tenantId, error).catch((e) =>
+                console.error('[SMS] notifyTwilioAuthFailure failed:', e),
+            );
         }
         throw error;
     }

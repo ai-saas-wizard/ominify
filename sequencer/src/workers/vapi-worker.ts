@@ -26,6 +26,8 @@ import { releaseDailyCall, reserveDailyCall, dailyCallCapKey } from '../lib/dail
 import { resolveVoiceCallerId } from '../lib/outbound-phone.js';
 import { checkContactFatigue } from '../lib/contact-fatigue.js';
 import { createNotification } from '../lib/emotional-intelligence.js';
+import { notifyCallsFailing } from '../lib/twilio-balance.js';
+import { classifyCallStart, fetchVapiCall } from '../lib/vapi-call-state.js';
 import { clampTestDelayMs } from '../lib/test-mode.js';
 import {
     isTCPACompliant,
@@ -857,6 +859,26 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
 
     console.log(`[VAPI] Call initiated: ${result.callId}`);
 
+    // Start-error verification: VAPI sends NO webhook for a call that dies
+    // before it starts (e.g. call.start.error-get-transport when Twilio is
+    // out of funds), so the slot we hold would leak until the stale sweep.
+    // Check the call's state in 90s and clean up if it never started.
+    try {
+        await vapiQueue.add('vapi:verify-start', {
+            kind: 'verify-start',
+            callId: result.callId,
+            enrollmentId,
+            stepId,
+            stepOrder: job.data.stepOrder ?? null,
+            tenantId,
+            umbrellaId: umbrella.umbrellaId,
+            dailyCapKey,
+            attempt: 1,
+        } satisfies VerifyStartPayload, { delay: VERIFY_START_DELAY_MS });
+    } catch (err) {
+        console.error(`[VAPI] Could not schedule start verification for ${result.callId}:`, err);
+    }
+
     // Log execution (initial state)
     await logExecution({
         enrollmentId,
@@ -931,8 +953,80 @@ async function processVapiJob(job: Job<VapiJobPayload>): Promise<{ callId: strin
     return { callId: result.callId, status: 'initiated' };
 }
 
-// Create the worker with priority support
-const vapiWorker = new Worker<VapiJobPayload>('vapi-calls', processVapiJob, {
+// ─── Start-error verification ────────────────────────────────────────────────
+
+const VERIFY_START_DELAY_MS = 90_000;
+const VERIFY_START_MAX_ATTEMPTS = 2;
+
+interface VerifyStartPayload {
+    kind: 'verify-start';
+    callId: string;
+    enrollmentId: string;
+    stepId: string;
+    stepOrder: number | null;
+    tenantId: string;
+    umbrellaId: string;
+    dailyCapKey: string | null;
+    attempt: number;
+}
+
+/**
+ * Runs ~90s after a call was created. If VAPI reports the call ended with a
+ * start error — for which it sends no webhook — release the concurrency slot
+ * and daily-cap reservation, record the failure, re-arm the lead for a retry
+ * in 15-45 min (instead of the 1 h awaiting_outcome timeout), and alert the
+ * tenant. Claims the webhook route's own dedup key so a late webhook (if one
+ * ever arrives) can't double-release.
+ */
+async function verifyCallStart(data: VerifyStartPayload): Promise<{ callId: string; status: string }> {
+    const { callId, enrollmentId, stepId, stepOrder, tenantId, umbrellaId, dailyCapKey, attempt } = data;
+
+    const umbrella = await umbrellaResolver.getUmbrellaForTenant(tenantId);
+    const call = await fetchVapiCall(callId, umbrella.vapiApiKey);
+    const verdict = classifyCallStart(call);
+
+    if (verdict === 'pending') {
+        if (attempt < VERIFY_START_MAX_ATTEMPTS) {
+            await vapiQueue.add('vapi:verify-start', { ...data, attempt: attempt + 1 }, { delay: VERIFY_START_DELAY_MS });
+            return { callId, status: 'verify_rescheduled' };
+        }
+        return { callId, status: 'verify_gave_up' };
+    }
+    if (verdict === 'ok') return { callId, status: 'verify_ok' };
+
+    // Same NX key the webhook route claims (server/routes/vapi-webhooks.ts);
+    // if it already exists the webhook handled this call — nothing to do.
+    const claimed = await redis.set(`vapi:dedup:${callId}`, '1', 'EX', 600, 'NX');
+    if (claimed !== 'OK') return { callId, status: 'verify_already_handled' };
+
+    const reason = call.endedReason || 'call.start.error';
+    console.warn(`[VAPI] Start error detected for call ${callId} (enrollment ${enrollmentId}): ${reason} — releasing slot and re-arming`);
+
+    await concurrencyManager.release(umbrellaId, tenantId, enrollmentId);
+    await releaseDailyCall(dailyCapKey);
+    await logExecution({
+        enrollmentId,
+        stepId,
+        channel: 'voice',
+        action: 'call_failed',
+        providerId: callId,
+        providerResponse: { endedReason: reason, detectedBy: 'verify-start' },
+        callStatus: reason,
+    });
+    await rearmEnrollmentForRetry({ enrollmentId, stepOrder, retryAt: capacityRetryAt(), reason });
+    await notifyCallsFailing(tenantId, reason).catch((err) =>
+        console.error('[VAPI] notifyCallsFailing failed:', err),
+    );
+
+    return { callId, status: 'start_error_cleaned' };
+}
+
+// Create the worker with priority support. One queue, two job kinds:
+// 'vapi:call' places calls; 'vapi:verify-start' is the delayed follow-up above.
+const vapiWorker = new Worker<VapiJobPayload | VerifyStartPayload>('vapi-calls', (job) =>
+    job.name === 'vapi:verify-start'
+        ? verifyCallStart(job.data as VerifyStartPayload)
+        : processVapiJob(job as Job<VapiJobPayload>), {
     connection: redisConnection,
     concurrency: 5, // Process multiple jobs, but concurrency is really managed by the manager
     lockDuration: 60000, // 1 minute lock (calls can take time to initiate)
@@ -966,8 +1060,11 @@ vapiWorker.on('error', (error) => {
 
 // Periodically reclaim concurrency slots whose call-outcome webhook was lost
 // (review workers I5) — otherwise a single dropped webhook leaks a slot forever.
-const RECONCILE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-const STALE_SLOT_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours — far beyond any real call
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+// 30 minutes: VAPI caps a call at ~10 min (maxDurationSeconds), so anything
+// older is a lost webhook. Was 2 h — on 2026-09-01 one leaked slot on a
+// tenant cap of 2 halved throughput for that long.
+const STALE_SLOT_MAX_AGE_MS = 30 * 60 * 1000;
 
 let reconcileInFlight = false;
 const reconcileTimer = setInterval(async () => {

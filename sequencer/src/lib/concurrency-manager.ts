@@ -229,9 +229,62 @@ export class VapiUmbrellaConcurrencyManager {
                     console.log(`[CONCURRENCY] Reclaimed stale slot ${member} on umbrella ${umbrellaId}`);
                 }
             }
+
+            reclaimed += await this.clampCountersToSlots(umbrellaId);
         }
 
         return reclaimed;
+    }
+
+    /**
+     * Invariant repair: every acquire registers a slot token, so the umbrella
+     * `current` can never legitimately exceed ZCARD(slots), and a tenant's
+     * usage can never exceed its member count. Counters above that are
+     * phantoms — on 2026-09-01 a token-less increment held one of a tenant's
+     * two slots with nothing to sweep, which (with one stale token) stopped
+     * every outbound call. Clamps DOWN only, atomically, so a concurrent
+     * acquire (which bumps counter + ZSET together) is never undercounted.
+     * Returns the number of phantom slots removed.
+     */
+    async clampCountersToSlots(umbrellaId: string): Promise<number> {
+        const script = `
+            local members = redis.call('zrange', KEYS[1], 0, -1)
+            local total = #members
+            local per_tenant = {}
+            for _, m in ipairs(members) do
+                local t = string.match(m, '^([^:]+):')
+                if t then per_tenant[t] = (per_tenant[t] or 0) + 1 end
+            end
+
+            local removed = 0
+            local current = tonumber(redis.call('hget', KEYS[2], 'current') or '0')
+            if current > total then
+                redis.call('hset', KEYS[2], 'current', total)
+                removed = removed + (current - total)
+            end
+
+            local usage = redis.call('hgetall', KEYS[3])
+            for i = 1, #usage, 2 do
+                local tenant = usage[i]
+                local used = tonumber(usage[i + 1]) or 0
+                local real = per_tenant[tenant] or 0
+                if used > real then
+                    redis.call('hset', KEYS[3], tenant, real)
+                end
+            end
+            return removed
+        `;
+        const removed = await redis.eval(
+            script,
+            3,
+            this.slotsKey(umbrellaId),
+            this.umbrellaKey(umbrellaId),
+            this.tenantUsageKey(umbrellaId),
+        ) as number;
+        if (removed > 0) {
+            console.log(`[CONCURRENCY] Clamped ${removed} phantom slot(s) on umbrella ${umbrellaId} to match slot tokens`);
+        }
+        return removed;
     }
 
     /**

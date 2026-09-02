@@ -12,9 +12,13 @@
 import 'dotenv/config';
 import { redis } from '../lib/redis.js';
 import { runAnalyticsJob, runBenchmarkJob } from '../lib/outcome-learning.js';
+import { checkTwilioBalances } from '../lib/twilio-balance.js';
 
 const ANALYTICS_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const BENCHMARK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+// Twilio balance poll for BYOA tenants — alerts before an empty balance
+// silently stops outreach (see lib/twilio-balance.ts).
+const TWILIO_BALANCE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 // Persisted in Redis so a restart doesn't reset the weekly benchmark clock
 const LAST_BENCHMARK_RUN_KEY = 'analytics:last-benchmark-run';
@@ -73,6 +77,21 @@ async function start(): Promise<void> {
         // Set up interval
         setInterval(tick, ANALYTICS_INTERVAL_MS);
     }, 10000); // 10s startup delay
+
+    // Twilio balance poll: first run shortly after boot so a deploy during a
+    // low-balance period alerts immediately, then every 30 minutes.
+    const balanceTick = async () => {
+        try {
+            const { checked, alerted } = await checkTwilioBalances();
+            console.log(`[ANALYTICS] Twilio balance poll: ${checked} account(s) checked, ${alerted} alert(s)`);
+        } catch (err) {
+            console.error('[ANALYTICS] Twilio balance poll error:', err);
+        }
+    };
+    setTimeout(() => {
+        void balanceTick();
+        setInterval(balanceTick, TWILIO_BALANCE_INTERVAL_MS);
+    }, 20000); // after the analytics tick's 10s delay
 
     console.log('[ANALYTICS] Analytics worker running');
 }

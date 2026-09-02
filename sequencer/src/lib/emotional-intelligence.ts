@@ -306,7 +306,8 @@ export async function createNotification(params: {
     clientId: string;
     enrollmentId?: string;
     contactId?: string;
-    type: 'hot_lead' | 'needs_human' | 'objection_detected' | 'sentiment_drop' | 'appointment_booked' | 'sequence_completed' | 'escalation' | 'at_risk';
+    type: 'hot_lead' | 'needs_human' | 'objection_detected' | 'sentiment_drop' | 'appointment_booked' | 'sequence_completed' | 'escalation' | 'at_risk'
+        | 'twilio_low_balance' | 'twilio_auth_failed' | 'calls_failing';
     title: string;
     body?: string;
     priority?: 'low' | 'normal' | 'high' | 'urgent';

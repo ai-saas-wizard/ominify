@@ -9,8 +9,11 @@ import {
     CheckCheck,
     Flag,
     Flame,
+    PhoneOff,
+    ShieldAlert,
     TrendingDown,
     UserCheck,
+    Wallet,
     X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -340,6 +343,10 @@ function getTypeConfig(type: string) {
         sequence_completed: { icon: Check, bg: "bg-gray-100", color: "text-gray-600" },
         escalation: { icon: Flag, bg: "bg-red-100", color: "text-red-600" },
         at_risk: { icon: TrendingDown, bg: "bg-red-100", color: "text-red-500" },
+        // Provider health (sequencer/src/lib/twilio-balance.ts)
+        twilio_low_balance: { icon: Wallet, bg: "bg-amber-100", color: "text-amber-600" },
+        twilio_auth_failed: { icon: ShieldAlert, bg: "bg-red-100", color: "text-red-600" },
+        calls_failing: { icon: PhoneOff, bg: "bg-red-100", color: "text-red-600" },
     };
     return configs[type] || { icon: Bell, bg: "bg-gray-100", color: "text-gray-600" };
 }
