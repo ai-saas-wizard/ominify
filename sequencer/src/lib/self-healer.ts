@@ -941,6 +941,51 @@ async function trackFailedChannel(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Channels the sequence's strategy allows (dynamic sequences carry
+ * `sequence_strategy.available_channels`). null = no restriction (static or
+ * legacy sequences), so healing behaves exactly as before for them.
+ */
+async function getSequenceAllowedChannels(sequenceId: string | null | undefined): Promise<ChannelType[] | null> {
+    if (!sequenceId) return null;
+    const { data, error } = await supabase
+        .from('sequences')
+        .select('sequence_strategy')
+        .eq('id', sequenceId)
+        .maybeSingle();
+    if (error || !data) return null;
+    const raw = (data.sequence_strategy as { available_channels?: unknown } | null)?.available_channels;
+    return Array.isArray(raw) && raw.length > 0 ? (raw as ChannelType[]) : null;
+}
+
+/**
+ * If a healing action would move the lead onto a channel the sequence does
+ * not allow (e.g. the first-no-answer fallback SMS on a voice-only campaign),
+ * replace it with a plain retry of the original channel later. Pure — unit
+ * tested without a database.
+ */
+export function gateHealingActionByChannels(
+    action: HealingAction,
+    allowedChannels: ChannelType[] | null,
+    stepChannel: ChannelType,
+): HealingAction {
+    if (!allowedChannels) return action;
+    const target: ChannelType | null =
+        action.type === 'inject_fallback_sms'
+            ? 'sms'
+            : action.type === 'switch_channel' || action.type === 'override_channel'
+              ? (action.details.new_channel ?? null)
+              : null;
+    if (!target || allowedChannels.includes(target)) return action;
+    return {
+        type: 'extend_delay',
+        details: {
+            delay_seconds: 4 * 60 * 60,
+            reason: `${action.type} to ${target} suppressed — sequence allows [${allowedChannels.join(', ')}]; retrying ${stepChannel} in 4h`,
+        },
+    };
+}
+
+/**
  * Full self-healing flow: diagnose → execute → log.
  *
  * Call this from event-processor or workers when a failure is detected.
@@ -1031,8 +1076,16 @@ export async function handleFailure(
         };
 
         // Diagnose
-        const action = diagnoseFailure(ctx);
-        console.log(`[HEALER] Diagnosed ${failureType} → ${action.type}: ${action.details.reason}`);
+        const diagnosed = diagnoseFailure(ctx);
+        console.log(`[HEALER] Diagnosed ${failureType} → ${diagnosed.type}: ${diagnosed.details.reason}`);
+
+        // Respect the sequence's channel strategy: a voice-only campaign must
+        // not get a "tried calling you" text injected by healing.
+        const allowedChannels = await getSequenceAllowedChannels(enrollment.sequence_id);
+        const action = gateHealingActionByChannels(diagnosed, allowedChannels, (step as any).channel);
+        if (action !== diagnosed) {
+            console.log(`[HEALER] ${diagnosed.type} suppressed for enrollment ${enrollmentId}: ${action.details.reason}`);
+        }
 
         // Execute
         await executeHealingAction(action, ctx);
