@@ -33,6 +33,38 @@ export default async function AgentEditorPage(props: {
         .eq("client_id", params.clientId)
         .single();
 
+    // VAPI is the source of truth for the voice prompt, and it gets edited in
+    // the VAPI dashboard directly. The sequencer reads the DB copy
+    // (agent_config.voice_prompt) for cross-channel context, so pull the live
+    // prompt back into the DB whenever this page loads and they differ.
+    if (agentRecord) {
+        const vapiPrompt: string =
+            agent.model?.systemPrompt ||
+            (Array.isArray(agent.model?.messages)
+                ? agent.model.messages.find((m: { role?: string }) => m.role === "system")?.content
+                : "") ||
+            "";
+        if (vapiPrompt && vapiPrompt !== agentRecord.agent_config?.voice_prompt) {
+            const { error: syncError } = await supabase
+                .from("agents")
+                .update({
+                    agent_config: {
+                        ...(agentRecord.agent_config || {}),
+                        voice_prompt: vapiPrompt,
+                    },
+                })
+                .eq("id", agentRecord.id);
+            if (syncError) {
+                console.error(
+                    `[AGENT] voice_prompt sync from VAPI failed for ${agentRecord.id}:`,
+                    syncError.message
+                );
+            } else {
+                console.log(`[AGENT] voice_prompt pulled from VAPI for ${agentRecord.id}`);
+            }
+        }
+    }
+
     const { data: allPhoneNumbers } = await supabase
         .from("tenant_phone_numbers")
         .select("id, phone_number, friendly_name, agent_id")

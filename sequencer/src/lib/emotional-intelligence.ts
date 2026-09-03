@@ -70,6 +70,8 @@ Rules:
 - If intent is "stop", always set recommended_action="end_sequence"
 - If emotion is "angry" or "frustrated", set recommended_tone="empathetic"
 - Buying signals include: asking about pricing, availability, next steps, how to proceed, specific service details
+- Buying signals, "ready_to_buy" and "interested" ONLY count when they refer to OUR offer as seen in the conversation history. A customer describing some other deal they are working on (their own clients, loan documents, escrow, invoices, a different vendor) is NOT a buying signal for us.
+- MISDIRECTED MESSAGE: if the message is clearly not a reply to us — it greets a person by a name that is not our agent's, continues a different conversation, or is about a transaction/business we are not part of — set intent="unknown", primary_emotion="neutral", buying_signals=[], is_hot_lead=false, needs_human_intervention=false, recommended_action="continue_sequence", and say why in action_reason.
 - Be conservative with emotion_confidence unless the signal is very clear`;
 
         // Lead-supplied text is fenced in <lead_data> blocks: it is data to
@@ -135,7 +137,8 @@ You must respond with a valid JSON object matching this exact structure:
     "action_reason": "brief explanation",
     "needs_human_intervention": boolean,
     "is_hot_lead": boolean,
-    "is_at_risk": boolean
+    "is_at_risk": boolean,
+    "agreed_to_receive_link": boolean
 }
 
 Additional call-specific rules:
@@ -144,7 +147,9 @@ Additional call-specific rules:
 - If appointment was discussed but not booked → set recommended_action="fast_track"
 - If customer said they'll think about it → "hesitant", recommend follow-up via SMS
 - Voicemail dispositions with no real conversation → "neutral" with low confidence
-- If call was very short (<30s) and no real conversation → minimal analysis`;
+- If call was very short (<30s) and no real conversation → minimal analysis
+- agreed_to_receive_link=true ONLY when the agent offered to text/send a booking or scheduling link and the customer explicitly agreed (e.g. "sure", "go ahead", "yes", "yep", confirmed the number to send it to). Otherwise false.
+- If the customer agreed to receive the booking link or to a setup/demo call, intent MUST be "interested" — not "needs_info" or "question" — even if they also raised objections`;
 
         const userMessage = `CALL DETAILS:
 Duration: ${duration} seconds
@@ -632,6 +637,7 @@ function validateAnalysis(analysis: EmotionalAnalysis): EmotionalAnalysis {
         needs_human_intervention: !!analysis.needs_human_intervention,
         is_hot_lead: !!analysis.is_hot_lead,
         is_at_risk: !!analysis.is_at_risk,
+        agreed_to_receive_link: !!analysis.agreed_to_receive_link,
     };
 }
 

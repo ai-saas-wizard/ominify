@@ -291,9 +291,10 @@ const BOOKING_LINK_POSITIVE_INTENTS = new Set(['interested', 'ready_to_buy']);
  * Deterministic booking-link SMS after a positive answered call.
  *
  * When a call was answered, NO appointment was booked on it, and the EI
- * analysis reads the lead as positive (hot lead or interested/ready-to-buy
- * intent), text the tenant's booking link right away instead of relying on
- * the AI's next generated step to remember to include one.
+ * analysis reads the lead as positive (hot lead, interested/ready-to-buy
+ * intent, or the lead said yes when the agent offered to text the link),
+ * text the tenant's booking link right away instead of relying on the AI's
+ * next generated step to remember to include one.
  *
  * Skips silently when no booking_link is configured or the tenant can't send
  * SMS. Honors contact opt-out; outside the TCPA window the job is queued with
@@ -305,7 +306,11 @@ async function maybeSendBookingLinkSms(
     eiAnalysis: EmotionalAnalysis | null
 ): Promise<void> {
     if (!eiAnalysis) return;
-    if (!eiAnalysis.is_hot_lead && !BOOKING_LINK_POSITIVE_INTENTS.has(eiAnalysis.intent)) return;
+    if (
+        !eiAnalysis.is_hot_lead &&
+        !eiAnalysis.agreed_to_receive_link &&
+        !BOOKING_LINK_POSITIVE_INTENTS.has(eiAnalysis.intent)
+    ) return;
 
     const { data: enrollment, error: enrollErr } = await supabase
         .from('sequence_enrollments')

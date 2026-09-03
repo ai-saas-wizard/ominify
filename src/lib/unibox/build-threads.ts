@@ -396,7 +396,11 @@ export function buildThreads(input: BuildThreadsInput): UniboxThread[] {
             lastResponseAt: lastResponse?.at ?? null,
             status,
             preview: previewFor(last),
-            needsReply: last.direction === "inbound" && last.kind !== "voice",
+            // A STOP or a "no thanks" closes the conversation; it is not a
+            // message waiting on a human. Without this every opted-out lead
+            // sat at the top of "Needs reply" because their last event is
+            // the inbound "Stop".
+            needsReply: !suppressed && last.direction === "inbound" && last.kind !== "voice",
             appointmentBooked: booked,
             // The do-not-contact flag covers both terminal answers; `status`
             // is what distinguishes a STOP from a polite decline.

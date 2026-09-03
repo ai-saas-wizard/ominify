@@ -659,6 +659,12 @@ export interface EmotionalAnalysis {
     needs_human_intervention: boolean;
     is_hot_lead: boolean;
     is_at_risk: boolean;
+
+    // Calls only: the agent offered to text a booking/scheduling link and the
+    // lead explicitly agreed. Drives the deterministic booking-link SMS — the
+    // intent enum alone filed "sure, go ahead" as `needs_info` and the link
+    // never went out.
+    agreed_to_receive_link?: boolean;
 }
 
 export interface TenantNotification {
