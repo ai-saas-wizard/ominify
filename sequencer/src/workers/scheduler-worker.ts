@@ -1628,15 +1628,17 @@ async function handleDynamicTimeout(enrollment: SequenceEnrollment & {
             if (result.end_reason === 'generation_failed') {
                 // Transient LLM failure (empty/invalid response) — retry via
                 // the timeout poll instead of permanently ending the sequence.
-                console.error(`[SCHEDULER] Generation failed for enrollment ${enrollment.id} — retrying in 15min`);
+                console.error(`[SCHEDULER] Generation failed for enrollment ${enrollment.id} — retrying in 60min`);
                 const { error: retryErr } = await supabase
                     .from('sequence_enrollments')
                     .update({
                         status: 'awaiting_outcome',
-                        // Clamped for test enrollments — a 15min park on a
-                        // transient LLM failure makes a test look dead.
+                        // One hour, not 15 minutes: during an OpenAI outage
+                        // every active enrollment re-hit the API four times
+                        // an hour. Clamped for test enrollments so a
+                        // transient failure doesn't look dead.
                         outcome_timeout_at: new Date(
-                            Date.now() + clampTestDelayMs(15 * 60 * 1000, enrollment.is_test === true)
+                            Date.now() + clampTestDelayMs(60 * 60 * 1000, enrollment.is_test === true)
                         ).toISOString(),
                         updated_at: new Date().toISOString(),
                     })

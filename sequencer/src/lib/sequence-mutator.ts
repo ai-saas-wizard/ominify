@@ -100,7 +100,9 @@ export async function mutateStepContent(
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            // Adapting an existing template to conversation context, not
+            // writing from scratch — mini is enough and 15× cheaper per step.
+            model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userMessage },
@@ -128,7 +130,7 @@ export async function mutateStepContent(
             confidence: typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
                 ? Math.max(0, Math.min(1, parsed.confidence))
                 : 0.7,
-            model: 'gpt-4o',
+            model: 'gpt-4o-mini',
         };
     } catch (err) {
         console.error('[MUTATOR] Mutation failed:', err);

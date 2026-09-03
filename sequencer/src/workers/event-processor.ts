@@ -252,15 +252,17 @@ async function maybeTriggerDynamicGeneration(
         } else if (result.end_reason === 'generation_failed') {
             // Transient LLM failure (empty/invalid response) — retry via the
             // timeout poll instead of permanently ending the sequence.
-            console.error(`[EVENT] Generation failed for enrollment ${enrollmentId} — retrying in 15min`);
+            console.error(`[EVENT] Generation failed for enrollment ${enrollmentId} — retrying in 60min`);
             const { error: retryErr } = await supabase
                 .from('sequence_enrollments')
                 .update({
                     status: 'awaiting_outcome',
-                    // Clamped for test enrollments — a 15min park on a
-                    // transient LLM failure makes a test look dead.
+                    // One hour, not 15 minutes: during an OpenAI outage every
+                    // active enrollment re-hit the API four times an hour
+                    // (348 errors in 2.5h on 2026-09-02). Clamped for test
+                    // enrollments so a transient failure doesn't look dead.
                     outcome_timeout_at: new Date(
-                        Date.now() + clampTestDelayMs(15 * 60 * 1000, (enrollment as any).is_test === true)
+                        Date.now() + clampTestDelayMs(60 * 60 * 1000, (enrollment as any).is_test === true)
                     ).toISOString(),
                     updated_at: new Date().toISOString(),
                 })
@@ -489,9 +491,11 @@ async function handleCallOutcome(event: EventJobPayload): Promise<void> {
         })
         .eq('provider_id', callId);
 
-    // 4. Run Emotional Intelligence analysis on the call transcript
+    // 4. Run Emotional Intelligence analysis on the call transcript.
+    // Answered calls only: a voicemail greeting or a no-answer stub has no
+    // intent to find, and those were ~40% of classifier spend.
     let eiAnalysis: EmotionalAnalysis | null = null;
-    if (event.transcript && event.transcript.length > 30) {
+    if (wasAnswered && event.transcript && event.transcript.length > 30) {
         try {
             eiAnalysis = await analyzeCallTranscript(
                 event.transcript,
