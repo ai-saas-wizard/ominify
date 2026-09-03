@@ -49,6 +49,53 @@ export function getOutcomeTimeout(channel: ChannelType): number {
     }
 }
 
+/** Retry spacing for voice-only strategies: what the model chose in 624 of
+ *  861 decisions on 2026-09-02 (the rest were 1–2 min, which only re-dials
+ *  into the same voicemail). An answered call that did not book gets a day —
+ *  the booking-link SMS has already gone out and a 60-minute re-dial reads
+ *  as pushy. */
+const VOICE_ONLY_RETRY_SECONDS = 60 * 60;
+const VOICE_ONLY_RETRY_AFTER_ANSWER_SECONDS = 24 * 60 * 60;
+
+/**
+ * A strategy whose only channel is voice has exactly one possible next step:
+ * call again, or stop. Paying gpt-4o ~$0.01 to "decide" that per enrollment
+ * per outcome/timeout was the bulk of the OpenAI bill (861 decisions for 24
+ * dials on 2026-09-02), and the opener it authored replaced the assistant's
+ * scripted first message on every retry. No model call here; the step
+ * carries no authored opener so the bound assistant's own script is used,
+ * exactly like the first touch.
+ */
+export function decideVoiceOnlyStep(
+    lastOutcome: OutcomeContext,
+    stepsRemaining: number,
+    maxSteps: number,
+    isTest: boolean
+): GeneratedStepResult {
+    const intent = lastOutcome.eiAnalysis?.intent;
+    if (intent === 'stop') {
+        return { should_continue: false, end_reason: 'opted_out', reasoning: 'Voice-only rule: lead asked to stop.' };
+    }
+    if (intent === 'not_interested') {
+        return { should_continue: false, end_reason: 'not_interested', reasoning: 'Voice-only rule: lead said not interested.' };
+    }
+    const delay = lastOutcome.type === 'call_answered'
+        ? VOICE_ONLY_RETRY_AFTER_ANSWER_SECONDS
+        : VOICE_ONLY_RETRY_SECONDS;
+    return {
+        should_continue: true,
+        step: {
+            channel: 'voice',
+            delay_seconds: clampTestDelaySeconds(delay, isTest),
+            content: { first_message: '', system_prompt: '' },
+            skip_conditions: { skip_if: ['appointment_booked'] },
+            on_success: { action: 'continue' },
+            on_failure: { action: 'skip' },
+        },
+        reasoning: `Voice-only rule: ${lastOutcome.type} → call again in ${Math.round(delay / 60)} min (${stepsRemaining} of ${maxSteps} touchpoints left).`,
+    };
+}
+
 /**
  * Fetch all executed steps for a sequence enrollment with their outcomes.
  */
@@ -212,6 +259,16 @@ export async function generateNextStep(params: {
         };
     }
 
+    // Voice-only: nothing to decide, and nothing to write — skip the model.
+    if (availableChannels.length === 1 && availableChannels[0] === 'voice') {
+        return decideVoiceOnlyStep(
+            lastOutcome,
+            stepsRemaining,
+            strategy.max_steps,
+            (enrollment as any).is_test === true
+        );
+    }
+
     // Build the previous steps summary for the prompt
     const stepHistory = previousSteps.map(s =>
         `Step ${s.step_order} [${s.channel.toUpperCase()}]: "${s.content_summary}" → outcome: ${s.outcome || 'pending'}`
@@ -315,7 +372,11 @@ OUTPUT FORMAT (JSON only):
 If should_continue is false, omit the "step" field.`;
 
     const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        // A routing decision plus one short SMS/email draft, with the rules
+        // spelled out above — gpt-4o-mini is ~15× cheaper per token and this
+        // prompt is ~3k tokens per call. Call/reply classification stays on
+        // gpt-4o (emotional-intelligence.ts); that is where dispositions live.
+        model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: 'Decide the next step. Output ONLY the JSON object.' },
